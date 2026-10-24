@@ -5,14 +5,14 @@ boilerplate out of Go (`if err != nil` blocks, nil-check ladders, verbose
 closures, hand-written `json` tags) so programs are shorter and easier to read,
 and it keeps everything else: Go's runtime and speed, its standard library,
 every Go package, and the official toolchain. Where Go already has a concept,
-Lyth spells it Go's way; what Lyth adds (null safety, `when`, lambdas) comes
-mostly from Kotlin.
+Lyth spells it Go's way, and what it adds (null safety, `?` for errors, `when`,
+lambdas) is a small set of features familiar from modern languages.
 
 > **Status: early vertical slice (v0.1-dev).** The compiler works end to end:
 > it parses, type-checks, generates Go, validates it, builds it, and maps
 > errors and stack traces back to Lyth source. Large parts of the planned
-> language are not implemented yet. See [docs/design/roadmap.md](docs/design/roadmap.md)
-> for the exact status.
+> language are not implemented yet. Each section of the
+> [specification](docs/spec/language.md) is tagged with its status.
 
 ```kotlin
 import "errors"
@@ -155,9 +155,8 @@ docs/               design, specification, ADRs
 - [Design overview](docs/design/overview.md): goals, principles, decision summary
 - Specification: [language](docs/spec/language.md), [types](docs/spec/types.md), [errors](docs/spec/errors.md)
 - Design: [compiler](docs/design/compiler.md), [interop](docs/design/interop.md),
-  [diagnostics](docs/design/diagnostics.md), [backend and concurrency](docs/design/backend-concurrency.md),
-  [engineering](docs/design/engineering.md), [benchmarks](docs/design/benchmarks.md),
-  [roadmap and risks](docs/design/roadmap.md)
+  [diagnostics](docs/design/diagnostics.md), [collections](docs/design/collections.md),
+  [benchmarks](docs/design/benchmarks.md)
 - [Architecture decision records](docs/adr/README.md)
 
 The documentation site in [website/](website) is generated from these files;

@@ -4,7 +4,7 @@
 
 ## Context
 Lyth's design keeps collection operations and similar helpers out of the
-language and in a library (backend-concurrency.md §4). Such a library is
+language and in a library. Such a library is
 written in Lyth and must be importable from any Lyth program, including a
 single file run with `lyth run file.lyth`, without the user publishing,
 fetching, or vendoring a module. The project's module path is a placeholder,

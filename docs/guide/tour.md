@@ -2,7 +2,7 @@
 
 Lyth is a thin layer over Go: the same runtime, standard library, packages,
 goroutines, and performance, spelled like Go where Go has the concept, with
-Kotlin-inspired additions and a type system that catches nil dereferences and
+a few additions and a type system that catches nil dereferences and
 ignored errors at compile time. This tour shows the language by example.
 
 Examples on this site have up to three tabs. **Lyth** is the source, **Go** is
@@ -570,8 +570,8 @@ Channels are Go channels with method syntax: `make(chan T, n)` creates one,
 `ch.send(v)`, `ch.receive()`, and `ch.close()` lower to `ch <- v`, `<-ch`, and
 `close(ch)`, and `for v in ch` receives until the channel is closed.
 `chan<- T` and `<-chan T` restrict a parameter to one direction.
-Semantics are Go's, not Kotlin's: receiving from a closed channel does not
-throw, it yields the zero value. That is why `receive()` on a channel of
+Semantics are Go's: receiving from a closed channel does not fail, it yields
+the zero value. That is why `receive()` on a channel of
 pointers is nullable, and why `?: break` ends the loop once `produce` closes
 `jobs`. `v, ok := ch.receive()` tells a zero value from a closed channel.
 

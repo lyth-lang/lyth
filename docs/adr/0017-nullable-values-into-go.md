@@ -34,4 +34,4 @@ Kotlin's rule for Java platform types holds: Lyth cannot check what Go does
 with nil, so it does not pretend to. `fmt.Printf("%v", x)` for `x: Int?`
 prints a pointer address, as it would in Go. `println` and string templates
 are Lyth constructs and print the value or `null`. The planned mapping of
-`T?` to Lyth-declared interfaces (roadmap Phase 4) is unaffected.
+`T?` to Lyth-declared interfaces is unaffected.

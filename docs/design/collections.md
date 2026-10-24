@@ -279,8 +279,7 @@ joining two small result sets with `AssociateBy`.
   decided together with how `T?` lowers for type parameters.
 - **v2, from use.** Map operations (`FilterValues`, `MapValues`) only when
   examples need them; each with a `run/` test and a row in §2.
-- **Performance, if real programs need it.** `inline func`
-  ([backend concurrency](backend-concurrency.md#4-collection-operations)):
+- **Performance, if real programs need it.** `inline func`:
   the compiler inlines a function and its lambda at the call site, which
   removes the closure calls but not the intermediate slices. Measure with a
   benchmark in `bench/` before and after.

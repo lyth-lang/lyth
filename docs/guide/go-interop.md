@@ -5,7 +5,7 @@ Go package works directly, with its exact Go names and types, and every Lyth
 package is an ordinary Go package that Go code can import. This page shows how
 Go APIs look from Lyth and how Lyth APIs look from Go. The design is in
 [interop](../design/interop.md), and the tested status of each construct is in
-the [interop matrix](../design/roadmap.md#2-interop-matrix).
+the [interop matrix](../design/interop.md#10-compatibility-matrix).
 
 ## Packages and names
 
@@ -198,7 +198,7 @@ the error as its value.
 
 Go does not say whether a pointer, interface, map, or function may be nil, so
 values that come from Go have *platform types*, written `T!` in diagnostics.
-Lyth lets you use them as non-null (like Kotlin with Java), and does not insert
+Lyth lets you use them as non-null, and does not insert
 checks: a nil dereference panics as it would in Go, with the `.lyth` line in the
 stack trace. Declare a local of type `T?` for a Go result (`u: *url.URL? = f()`)
 when you want Lyth to make you check it.

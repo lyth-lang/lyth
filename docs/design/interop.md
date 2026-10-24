@@ -172,5 +172,29 @@ golden file, and the generated Go must also pass `go vet`.
 
 ## 10. Compatibility matrix
 
-Maintained in [roadmap.md](roadmap.md#2-interop-matrix). Each row names the test
-that demonstrates it.
+Each row names the test that demonstrates it.
+
+| Construct | Status | Test |
+|---|---|---|
+| Call Go functions, variadic, spread | ✅ | `run/basics`, `run/advanced` |
+| Construct Go structs (named fields), read and write exported fields | ✅ | `run/interop_http` (`&http.Server(...)`), `run/advanced` (`fstest.MapFile`) |
+| Value and pointer receiver methods on Go types (incl. on locals) | ✅ | `run/interop_interfaces` (`strings.Builder`), `run/advanced` (`sync.WaitGroup`) |
+| Go `(T, error)` with `?`, `catch`, destructuring | ✅ | `run/errors`, `TestThirdPartyModule` |
+| Lyth types implementing Go interfaces (`http.Handler`, `fmt.Stringer`, `error`, `sort.Interface`) | ✅ | `run/interop_http`, `run/interop_interfaces` |
+| Go values through Lyth interfaces, interface embedding | ✅ | `run/interop_interfaces`, `run/advanced` |
+| Generic Go functions with inference, incl. core-type inference for lambdas (`slices.SortFunc`) | ✅ | `run/collections`, `run/lambdas` |
+| Explicit type arguments on generic Go functions, called or as values (`errors.AsType[*E](err)`, `pgx.RowToStructByName[T]`) | ✅ | `examples/todoapi` |
+| Lambdas converted to named Go function types (`http.HandlerFunc({ w, r -> ... })`) | ✅ | `examples/todoapi` |
+| Nullable Lyth values passed to Go parameters (`*T` to `...any`, read as NULL by pgx) | ✅ | `pgstore_test.lyth` (ADR 0017) |
+| Go constants (typed and untyped) and package variables | ✅ | `run/interop_http` (`time.Second`), `TestThirdPartyModule` (`uuid.Nil`) |
+| Callbacks: Lyth lambdas as Go funcs, incl. fallible callbacks | ✅ | `run/lambdas`, `run/advanced` |
+| Named map types and conversions (`fstest.MapFS(...)`, `[]byte(s)`) | ✅ | `run/advanced`, `run/structs`, `run/slicetypes` |
+| `encoding/json` on Lyth structs (auto tags, explicit tags, `json:"-"`) | ✅ | `run/structs` |
+| `errors.Is` / `errors.As` with Lyth error types | ✅ | `run/errors`, `run/interop_interfaces` |
+| Go 1.22 `ServeMux` patterns, `httptest` | ✅ | `run/interop_http` |
+| Third-party modules (`github.com/google/uuid`, `github.com/jackc/pgx/v5`) | ✅ | `TestThirdPartyModule`, `examples/todoapi` |
+| `context.Context`, `signal.NotifyContext`, `context.AfterFunc` | ✅ | `examples/todoapi` |
+| Hand-written `_test.go` files in a Lyth package | ✅ | `TestLythTest`, `memstore_go_test.go` |
+| Channels from Go APIs (`ctx.Done().receive()`, `time.After(d).receive()`) | ✅ | `run/channels` |
+| Go iterator functions | ⬜ | E0601 |
+| Mixed Go and Lyth non-test files in one package | ⬜ | E0601 |

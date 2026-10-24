@@ -1,6 +1,6 @@
 # Benchmarks: Lyth versus hand-written Go
 
-Phase 7 of the roadmap asks whether Lyth's design promise holds: code written in
+This document checks whether Lyth's design promise holds: code written in
 Lyth should perform like idiomatic Go, because it *is* Go once compiled, with no
 runtime and no wrappers. This document reports how we measured that, what we
 found, and what we changed because of it. The suite lives in
@@ -62,8 +62,7 @@ full `benchrun` run includes it.
   rounds** (Go, Lyth, Go, Lyth, …; 10 rounds of `-benchtime 500ms`) so that
   drifting machine state affects both sides alike.
 - **Statistics.** `benchstat` (golang.org/x/perf, pinned version) compares
-  the two sets with `-row .fullname -col .file`. Our decision rule
-  ([engineering.md §4.3](engineering.md#43-benchmark-methodology)) counts a
+  the two sets with `-row .fullname -col .file`. Our decision rule counts a
   difference as real only if p < 0.05 *and* it exceeds 2%.
 - **Build metrics.** These use the `logagg` program in both languages. A cold
   build uses a fresh, empty `GOCACHE`. A warm rebuild appends a new function to
@@ -78,7 +77,7 @@ full `benchrun` run includes it.
 ## 4. Results
 
 From `bench/results/benchstat.txt` (final run of 2026-10-24, with the
-compiler as of the end of Phase 5). Times are benchstat medians; `~` means no
+compiler as of the first backend example). Times are benchstat medians; `~` means no
 significant difference.
 
 | Benchmark | Go | Lyth | Verdict |

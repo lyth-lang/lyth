@@ -174,7 +174,7 @@ not an error. A function that can both fail and find nothing returns `T? throws`
 For a value type `T`, `T?` is an *immutable optional value* represented as `*T`.
 This is the idiomatic Go representation for optional JSON fields (`*int` with
 `null`), nullable SQL columns (`database/sql` and pgx scan NULL into `*T`), and
-"maybe a struct" results (`(*User, error)`). It is also how Kotlin boxes `Int?`.
+"maybe a struct" results (`(*User, error)`).
 
 - Boxing `T → T?` lowers to Go 1.26 `new(expr)`, which allocates unless escape
   analysis proves otherwise. Unboxing (a smart cast or `!!`) copies the value out

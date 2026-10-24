@@ -4,8 +4,7 @@ This is the normative description of Lyth's syntax and the semantics that are no
 about types. Types, inference, nullability, and mutability are specified in
 [types.md](types.md); error handling in [errors.md](errors.md). Each section is
 tagged **[v0.1]** (implemented in the current compiler, with tests) or
-**[planned]** (designed, not yet implemented). The roadmap keeps the
-authoritative list.
+**[planned]** (designed, not yet implemented).
 
 Notation: EBNF as in the Go specification. `|` alternation, `()` grouping,
 `[]` option, `{}` repetition. Terminals are in double quotes.
@@ -31,7 +30,7 @@ doc comment.
 
 ### 1.3 Newlines and statement termination **[v0.1]**
 
-Lyth is newline-sensitive like Kotlin. The lexer emits a `NEWLINE` token at each
+Lyth is newline-sensitive. The lexer emits a `NEWLINE` token at each
 line break outside of `( )` and `[ ]`. A `NEWLINE` terminates a statement or
 declaration except when:
 
@@ -43,7 +42,7 @@ declaration except when:
 Semicolons may separate statements on one line. They are never required.
 
 > Rationale: rule 2 lets fluent call chains and elvis chains start lines with an
-> operator, the common Kotlin layout. A trailing lambda's `{` must therefore be on
+> operator, a common layout for long chains. A trailing lambda's `{` must therefore be on
 > the same line as the call it belongs to; `{` at the start of a line begins a
 > new statement. In the header of an `if`, `while`, `for`, or `when`, a `{`
 > always starts the body (§4.4).
@@ -110,7 +109,7 @@ raw_string = "`" { any char except "`" } "`" .
 - **String templates.** `${expr}` inside a `"..."` literal interpolates. There is
   exactly one template syntax. `$` followed by an identifier character without
   braces is a compile error (E0006, "did you mean `${name}`?"). This catches the
-  Kotlin habit `"$name"`, which would otherwise print literally. A `$` followed by
+  habit `"$name"` from other languages, which would otherwise print literally. A `$` followed by
   anything else (`"$1"`, `"US$ 5"`) is a literal dollar, so SQL placeholders need
   no escaping. Write `\$` for a literal `$` before an identifier character.
 - **Raw strings** use backticks, exactly as in Go: no escapes, no templates, may
@@ -590,7 +589,7 @@ Continue = "continue" [ "@" identifier ] .
   loop where needed.)
 - A loop labeled `outer@ for x in xs` or `outer@ while c` is the target of
   `break@outer` and `continue@outer` anywhere in its body, including nested
-  loops. As in Kotlin, the `@` touches the name. Labels name loops only (E0008).
+  loops. The `@` touches the name. Labels name loops only (E0008).
   A jump to a label that no enclosing loop of the same function or lambda has
   is E0101, and reusing an enclosing loop's label is E0102. Labels lower to Go
   labels, emitted only where a jump needs one.
@@ -606,7 +605,7 @@ Only calls (including the channel operations `ch.send(v)` and
 `ch.receive()`) and postfix `?`/`catch` forms may stand
 alone as statements. A call whose result includes an `error` cannot be a bare
 statement (E0303); see [errors.md §4](errors.md#44-no-silently-discarded-errors).
-Ignoring a non-error result is allowed (as in Go and Kotlin).
+Ignoring a non-error result is allowed, as in Go.
 
 ## 5. Expressions
 
@@ -619,7 +618,7 @@ which is right-associative.
 |---|---|---|
 | 1 | `\|\|` | |
 | 2 | `&&` | |
-| 3 | `==` `!=` | Go puts these at one level with `<`; Lyth separates them (Kotlin) |
+| 3 | `==` `!=` | Go puts these at one level with `<`; Lyth separates them |
 | 4 | `<` `<=` `>` `>=` | |
 | 5 | `in` `!in` `is` `!is` | membership (§5.11) and type tests (§5.10) |
 | 6 | `?:` | elvis; right side may be `return`/`throw`/`break`/`continue` |
@@ -631,7 +630,7 @@ which is right-associative.
 | 12 | postfix `.` `?.` `?` `!!` call `[...]` `catch` | |
 
 Arithmetic and bitwise levels match Go, so generated expressions need no extra
-parentheses and Go readers' intuitions hold. Comparisons are split as in Kotlin
+parentheses and Go readers' intuitions hold. Comparisons are split
 so that `a < b == c < d` means `(a < b) == (c < d)`.
 
 ### 5.2 Primary expressions **[v0.1]**
@@ -898,7 +897,7 @@ survives. Expressions that need no hoisting are emitted unchanged.
 
 Go's builtin functions keep their names and semantics: `len`, `cap`, `append`,
 `copy`, `delete`, `make`, `new`, `panic`, `recover`, `min`, `max`, `clear`,
-`close`. `print`/`println` write to standard output (Kotlin behavior) and lower to
+`close`. `print`/`println` write to standard output and lower to
 `fmt.Print`/`fmt.Println`; Go's stderr builtins are not exposed. The prelude adds a
 deliberately small set of methods on built-in types that lower to the standard
 library. Each one replaces a common multi-line Go idiom:

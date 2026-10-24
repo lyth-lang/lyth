@@ -7,7 +7,7 @@
 | `:=` declarations | Second syntax for `val`, read as mutable by Go users | `val`/`var`; E0005 explains |
 | Fallibility inferred from `?` in the body | API changes with implementation, invisible in signatures | explicit `throws` |
 | Implicit numeric widening (`Float64 * Int`) | Hides precision loss and overflow, one of Go's real strengths | E0202 with a fix-it |
-| `parallel for ... limit N` syntax | Library-expressible with fallible lambdas, and would freeze semantics in the language | `lyth/conc` (backend-concurrency.md §3) |
+| `parallel for ... limit N` syntax | Library-expressible with fallible lambdas, and would freeze semantics in the language | a `lyth/conc` library |
 | lowerCamel aliases for Go APIs | Heuristics, collisions, two spellings | verbatim Go names (ADR 0010) |
 | Receiver lambdas / implicit DSL receivers (`get(...) { json(x) }`) | Hidden name resolution, type-system complexity | explicit lambda parameter, `it` |
 | Dynamic route params `params.id` | Needs framework knowledge in the compiler or dynamic typing | `c.PathValue("id")` |

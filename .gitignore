@@ -5,3 +5,6 @@
 bench/results/bin/
 
 .DS_Store
+
+# design notes and plans kept out of the public repository
+internal-docs/

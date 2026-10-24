@@ -3,8 +3,8 @@
 **Status:** Accepted
 
 ## Context
-Phase 5 asks for a REST API with routing, JSON, PostgreSQL, environment
-configuration, authentication middleware, and tests. The earlier roadmap
+The first backend example needed a REST API with routing, JSON, PostgreSQL, environment
+configuration, authentication middleware, and tests. An earlier plan
 sketched a `std/web` package (a `Ctx` type, a router wrapper, `db.tx`). Writing
 the example first showed what Lyth actually needs: Go 1.22's `ServeMux` already
 routes by method and path (`"GET /v1/todos/{id}"`, `r.PathValue`), `pgx` and

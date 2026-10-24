@@ -3,7 +3,7 @@
 **Status:** Accepted; channel types respelled `chan T`, `chan<- T`, `<-chan T`, and select bindings `v := ch.receive()`, by [0031](0031-go-spelling.md)
 
 ## Context
-Channels are planned (roadmap phase 4b). Go spells their operations with the
+Channels were not implemented yet. Go spells their operations with the
 `<-` operator: `ch <- v` sends, `<-ch` receives, and `close(ch)` closes. The
 operator is the least readable part of Go's syntax for programmers new to Go,
 and it is a lexing hazard in Lyth, where `x<-1` would mean a send rather than

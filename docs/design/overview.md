@@ -4,8 +4,7 @@ Lyth is a statically typed language that compiles to readable Go source code,
 which the official Go toolchain then builds. It keeps Go's runtime, performance
 model, standard library, and ecosystem, and changes how much code a program
 takes, how it reads, and how often it fails at runtime: all of Go, in fewer
-lines. Where Go has a concept, Lyth spells it Go's way; most of what Lyth adds
-comes from Kotlin.
+lines. Where Go has a concept, Lyth spells it Go's way.
 
 This document states the vision, the principles used to make decisions, the goals
 and non-goals, and a summary of the major decisions. Normative details live in
@@ -77,7 +76,7 @@ wins.
 
 1. Static typing with useful compile-time diagnostics.
 2. Go's spelling for what Go has (`func`, `:=`, `int`, `map[K]V`, `[T: C]`),
-   and Kotlin-inspired syntax for what Lyth adds: `name: Type`, `T?`, `throws`,
+   and a small, familiar syntax for what Lyth adds: `name: Type`, `T?`, `throws`,
    lambdas, `if`/`when` expressions, string templates.
 3. Direct compilation to idiomatic, gofmt-clean Go source.
 4. Practical, honest interoperability with Go packages (see §5).
@@ -102,7 +101,8 @@ wins.
   make generated code unpredictable, and compiling untrusted code would stop
   being safe.
 - **Renaming Go APIs.** Go identifiers are used verbatim (see ADR 0010).
-- **Source compatibility with Kotlin.** Lyth is Kotlin-*inspired*.
+- **Source compatibility with other languages.** Lyth borrows ideas, not
+  source code: a Kotlin or Swift file is not a Lyth file.
 
 ## 5. What "full Go compatibility" means
 
@@ -120,7 +120,7 @@ Precisely, and only what has been demonstrated (tracked in
 - **Documented limitations** (v0): defining new generic types with type-set
   constraints, cgo inside Lyth files, struct embedding in Lyth-declared structs,
   Go labels/goto, and mixing Go and Lyth files in a single package. Each has a
-  planned path (roadmap) and a specific diagnostic today.
+  specific diagnostic today.
 
 ## 6. A taste of Lyth
 
@@ -184,6 +184,6 @@ func Greeting(repo: *Repo, ctx: context.Context, id: int64): string throws {
 
 ## 8. Status
 
-Status is tracked feature by feature in [roadmap.md](roadmap.md). Every claim of
-"implemented" there is backed by a test under `internal/**/testdata` or
-`tests/`.
+Each section of the [specification](../spec/language.md) is tagged **[v0.1]**
+(implemented) or **[planned]**. Every implemented feature is backed by a test
+under `internal/**/testdata` or `tests/`.
