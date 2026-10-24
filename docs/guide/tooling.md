@@ -35,12 +35,56 @@ go install ./cmd/lyth
 | `lyth vet [packages]` | Runs `go vet` on the generated code and maps findings to `.lyth` positions. |
 | `lyth gen [-stdout \| -in-tree] [packages]` | Writes the generated Go: to stdout, or next to the sources as `*.lyth.go` files. |
 | `lyth mod tidy` | `go mod tidy` that also sees imports in `.lyth` files ([interop](go-interop.md#modules-and-third-party-packages)). |
+| `lyth lsp [-no-vet]` | Runs the language server on stdin and stdout, for editors ([editors](#editors)). |
 | `lyth version` | Prints the compiler version. |
 
 Common flags: `-tags a,b` (build tags), `-diagnostics=json` (one JSON object
 per diagnostic, for editors and CI), `-v` (diagnostics include the original Go
 toolchain message where one exists), `-no-line-directives`, and `-timings`
 (time per compiler phase). For `lyth test`, `-v` is `go test`'s.
+
+## Editors
+
+`lyth lsp` is Lyth's language server. It answers from the compiler itself:
+every edit re-checks the file's package, with unsaved changes, and
+publishes the same diagnostics as `lyth check`, including the in-process
+check of the generated Go. Saving a file also runs `go vet`, mapped to `.lyth`
+lines (`-no-vet` turns that off). Beyond diagnostics it offers:
+
+- **Hover:** the declaration as written, its doc comment, and the Go it
+  compiles to. A Go declaration shows its doc from the Go source.
+- **Navigation:** go to definition, including into the Go standard
+  library and modules, type definition, references, and highlights. These
+  follow what each name resolves to, not its text.
+- **Rename** across the module.
+- **Completion:** members after `.` (fields, methods, `lyth/coll`'s
+  extension functions, a package's exports), the names in scope, and
+  import paths.
+- **Signature help.**
+- **Inlay hints** for inferred types: `x := f()`, loop variables, lambda
+  parameters, and results of `func f() = ...`.
+- **Quick fixes** from the compiler's suggested edits.
+- **Document and workspace symbols.**
+- **The generated Go** of a file (the `lyth.showGo` command).
+
+Editor support lives in the repository's `editors/` folder:
+
+- **VS Code** (`editors/vscode-lyth`): highlighting, the language server, ▶
+  Run and Run Test buttons, `lyth` tasks, snippets, and a live **Show
+  Generated Go** view.
+- **Kuana** (`editors/kuana-lyth`): highlighting, outline, run and test
+  buttons with test results, and the language server. Kuana's Install button
+  installs `lyth` with `go install`.
+- **Other editors:** the tree-sitter grammar (`editors/tree-sitter-lyth`)
+  covers highlighting, outline, indentation, and text objects. For the
+  language server, start `lyth lsp` for `.lyth` files, with `go.mod` as the
+  root marker. In Neovim, for example:
+
+```lua
+vim.filetype.add({ extension = { lyth = "lyth" } })
+vim.lsp.config("lyth", { cmd = { "lyth", "lsp" }, filetypes = { "lyth" }, root_markers = { "go.mod" } })
+vim.lsp.enable("lyth")
+```
 
 ## What a build does
 

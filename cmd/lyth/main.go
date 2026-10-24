@@ -8,6 +8,7 @@
 //	lyth gen [-stdout | -in-tree] [packages]
 //	lyth vet [packages]
 //	lyth test [packages] [go test flags]
+//	lyth lsp
 //	lyth version
 package main
 
@@ -25,6 +26,7 @@ import (
 
 	"github.com/lyth-lang/lyth/internal/build"
 	"github.com/lyth-lang/lyth/internal/diag"
+	"github.com/lyth-lang/lyth/internal/lsp"
 )
 
 // version is set by release builds (-ldflags "-X main.version=0.1.0"); a
@@ -56,6 +58,7 @@ Usage:
   lyth vet [packages]                                     run go vet on generated code
   lyth test [packages] [go test flags]                    run tests (_test.lyth and _test.go files)
   lyth mod tidy                                           go mod tidy that sees imports in .lyth files
+  lyth lsp [-no-vet]                                      run the language server on stdin and stdout
   lyth version                                            print the compiler version
 
 Common flags:
@@ -134,6 +137,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdVet(rest, stdout, stderr)
 	case "test":
 		return cmdTest(rest, stdout, stderr)
+	case "lsp":
+		return cmdLSP(rest, os.Stdin, stdout, stderr)
 	case "mod":
 		if len(rest) == 1 && rest[0] == "tidy" {
 			var c common
@@ -525,4 +530,22 @@ func cmdTest(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return code
+}
+
+// cmdLSP serves the Language Server Protocol on stdin and stdout for
+// editors. go vet runs on save unless -no-vet is given or LYTH_LSP_NO_VET is set.
+func cmdLSP(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("lsp", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	noVet := fs.Bool("no-vet", false, "do not run go vet when a file is saved")
+	fs.Bool("stdio", true, "use stdin and stdout (the only transport)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	vet := !*noVet && os.Getenv("LYTH_LSP_NO_VET") == ""
+	if err := lsp.Run(stdin, stdout, lsp.Options{Version: version, Vet: vet}); err != nil {
+		fmt.Fprintf(stderr, "lyth lsp: %v\n", err)
+		return 1
+	}
+	return 0
 }

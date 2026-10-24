@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"go/token"
 	gotypes "go/types"
 	"io"
 	"os"
@@ -41,6 +42,12 @@ type Config struct {
 	Tags             []string
 	Env              []string
 	Stdout, Stderr   io.Writer
+	// Overlay replaces the contents of source files, by absolute path: an
+	// editor's unsaved buffers.
+	Overlay map[string][]byte
+	// NoWrite stops after validation: nothing is written to .lyth/gen, for
+	// analysis only (the language server).
+	NoWrite bool
 }
 
 // Package is one Lyth package in a session.
@@ -147,7 +154,7 @@ func Compile(cfg *Config, target Target) (*Session, error) {
 	t = s.phase("lower+emit", t)
 	s.validate()
 	t = s.phase("validate", t)
-	if s.Sink.HasErrors() {
+	if s.Sink.HasErrors() || s.cfg.NoWrite {
 		return s, nil
 	}
 	err := s.write()
@@ -290,7 +297,11 @@ func (s *Session) parse() {
 			paths = append(slices.Clip(paths), p.Dir.TestFiles...)
 		}
 		for _, path := range paths {
-			data, err := os.ReadFile(path)
+			data, ok := s.cfg.Overlay[path]
+			var err error
+			if !ok {
+				data, err = os.ReadFile(path)
+			}
 			if err != nil {
 				s.Sink.Errorf(diag.EImport, source.Span{}, "cannot read %s: %v", path, err)
 				continue
@@ -589,6 +600,15 @@ func cleanStale(dir string, keep map[string]*emit.SourceMap) error {
 // TypesCached reports whether Go type information came from the persistent
 // cache instead of `go list`.
 func (s *Session) TypesCached() bool { return s.loader != nil && s.loader.CacheHit }
+
+// GoFset returns the positions of the loaded Go packages' declarations, or
+// nil before they are loaded.
+func (s *Session) GoFset() *token.FileSet {
+	if s.loader == nil {
+		return nil
+	}
+	return s.loader.Fset
+}
 
 // MainPackages returns the target packages named main.
 func (s *Session) MainPackages() []*Package {

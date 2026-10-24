@@ -382,7 +382,8 @@ Planned, in order of payoff:
    version, dependency API hashes, Go dependency export-data hashes). A
    package whose key is unchanged reuses its generated output and an API
    summary of its exported declarations.
-3. **Watch mode / LSP** reusing in-memory state.
+3. **Watch mode, and an LSP that reuses in-memory state.** The language server (`lyth lsp`,
+   `internal/lsp`) recompiles the edited package on every change today.
 
 ## 9. Determinism and reproducibility
 

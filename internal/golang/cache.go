@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"go/token"
 	gotypes "go/types"
 	"os"
 	"path/filepath"
@@ -145,7 +144,6 @@ func (l *Loader) readCache(paths []string) (map[string]*Package, bool) {
 				return nil, false
 			}
 		}
-		fset := token.NewFileSet()
 		view := map[string]*gotypes.Package{}
 		out := map[string]*Package{}
 		for _, cp := range e.Packages {
@@ -158,7 +156,7 @@ func (l *Loader) readCache(paths []string) (map[string]*Package, bool) {
 				f.Close()
 				return nil, false
 			}
-			pkg, err := gcexportdata.Read(r, fset, view, cp.Path)
+			pkg, err := gcexportdata.Read(r, l.Fset, view, cp.Path)
 			f.Close()
 			if err != nil {
 				return nil, false

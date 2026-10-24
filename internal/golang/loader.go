@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"go/token"
 	gotypes "go/types"
 	"os/exec"
 	"sort"
@@ -33,6 +34,9 @@ type Loader struct {
 	GoEnv     *Env     // go env output to key the cache with; nil runs go env
 	// CacheHit reports whether the last Load was served from CacheFile.
 	CacheHit bool
+	// Fset holds the positions of the loaded packages' declarations (from
+	// their export data), for editors that go to a Go declaration.
+	Fset *token.FileSet
 
 	cache       map[string]*Package
 	sizes       gotypes.Sizes
@@ -42,7 +46,7 @@ type Loader struct {
 
 // NewLoader creates a loader for dir.
 func NewLoader(dir string, env, tags []string) *Loader {
-	return &Loader{Dir: dir, Env: env, Tags: tags, cache: map[string]*Package{}}
+	return &Loader{Dir: dir, Env: env, Tags: tags, cache: map[string]*Package{}, Fset: token.NewFileSet()}
 }
 
 // Sizes returns the type sizes for the target platform, once known.
@@ -79,7 +83,8 @@ func (l *Loader) Load(paths []string) (map[string]*Package, error) {
 		cfg := &packages.Config{
 			Mode: packages.NeedName | packages.NeedTypes | packages.NeedImports | packages.NeedDeps | packages.NeedTypesSizes |
 				packages.NeedExportFile | packages.NeedFiles | packages.NeedModule,
-			Dir: l.Dir,
+			Dir:  l.Dir,
+			Fset: l.Fset,
 		}
 		if l.Env != nil {
 			cfg.Env = l.Env
