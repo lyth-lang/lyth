@@ -1,0 +1,49 @@
+import "fmt"
+import "slices"
+
+struct Student {
+    Name: string
+    Scores: []int
+}
+
+func Student.Average(): float64 {
+    sum := 0
+    for s in self.Scores {
+        sum += s
+    }
+    return float64(sum) / float64(len(self.Scores))
+}
+
+func median(scores: []int): float64 {
+    sorted := slices.Sorted(slices.Values(scores))
+    mid := len(sorted) / 2
+    if len(sorted) % 2 == 0 {
+        return float64(sorted[mid - 1] + sorted[mid]) / 2
+    }
+    return float64(sorted[mid])
+}
+
+func grade(avg: float64): string = when {
+    avg >= 90 -> "A"
+    avg >= 80 -> "B"
+    avg >= 70 -> "C"
+    else -> "F"
+}
+
+func main() {
+    students := [
+        Student(Name = "ada", Scores = [92, 88, 95]),
+        Student(Name = "bob", Scores = [75, 64, 81]),
+        Student(Name = "cyd", Scores = [58, 72, 66]),
+        Student(Name = "dee", Scores = [80, 90, 70, 100]),
+    ]
+    best := students[0]
+    for s in students {
+        avg := s.Average()
+        fmt.Printf("%s: %.1f %s, median %.1f\n", s.Name, avg, grade(avg), median(s.Scores))
+        if avg > best.Average() {
+            best = s
+        }
+    }
+    fmt.Println("best: ${best.Name}")
+}

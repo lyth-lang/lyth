@@ -1,0 +1,34 @@
+import "fmt"
+
+struct Student {
+    val Name: String
+    val Scores: List<Int>
+}
+
+fun Student.Average(): Double {
+    var sum = 0
+    for (s in this.Scores) {
+        sum += s
+    }
+    return float64(sum) / float64(len(this.Scores))
+}
+
+fun grade(avg: Double): String = when {
+    avg >= 90 -> "A"
+    avg >= 80 -> "B"
+    avg >= 70 -> "C"
+    else -> "F"
+}
+
+fun main() {
+    val students = [
+        Student(Name = "ada", Scores = [92, 88, 95]),
+        Student(Name = "bob", Scores = [75, 64, 81]),
+        Student(Name = "cyd", Scores = [58, 72, 66]),
+        Student(Name = "dee", Scores = [80, 90, 70, 100]),
+    ]
+    for (s in students) {
+        val avg = s.Average()
+        fmt.Printf("%s: %.1f %s\n", s.Name, avg, grade(avg))
+    }
+}

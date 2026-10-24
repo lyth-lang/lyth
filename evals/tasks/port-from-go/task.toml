@@ -1,0 +1,3 @@
+features = ["porting Go", "throws", "catch", "err.wrap"]
+requires = ['\bthrows\b', '\bcatch\b']
+forbids = ['if\s+err\s*!=\s*nil', '\brange\b']

@@ -1,0 +1,22 @@
+import "testing"
+
+func TestGrade(t: *testing.T) {
+    cases: map[float64]string = [95.0: "A", 85.0: "B", 72.0: "C", 10.0: "F"]
+    for avg, want in cases {
+        got := grade(avg)
+        if got != want {
+            t.Error("grade(${avg}) = ${got}, want ${want}")
+        }
+    }
+}
+
+func TestMedian(t: *testing.T) {
+    odd := median([3, 1, 2])
+    if odd != 2 {
+        t.Errorf("median of 3, 1, 2 = %v, want 2", odd)
+    }
+    even := median([4, 1, 3, 2])
+    if even != 2.5 {
+        t.Errorf("median of 4, 1, 3, 2 = %v, want 2.5", even)
+    }
+}

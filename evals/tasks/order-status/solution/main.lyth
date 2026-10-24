@@ -1,0 +1,31 @@
+import "fmt"
+
+enum Status { Pending, Paid, Shipped, Delivered, Cancelled }
+
+func next(s: Status): Status? = when s {
+    Pending -> Status.Paid
+    Paid -> Status.Shipped
+    Shipped -> Status.Delivered
+    Delivered, Cancelled -> null
+}
+
+func canCancel(s: Status): bool = s in [Status.Pending, Status.Paid]
+
+func label(s: Status): string = when s {
+    Pending -> "waiting for payment"
+    Paid -> "paid, packing"
+    Shipped -> "on the way"
+    Delivered -> "delivered"
+    Cancelled -> "cancelled"
+}
+
+func main() {
+    s := Status.Pending
+    while true {
+        fmt.Println("${s}: ${label(s)}, can cancel: ${canCancel(s)}")
+        n := next(s) ?: break
+        s = n
+    }
+    c := Status.Cancelled
+    fmt.Println("${c}: ${label(c)}, next: ${next(c) == null}")
+}

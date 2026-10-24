@@ -1,0 +1,51 @@
+import "errors"
+import "fmt"
+import "strconv"
+import "strings"
+
+struct Entry {
+    Key: string
+    Value: int
+}
+
+var ErrEmpty = errors.New("empty line")
+
+func parseLine(raw: string): Entry throws {
+    line := strings.TrimSpace(raw)
+    if line == "" {
+        throw ErrEmpty
+    }
+    key, text, ok := strings.Cut(line, "=")
+    if !ok {
+        throw fmt.Errorf("line %q: missing '='", line)
+    }
+    name := strings.TrimSpace(key)
+    v := strconv.Atoi(strings.TrimSpace(text)) catch (err) {
+        throw err.wrap("key ${name}")
+    }
+    return Entry(Key = name, Value = v)
+}
+
+func parseAll(text: string): (map[string]int, []error) {
+    out: map[string]int = [:]
+    errs: []error = []
+    for line in strings.Split(text, "\n") {
+        e := parseLine(line) catch (err) {
+            if !errors.Is(err, ErrEmpty) {
+                errs = append(errs, err)
+            }
+            continue
+        }
+        out[e.Key] = e.Value
+    }
+    return out, errs
+}
+
+func main() {
+    text := "workers = 4\n\nretries=3\ntimeout = 3s\nverbose\nport= 8080\n"
+    values, errs := parseAll(text)
+    fmt.Println(values)
+    for err in errs {
+        fmt.Println("error:", err)
+    }
+}

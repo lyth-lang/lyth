@@ -1,0 +1,3 @@
+features = ["tests", "when"]
+requires = ['func\s+Test\w+\s*\(\s*t\s*:\s*\*testing\.T']
+tests = 4

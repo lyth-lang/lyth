@@ -1,0 +1,6 @@
+size: 4
+popped: 16
+size: 3
+empty pop ok: false
+[c b a]
+[2.5 1.5]

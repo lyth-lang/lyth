@@ -1,0 +1,3 @@
+map[port:8080 retries:3 workers:4]
+error: key timeout: strconv.Atoi: parsing "3s": invalid syntax
+error: line "verbose": missing '='

@@ -1,0 +1,3 @@
+features = ["throws", "typed catch", "error structs", "maps"]
+requires = ['\bthrows\b', 'struct\s+UnknownItem', 'struct\s+OutOfStock', 'catch\s*\(\s*\w+\s*:\s*\*?UnknownItem']
+forbids = ['if\s+err\s*!=\s*nil']

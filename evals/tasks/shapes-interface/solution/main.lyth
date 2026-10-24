@@ -1,0 +1,42 @@
+import "fmt"
+import "math"
+
+sealed interface Shape {
+    Area(): float64
+}
+
+struct Circle : Shape {
+    R: float64
+}
+
+func Circle.Area(): float64 = math.Pi * R * R
+
+struct Rect : Shape {
+    W: float64
+    H: float64
+}
+
+func Rect.Area(): float64 = W * H
+
+struct Triangle : Shape {
+    Base: float64
+    Height: float64
+}
+
+func Triangle.Area(): float64 = Base * Height / 2
+
+func describe(s: Shape): string = when s {
+    is Circle -> "circle of radius ${s.R}"
+    is Rect -> if s.W == s.H { "square of side ${s.W}" } else { "rectangle ${s.W}x${s.H}" }
+    is Triangle -> "triangle with base ${s.Base}"
+}
+
+func main() {
+    shapes: []Shape = [Circle(1.5), Rect(2, 3), Rect(4, 4), Triangle(6, 2)]
+    total := 0.0
+    for s in shapes {
+        fmt.Printf("%s: %.2f\n", describe(s), s.Area())
+        total += s.Area()
+    }
+    fmt.Printf("total area: %.2f\n", total)
+}

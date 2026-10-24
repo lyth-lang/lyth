@@ -1,0 +1,2 @@
+features = ["goroutines", "channels"]
+requires = ['\bgo\s*[{\w]', '\bchan\b']

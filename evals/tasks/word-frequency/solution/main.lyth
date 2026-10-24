@@ -1,0 +1,27 @@
+import "cmp"
+import "fmt"
+import "maps"
+import "slices"
+import "strings"
+import "unicode"
+
+const text = "The quick brown fox jumps over the lazy dog. The dog sleeps; the fox runs! A quick fox, a lazy dog."
+
+func countWords(s: string): map[string]int {
+    counts: map[string]int = [:]
+    words := strings.FieldsFunc(strings.ToLower(s)) { !unicode.IsLetter(it) }
+    for w in words {
+        counts[w]++
+    }
+    return counts
+}
+
+func main() {
+    counts := countWords(text)
+    words := slices.Collect(maps.Keys(counts))
+    slices.SortFunc(words) { a, b -> cmp.Or(cmp.Compare(counts[b], counts[a]), strings.Compare(a, b)) }
+    for w in words[:5] {
+        fmt.Println("${w}: ${counts[w]}")
+    }
+    fmt.Println("distinct words: ${len(counts)}")
+}

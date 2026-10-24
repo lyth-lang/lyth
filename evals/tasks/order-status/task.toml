@@ -1,0 +1,3 @@
+features = ["enums", "exhaustive when", "nullable enums", "in"]
+requires = ['enum\s+Status', '\bwhen\b']
+forbids = ['else\s*->']

@@ -1,0 +1,60 @@
+import "fmt"
+
+struct UnknownItem {
+    Item: string
+}
+
+func *UnknownItem.Error(): string = "unknown item ${Item}"
+
+struct OutOfStock {
+    Item: string
+    Wanted: int
+    Have: int
+}
+
+func *OutOfStock.Error(): string = "not enough ${Item}: wanted ${Wanted}, have ${Have}"
+
+func take(stock: map[string]int, item: string, qty: int): int throws {
+    have, ok := stock[item]
+    if !ok {
+        throw &UnknownItem(Item = item)
+    }
+    if have < qty {
+        throw &OutOfStock(Item = item, Wanted = qty, Have = have)
+    }
+    stock[item] = have - qty
+    return have - qty
+}
+
+struct Order {
+    Item: string
+    Qty: int
+}
+
+func takeBoth(stock: map[string]int) throws {
+    take(stock, "pear", 1)?
+    take(stock, "plum", 1)?
+}
+
+func main() {
+    stock := ["apple": 5, "pear": 2, "plum": 0]
+    orders := [Order("apple", 3), Order("pear", 5), Order("kiwi", 1), Order("apple", 2), Order("apple", 1)]
+    for o in orders {
+        left := take(stock, o.Item, o.Qty) catch (e: *UnknownItem) {
+            fmt.Println("${o.Item} x${o.Qty}: skipped, ${e.Item} is not sold here")
+            continue
+        } catch (err) {
+            fmt.Println("${o.Item} x${o.Qty}: error: ${err}")
+            continue
+        }
+        fmt.Println("${o.Item} x${o.Qty}: ok, ${left} left")
+    }
+    takeBoth(stock) catch (err) {
+        fmt.Println("batch stopped: ${err}")
+    }
+    total := 0
+    for _, n in stock {
+        total += n
+    }
+    fmt.Println("left: ${total}")
+}

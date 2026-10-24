@@ -1,0 +1,33 @@
+import "fmt"
+
+struct Part {
+    Index: int
+    Sum: int
+}
+
+func main() {
+    n := 1000000
+    workers := 4
+    results := make(chan Part, workers)
+    size := n / workers
+    for w in 0..<workers {
+        go {
+            sum := 0
+            for i in w * size + 1..(w + 1) * size {
+                sum += i
+            }
+            results.send(Part(w, sum))
+        }
+    }
+    sums := make([]int, workers)
+    for _ in 0..<workers {
+        p := results.receive()
+        sums[p.Index] = p.Sum
+    }
+    total := 0
+    for i, s in sums {
+        fmt.Println("worker ${i}: ${s}")
+        total += s
+    }
+    fmt.Println("total: ${total}")
+}

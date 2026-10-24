@@ -1,0 +1,2 @@
+features = ["reading compiler errors", "numeric conversions", "errors", "nullable types", "lyth/coll"]
+requires = ['struct\s+Item\b', 'func\s+total\b', 'func\s+parseQty\b', 'func\s+cheapest\b']

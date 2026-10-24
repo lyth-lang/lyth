@@ -1,0 +1,2 @@
+features = ["generic structs", "generic methods", "generic functions"]
+requires = ['struct\s+Stack\s*\[\s*T', 'func\s+\*?Stack\[T\]\.Push', 'func\s+\*?Stack\[T\]\.Pop']

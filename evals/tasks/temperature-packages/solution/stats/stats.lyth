@@ -1,0 +1,17 @@
+package stats
+
+func Mean(xs: []float64): float64 {
+    sum := 0.0
+    for x in xs {
+        sum += x
+    }
+    return sum / float64(len(xs))
+}
+
+func Max(xs: []float64): float64 {
+    best := xs[0]
+    for x in xs {
+        best = max(best, x)
+    }
+    return best
+}

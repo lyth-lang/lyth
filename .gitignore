@@ -8,3 +8,7 @@ bench/results/bin/
 
 # design notes and plans kept out of the public repository
 internal-docs/
+
+# eval runs (evals/run.py)
+evals/results/
+__pycache__/

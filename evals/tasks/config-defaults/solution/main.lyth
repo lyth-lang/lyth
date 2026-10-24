@@ -1,0 +1,39 @@
+import "fmt"
+import "strconv"
+
+func lookup(env: map[string]string, key: string): string? {
+    v, ok := env[key]
+    if !ok {
+        return null
+    }
+    return v
+}
+
+func address(host: string, port: int = 5432, secure: bool = false): string {
+    scheme := if secure { "postgres+tls" } else { "postgres" }
+    return "${scheme}://${host}:${port}"
+}
+
+func main() {
+    envs: []map[string]string = [
+        ["DB_HOST": "db.internal", "DB_PORT": "6543", "DB_TLS": "on"],
+        ["DB_HOST": "cache"],
+        ["DB_PORT": "7000"],
+        ["DB_HOST": "api", "DB_PORT": "eighty"],
+        [:],
+    ]
+    for env in envs {
+        host := lookup(env, "DB_HOST") ?: "localhost"
+        secure := lookup(env, "DB_TLS") == "on"
+        text := lookup(env, "DB_PORT")
+        if text == null {
+            fmt.Println(address(host, secure = secure))
+            continue
+        }
+        port := strconv.Atoi(text) catch {
+            fmt.Println("${host}: bad port ${text}")
+            continue
+        }
+        fmt.Println(address(host, port, secure))
+    }
+}

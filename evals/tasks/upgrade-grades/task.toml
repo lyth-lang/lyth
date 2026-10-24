@@ -1,0 +1,4 @@
+features = ["older Lyth syntax", "lyth fix", "tests", "slices"]
+requires = ['func\s+median\b', 'func\s+Test\w*Median']
+forbids = ['\bfun\b', '\bval\b', '\bthis\b', '\b(?:Int|String|Double|Boolean|Long)\b', '\b(?:List|Map)\s*<']
+tests = 2

@@ -1,0 +1,11 @@
+import "testing"
+
+fun TestGrade(t: *testing.T) {
+    val cases: Map<Double, String> = [95.0: "A", 85.0: "B", 72.0: "C", 10.0: "F"]
+    for (avg, want in cases) {
+        val got = grade(avg)
+        if got != want {
+            t.Error("grade($avg) = $got, want $want")
+        }
+    }
+}

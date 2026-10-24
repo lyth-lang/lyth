@@ -1,0 +1,16 @@
+import "fmt"
+import "app/stats"
+import "app/units"
+
+func main() {
+    readings := [68.0, 75.2, 59.0, 82.4, 71.6]
+    celsius: []float64 = []
+    for f in readings {
+        c := units.FahrenheitToCelsius(f)
+        celsius = append(celsius, c)
+        fmt.Printf("%.1f°F = %.1f°C\n", f, c)
+    }
+    fmt.Printf("mean: %.1f°C\n", stats.Mean(celsius))
+    fmt.Printf("max: %.1f°C\n", stats.Max(celsius))
+    fmt.Printf("body temperature: %.1f°F\n", units.CelsiusToFahrenheit(37))
+}

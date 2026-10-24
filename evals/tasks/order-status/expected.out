@@ -1,0 +1,5 @@
+Pending: waiting for payment, can cancel: true
+Paid: paid, packing, can cancel: true
+Shipped: on the way, can cancel: false
+Delivered: delivered, can cancel: false
+Cancelled: cancelled, next: true

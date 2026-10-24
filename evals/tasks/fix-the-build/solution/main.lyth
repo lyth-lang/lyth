@@ -1,0 +1,45 @@
+import "fmt"
+import "strconv"
+import "strings"
+import "lyth/coll"
+
+struct Item {
+    Name: string
+    Price: float64
+    Qty: int
+}
+
+func total(items: []Item): float64 {
+    sum := 0.0
+    for item in items {
+        sum += item.Price * float64(item.Qty)
+    }
+    return sum
+}
+
+func parseQty(s: string): int = strconv.Atoi(s) catch { 0 }
+
+func cheapest(items: []Item): Item? {
+    best: Item? = null
+    for item in items {
+        current := best
+        if current == null || item.Price < current.Price {
+            best = item
+        }
+    }
+    return best
+}
+
+func main() {
+    items := [Item("pen", 1.5, parseQty("4")), Item("book", 12, parseQty("1")), Item("bag", 25, parseQty("x"))]
+    names := items.Map { strings.ToUpper(it.Name) }
+    fmt.Println(strings.Join(names, ", "))
+    c := cheapest(items)
+    fmt.Println("cheapest: ${c?.Name ?: "none"}")
+    count := 0
+    for _ in 1..len(items) {
+        count++
+    }
+    fmt.Println("items: ${count}")
+    fmt.Printf("total: %.2f\n", total(items))
+}

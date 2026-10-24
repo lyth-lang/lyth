@@ -1,0 +1,55 @@
+import "fmt"
+
+struct Stack[T] {
+    items: []T
+}
+
+func *Stack[T].Push(v: T) {
+    self.items = append(self.items, v)
+}
+
+func *Stack[T].Pop(): (T, bool) {
+    if len(items) == 0 {
+        zero: T
+        return zero, false
+    }
+    v := items[len(items) - 1]
+    self.items = items[:len(items) - 1]
+    return v, true
+}
+
+func Stack[T].Len(): int = len(items)
+
+func reversed[T](xs: []T): []T {
+    s := Stack[T]()
+    for x in xs {
+        s.Push(x)
+    }
+    out := make([]T, 0, len(xs))
+    while true {
+        v, ok := s.Pop()
+        if !ok {
+            break
+        }
+        out = append(out, v)
+    }
+    return out
+}
+
+func main() {
+    nums := Stack[int]()
+    for i in 1..4 {
+        nums.Push(i * i)
+    }
+    fmt.Println("size:", nums.Len())
+    top, _ := nums.Pop()
+    fmt.Println("popped:", top)
+    fmt.Println("size:", nums.Len())
+
+    words := Stack[string]()
+    _, ok := words.Pop()
+    fmt.Println("empty pop ok:", ok)
+
+    fmt.Println(reversed(["a", "b", "c"]))
+    fmt.Println(reversed([1.5, 2.5]))
+}

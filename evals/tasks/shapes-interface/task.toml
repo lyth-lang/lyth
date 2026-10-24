@@ -1,0 +1,2 @@
+features = ["sealed interfaces", "when with is", "methods", "formatting"]
+requires = ['sealed\s+interface\s+Shape', '\bwhen\b', '\bis\s+Circle\b']

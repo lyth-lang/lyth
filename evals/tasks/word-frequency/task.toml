@@ -1,0 +1,2 @@
+features = ["maps", "sorting", "lambdas", "Go standard library"]
+requires = ['\bmap\[string\]int\b']
