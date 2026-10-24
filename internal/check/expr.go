@@ -272,13 +272,13 @@ func (c *Checker) ident(e *syntax.Ident) *operand {
 		if path, ok := stdPackages[e.Name]; ok {
 			d.WithHint("add the import: import %q", path)
 		} else if t, ok := oldTypeNames[e.Name]; ok {
-			d.WithEdit(e.S, t, "Lyth uses Go's type names: %s", t)
+			d.WithFix(e.S, t, "Lyth uses Go's type names: %s", t)
 		} else if s := c.suggest(e.Name); s != "" {
 			d.WithHint("did you mean %s?", s)
 		}
 		if e.Name == "nil" {
 			d.Hints = nil
-			d.WithEdit(e.S, "null", "Lyth writes null")
+			d.WithFix(e.S, "null", "Lyth writes null")
 		}
 		return invalid(e)
 	}

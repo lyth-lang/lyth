@@ -48,6 +48,10 @@ type Hint struct {
 type Edit struct {
 	Span    source.Span
 	NewText string
+	// Fix marks an edit that writes what the code already means, typically
+	// an older or Kotlin or Go spelling of a Lyth construct: lyth fix
+	// applies it without asking.
+	Fix bool
 }
 
 // GoCause records the original Go toolchain message behind a mapped diagnostic.
@@ -92,6 +96,24 @@ func (d *Diagnostic) WithHint(format string, args ...any) *Diagnostic {
 func (d *Diagnostic) WithEdit(span source.Span, newText, format string, args ...any) *Diagnostic {
 	d.Hints = append(d.Hints, Hint{Message: fmt.Sprintf(format, args...), Edit: &Edit{Span: span, NewText: newText}})
 	return d
+}
+
+// WithFix appends a hint with an edit that lyth fix may apply: the
+// replacement must mean exactly what the reported code was written to mean.
+func (d *Diagnostic) WithFix(span source.Span, newText, format string, args ...any) *Diagnostic {
+	d.Hints = append(d.Hints, Hint{Message: fmt.Sprintf(format, args...), Edit: &Edit{Span: span, NewText: newText, Fix: true}})
+	return d
+}
+
+// Fixes returns the edits of d that lyth fix applies.
+func (d *Diagnostic) Fixes() []*Edit {
+	var out []*Edit
+	for _, h := range d.Hints {
+		if h.Edit != nil && h.Edit.Fix && h.Edit.Span.IsValid() {
+			out = append(out, h.Edit)
+		}
+	}
+	return out
 }
 
 // WithRelated appends a secondary span.

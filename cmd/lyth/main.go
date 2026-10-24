@@ -8,6 +8,7 @@
 //	lyth gen [-stdout | -in-tree] [packages]
 //	lyth vet [packages]
 //	lyth test [packages] [go test flags]
+//	lyth fix [packages]
 //	lyth lsp
 //	lyth version
 package main
@@ -57,6 +58,7 @@ Usage:
   lyth gen [-stdout | -in-tree] [packages]                emit the generated Go code
   lyth vet [packages]                                     run go vet on generated code
   lyth test [packages] [go test flags]                    run tests (_test.lyth and _test.go files)
+  lyth fix [packages]                                     rewrite older Lyth syntax and Kotlin and Go spellings
   lyth mod tidy                                           go mod tidy that sees imports in .lyth files
   lyth lsp [-no-vet]                                      run the language server on stdin and stdout
   lyth version                                            print the compiler version
@@ -76,6 +78,7 @@ type common struct {
 	timings  bool
 	tags     string
 	tests    bool // include _test.lyth files (check, vet, gen, test)
+	fixing   bool // lyth fix: don't suggest lyth fix
 }
 
 func (c *common) register(fs *flag.FlagSet) {
@@ -137,6 +140,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdVet(rest, stdout, stderr)
 	case "test":
 		return cmdTest(rest, stdout, stderr)
+	case "fix":
+		return cmdFix(rest, stdout, stderr)
 	case "lsp":
 		return cmdLSP(rest, os.Stdin, stdout, stderr)
 	case "mod":
@@ -200,8 +205,22 @@ func report(s *build.Session, c *common, stderr io.Writer) bool {
 			}
 			fmt.Fprintf(stderr, "\n%d %s\n", n, word)
 		}
+		if n := countFixable(all); n > 0 && !c.fixing {
+			fmt.Fprintf(stderr, "lyth fix rewrites %d of them: they are older Lyth syntax, or Kotlin or Go spellings\n", n)
+		}
 	}
 	return s.Sink.HasErrors()
+}
+
+// countFixable counts the diagnostics lyth fix would settle.
+func countFixable(ds []*diag.Diagnostic) int {
+	n := 0
+	for _, d := range ds {
+		if len(d.Fixes()) > 0 {
+			n++
+		}
+	}
+	return n
 }
 
 func countErrors(ds []*diag.Diagnostic) int {

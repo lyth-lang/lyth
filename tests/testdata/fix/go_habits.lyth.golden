@@ -1,0 +1,37 @@
+// Go spellings that lyth fix rewrites.
+import "cmp"
+import "fmt"
+import "strings"
+
+struct Point {
+    X: int
+    Y: int
+}
+
+func Point.Sum(): int = X + Y
+
+func biggest[T: cmp.Ordered](xs: []T): T {
+    best := xs[0]
+    for x in xs {
+        if x > best {
+            best = x
+        }
+    }
+    return best
+}
+
+func lookup(m: map[string]*Point, k: string): *Point? = m[k]
+
+func main() {
+    p := Point(X = 1, Y = 2)
+    fmt.Println(p.Sum(), biggest([3, 9, 4]))
+    if lookup(["a": &p], "b") == null {
+        fmt.Println("missing")
+    }
+    for x in ([]int{1, 2}) {
+        fmt.Println(strings.Repeat("*", x))
+    }
+    b: strings.Builder
+    b.WriteString("done")
+    fmt.Println(b.String())
+}

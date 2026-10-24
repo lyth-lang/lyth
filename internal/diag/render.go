@@ -289,6 +289,7 @@ type jsonHint struct {
 type jsonEdit struct {
 	Location *jsonLocation `json:"location"`
 	NewText  string        `json:"newText"`
+	Fix      bool          `json:"fix,omitempty"` // lyth fix applies it
 }
 
 func toJSONLoc(s source.Span) *jsonLocation {
@@ -318,7 +319,7 @@ func RenderJSON(w io.Writer, diags []*Diagnostic) error {
 		for _, h := range d.Hints {
 			jh := jsonHint{Message: h.Message}
 			if h.Edit != nil {
-				jh.Edit = &jsonEdit{Location: toJSONLoc(h.Edit.Span), NewText: h.Edit.NewText}
+				jh.Edit = &jsonEdit{Location: toJSONLoc(h.Edit.Span), NewText: h.Edit.NewText, Fix: h.Edit.Fix}
 			}
 			j.Hints = append(j.Hints, jh)
 		}

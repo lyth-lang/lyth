@@ -390,7 +390,7 @@ func (c *Checker) goMember(t, base types.Type, name string, id *syntax.Ident) *m
 		if r, size := utf8.DecodeRuneInString(name); unicode.IsLower(r) {
 			alt := string(unicode.ToUpper(r)) + name[size:]
 			if o, _, _ := gotypes.LookupFieldOrMethod(gt, true, nil, alt); o != nil {
-				d.WithEdit(id.S, alt, "Go names are used verbatim: write %s", alt)
+				d.WithFix(id.S, alt, "Go names are used verbatim: write %s", alt)
 				return nil
 			}
 		}
@@ -523,7 +523,7 @@ func (c *Checker) pkgMember(e *syntax.SelectorExpr, pkg *Package) *operand {
 		d := c.errorf(diag.EUnknownPkgName, e.Sel.S, "package %s has no exported member %s", pkg.Name, name)
 		if s := suggestGoName(pkg.Go, name, false); s != "" {
 			if strings.EqualFold(s, name) {
-				d.WithEdit(e.Sel.S, s, "Go names are used verbatim: write %s.%s", pkg.Name, s)
+				d.WithFix(e.Sel.S, s, "Go names are used verbatim: write %s.%s", pkg.Name, s)
 			} else {
 				d.WithHint("did you mean %s.%s?", pkg.Name, s)
 			}

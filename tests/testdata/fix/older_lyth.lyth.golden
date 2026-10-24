@@ -1,0 +1,66 @@
+// Lyth before 0.1.0, which lyth fix rewrites.
+import "cmp"
+import "fmt"
+import "strings"
+
+var Greeting = "hi"
+
+struct Box[T] {
+    Items: []T
+}
+
+func Box[T].First(): T = self.Items[0]
+
+interface Named {
+    Name(): string
+}
+
+struct Pet {
+    PetName: string
+}
+
+func Pet.Name(): string = PetName
+
+func maxOf[T: cmp.Ordered](a: T, b: T): T = if a > b { a } else { b }
+
+func pick[T: cmp.Ordered](a: T, b: T): T = maxOf[T](a, b)
+
+func count(words: []string): map[string]int {
+    counts: map[string]int = [:]
+    for w in words {
+        counts[w] = counts[w] + 1
+    }
+    for k, n in counts {
+        if n > 1 {
+            fmt.Println("${k} repeats")
+        }
+    }
+    return counts
+}
+
+func main() {
+    name := "lyth"
+    total: int = 0
+    a := 1
+    b := 2
+    a, b = (b, a)
+    total = a * 10 + b
+    parts := strings.Split("x,y,x", ",")
+    c := count(parts)
+    fmt.Println("${name} ${total} ${c["x"]} ${Greeting}")
+    box := Box[int](Items = [3, 4])
+    fmt.Println(box.First(), maxOf(2, 5), pick(1.5, 0.5))
+    p: Named? = Pet(PetName = "rex")
+    if p != null {
+        fmt.Println(p.Name())
+    }
+    when n := total % 3 {
+        0 -> fmt.Println("zero")
+        else -> fmt.Println("rest ${n}")
+    }
+    ch := make(chan int, 1)
+    ch.send(7)
+    select {
+        v := ch.receive() -> fmt.Println(v)
+    }
+}

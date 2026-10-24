@@ -119,6 +119,7 @@ has the exact rules.
 | `lyth run file.lyth`, `lyth run ./cmd/api` | `go run` |
 | `lyth build`, `lyth test`, `lyth vet` | `go build`, `go test`, `go vet` (through an overlay) |
 | `lyth check` | type-check only, no build |
+| `lyth fix` | rewrite older Lyth syntax and Go and Kotlin spellings |
 | `lyth gen -stdout` | print the generated Go |
 | `lyth mod tidy` | `go mod tidy` that also sees imports in `.lyth` files |
 

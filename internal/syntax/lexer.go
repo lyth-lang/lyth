@@ -416,7 +416,7 @@ func (l *lexer) scanString() {
 			}
 			name := string(l.src[l.off+1 : end])
 			l.errorf(diag.EDollarTemplate, l.off, end, "string templates use ${...}; \"$%s\" would print literally", name).
-				WithEdit(l.span(l.off, end), "${"+name+"}", "write ${%s} to interpolate, or \\$%s for a literal dollar sign", name, name)
+				WithFix(l.span(l.off, end), "${"+name+"}", "write ${%s} to interpolate, or \\$%s for a literal dollar sign", name, name)
 			text.WriteByte('$')
 			l.off++
 		default:

@@ -59,7 +59,7 @@ func (c *Checker) resolveType0(te syntax.TypeExpr) types.Type {
 		if sym == nil {
 			d := c.errorf(diag.EUndefined, te.Name.S, "undefined type %s", te.Name.Name)
 			if hint, ok := oldTypeNames[te.Name.Name]; ok {
-				d.WithEdit(te.Name.S, hint, "Lyth uses Go's type names: %s", hint)
+				d.WithFix(te.Name.S, hint, "Lyth uses Go's type names: %s", hint)
 			} else if s := c.suggest(te.Name.Name); s != "" {
 				d.WithHint("did you mean %s?", s)
 			}
@@ -304,7 +304,7 @@ func (c *Checker) builtinGeneric(name string, te *syntax.NamedType) types.Type {
 		spelling = "<-chan " + args[0]
 	}
 	c.errorf(diag.EUnsupportedSyntax, te.S, "Lyth uses Go's spelling for this type").
-		WithEdit(te.S, spelling, "write %s", spelling)
+		WithFix(te.S, spelling, "write %s", spelling)
 	elems := make([]types.Type, len(te.Args))
 	for i, a := range te.Args {
 		elems[i] = c.resolveType(a)

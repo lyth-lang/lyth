@@ -446,7 +446,7 @@ func (p *parser) parseDecl() (decl Decl) {
 	case VAL, VAR:
 		if kw := p.next(); kw.Kind == VAL {
 			p.errorf(diag.EUnsupportedSyntax, kw.Span, "package-level variables are declared with var").
-				WithEdit(kw.Span, "var", "write var")
+				WithFix(kw.Span, "var", "write var")
 		}
 		d := &PropDecl{Doc: doc, Mutable: true}
 		d.Name = p.parseIdent("in variable declaration")
@@ -564,7 +564,7 @@ func (p *parser) parseTypeParams() []*TypeParam {
 			// Go's [T cmp.Ordered]: Lyth writes a constraint like a type, after ':'.
 			c := p.parseType()
 			p.errorf(diag.EUnsupportedSyntax, c.Span(), "a type parameter's constraint follows ':'").
-				WithEdit(tp.Name.S.EndSpan().Join(c.Span().At()), ": ", "write %s: %s", tp.Name.Name, c.Span().Text())
+				WithFix(tp.Name.S.EndSpan().Join(c.Span().At()), ": ", "write %s: %s", tp.Name.Name, c.Span().Text())
 			tp.Constraint = c
 		}
 		tp.S = p.spanFrom(start)
@@ -582,12 +582,44 @@ func (p *parser) parseTypeParams() []*TypeParam {
 }
 
 // angleTypeParams reports Kotlin-style type parameters <T> at the current
-// token and parses them.
-func (p *parser) angleTypeParams(where string) []*TypeParam {
+// token and parses them. After a type's name the fix writes them in
+// brackets in place; before a function's name (fun <T> f) it moves them
+// after the name.
+func (p *parser) angleTypeParams(where string, beforeName bool) []*TypeParam {
 	start := p.tok().Span
 	tps := p.parseTypeParams()
-	p.errorf(diag.EUnsupportedSyntax, p.spanFrom(start), "type parameters are written in brackets %s", where).
-		WithHint("write [%s]", typeParamText(tps))
+	span := p.spanFrom(start)
+	brackets := "[" + typeParamText(tps) + "]"
+	d := p.errorf(diag.EUnsupportedSyntax, span, "type parameters are written in brackets %s", where)
+	if !beforeName {
+		d.WithFix(span, brackets, "write %s", brackets)
+		return tps
+	}
+	// The name, with its receiver (fun <T> []T.Second), ends before the
+	// parameter list.
+	end, depth := p.pos, 0
+scan:
+	for ; end < len(p.toks); end++ {
+		switch p.toks[end].Kind {
+		case LBRACK:
+			depth++
+		case RBRACK:
+			depth--
+		case LPAREN:
+			if depth == 0 {
+				break scan
+			}
+		case NEWLINE, LBRACE, EOF:
+			end = p.pos
+			break scan
+		}
+	}
+	if end == p.pos {
+		d.WithHint("write %s after the function name", brackets)
+		return tps
+	}
+	name := p.tok().Span.Join(p.toks[end-1].Span)
+	d.WithFix(span.Join(name), name.Text()+brackets, "write func %s%s(...)", name.Text(), brackets)
 	return tps
 }
 
@@ -655,7 +687,7 @@ func (p *parser) goCompositeLit(x Expr) Expr {
 	}
 	repl := x.Span().Text() + "(" + strings.TrimSpace(args) + ")"
 	p.errorf(diag.EUnsupportedSyntax, span, "Lyth constructs a struct by calling its type").
-		WithEdit(span, repl, "write %s", repl)
+		WithFix(span, repl, "write %s", repl)
 	p.pos = end + 1
 	return &BadExpr{S: span}
 }
@@ -810,7 +842,7 @@ func (p *parser) selfAsName() {
 func (p *parser) oldFun() {
 	if t := p.tok(); t.Kind == IDENT && t.Text == "fun" && (p.peek(1).Kind == IDENT || p.peek(1).Kind == LSS || p.peek(1).Kind == MUL || p.peek(1).Kind == LBRACK) {
 		p.errorf(diag.EUnsupportedSyntax, t.Span, "functions are declared with func").
-			WithEdit(t.Span, "func", "write func")
+			WithFix(t.Span, "func", "write func")
 		p.toks[p.pos].Kind = FUN
 	}
 }
@@ -852,7 +884,7 @@ func (p *parser) parseFunDecl(start source.Span, doc string) *FunDecl {
 		defer func() { p.damaged = append(p.damaged, d.S) }()
 	}
 	if p.at(LSS) {
-		d.TypeParams = p.angleTypeParams("after the function name")
+		d.TypeParams = p.angleTypeParams("after the function name", true)
 	}
 	switch r, name := p.parseReceiver(); {
 	case name != nil:
@@ -932,8 +964,12 @@ func (p *parser) parseReceiver() (r *Receiver, name *Ident) {
 						names = append(names, at.Name.Name)
 					}
 				}
-				p.errorf(diag.EUnsupportedSyntax, nt.Args[0].Span(), "type parameters are written in brackets after the function name").
-					WithHint("write func %s[%s](...)", nt.Name.Name, strings.Join(names, ", "))
+				d := p.errorf(diag.EUnsupportedSyntax, nt.Args[0].Span(), "type parameters are written in brackets after the function name")
+				if len(names) == len(nt.Args) {
+					d.WithFix(nt.Name.S.EndSpan().Join(nt.S.EndSpan()), "["+strings.Join(names, ", ")+"]", "write func %s[%s](...)", nt.Name.Name, strings.Join(names, ", "))
+				} else {
+					d.WithHint("write func %s[%s](...)", nt.Name.Name, strings.Join(names, ", "))
+				}
 				return nil, nt.Name
 			}
 			p.errorf(diag.EUnexpectedToken, p.tok().Span, "expected '.' and the function name after the receiver type")
@@ -1081,7 +1117,7 @@ func (p *parser) parseStructDecl(start source.Span, doc string) *StructDecl {
 	case p.at(LBRACK):
 		d.TypeParams = p.parseTypeParams()
 	case p.at(LSS):
-		d.TypeParams = p.angleTypeParams("after the struct name")
+		d.TypeParams = p.angleTypeParams("after the struct name", false)
 	}
 	if p.at(LPAREN) {
 		p.errorf(diag.EUnexpectedToken, p.tok().Span, "struct fields are declared in braces").
@@ -1121,7 +1157,7 @@ func (p *parser) parseStructDecl(start source.Span, doc string) *StructDecl {
 		}
 		if p.at(VAL) || p.at(VAR) {
 			p.errorf(diag.EUnexpectedToken, p.tok().Span, "struct fields are declared as name: Type").
-				WithNote("mutability belongs to bindings: a val struct is immutable, a var struct is mutable")
+				WithFix(p.tok().Span.Join(p.peek(1).Span.At()), "", "write the field without %s", p.tok().Text)
 			p.next()
 		}
 		if p.at(FUN) || p.at(IDENT) && p.tok().Text == "fun" && p.peek(1).Kind == IDENT {
@@ -1194,7 +1230,7 @@ func (p *parser) parseInterfaceDecl(start source.Span, doc string) *InterfaceDec
 	case p.at(LBRACK):
 		d.TypeParams = p.parseTypeParams()
 	case p.at(LSS):
-		d.TypeParams = p.angleTypeParams("after the interface name")
+		d.TypeParams = p.angleTypeParams("after the interface name", false)
 	}
 	p.expect(LBRACE, "to start the interface body")
 	for {
@@ -1207,7 +1243,7 @@ func (p *parser) parseInterfaceDecl(start source.Span, doc string) *InterfaceDec
 			// Go's interfaces list methods without a keyword.
 			p.next()
 			p.errorf(diag.EUnsupportedSyntax, kw.Span, "interface methods are written without '%s'", kw.Text).
-				WithEdit(kw.Span.Join(p.tok().Span.At()), "", "write %s(...)", p.tok().Text)
+				WithFix(kw.Span.Join(p.tok().Span.At()), "", "write %s(...)", p.tok().Text)
 		}
 		if p.at(IDENT) && p.peek(1).Kind == LPAREN {
 			m := &MethodSpec{Doc: p.docFor(mstart.Start)}
@@ -1396,7 +1432,7 @@ func (p *parser) oldTypeArgs(span source.Span, args []TypeExpr) {
 		parts = append(parts, a.Span().Text())
 	}
 	p.errorf(diag.EUnsupportedSyntax, span, "type arguments are written in brackets").
-		WithEdit(span, "["+strings.Join(parts, ", ")+"]", "write [%s]", strings.Join(parts, ", "))
+		WithFix(span, "["+strings.Join(parts, ", ")+"]", "write [%s]", strings.Join(parts, ", "))
 }
 
 // expectCloseAngle consumes one '>' and splits '>>', '>=', '>>=' tokens.
@@ -1573,7 +1609,7 @@ func (p *parser) parseStmt() Stmt {
 	if tup, ok := x.(*TupleExpr); ok && (p.at(ASSIGN) || p.at(DEFINE)) {
 		// (a, b) = (b, a): Go's list form has no parentheses.
 		p.errorf(diag.EUnsupportedSyntax, tup.S, "assignment lists are written without parentheses").
-			WithEdit(tup.S, tupleText(tup), "write %s", tupleText(tup))
+			WithFix(tup.S, tupleText(tup), "write %s", tupleText(tup))
 	}
 	lhs := []Expr{x}
 	for p.at(COMMA) {
@@ -1661,7 +1697,7 @@ func (p *parser) parseTypedLocalDecl() Stmt {
 		d.Value = p.parseExpr()
 	case p.at(DEFINE):
 		p.errorf(diag.EUnexpectedToken, p.tok().Span, "a declaration with a type uses '='").
-			WithEdit(p.tok().Span, "=", "write %s: %s = ...", d.Names[0].Name, d.Type.Span().Text())
+			WithFix(p.tok().Span, "=", "write %s: %s = ...", d.Names[0].Name, d.Type.Span().Text())
 		p.next()
 		d.Value = p.parseExpr()
 	}
@@ -1685,12 +1721,13 @@ func (p *parser) parseOldLocalDecl() Stmt {
 	list := strings.Join(names, ", ")
 	d2 := p.errorf(diag.EUnsupportedSyntax, kw.Span, "local variables are declared with := (or name: Type = value)")
 	switch {
-	case ld.Type != nil && ld.Value != nil:
-		d2.WithHint("write %s: %s = %s", list, ld.Type.Span().Text(), ld.Value.Span().Short())
-	case ld.Type != nil:
-		d2.WithHint("write %s: %s", list, ld.Type.Span().Text())
-	case ld.Value != nil:
-		d2.WithHint("write %s := %s", list, ld.Value.Span().Short())
+	case ld.Type != nil && ld.Value != nil && !ld.Destructure:
+		// val x: T = e and val x: T keep their type: drop the keyword.
+		d2.WithFix(kw.Span.Join(ld.Names[0].S.At()), "", "write %s: %s = %s", list, ld.Type.Span().Text(), ld.Value.Span().Short())
+	case ld.Type != nil && !ld.Destructure:
+		d2.WithFix(kw.Span.Join(ld.Names[0].S.At()), "", "write %s: %s", list, ld.Type.Span().Text())
+	case ld.Value != nil && ld.Type == nil:
+		d2.WithFix(kw.Span.Join(ld.Value.Span().At()), list+" := ", "write %s := %s", list, ld.Value.Span().Short())
 	}
 	ld.Define = ld.Type == nil
 	ld.Mutable = true
@@ -1837,6 +1874,10 @@ func (p *parser) parseOldFor(start source.Span, s *ForStmt) Stmt {
 		p.expect(RPAREN, "")
 	} else {
 		s.Names = []*Ident{p.parseIdent("for the loop variable")}
+		for p.at(COMMA) && p.peek(1).Kind == IDENT {
+			p.next()
+			s.Names = append(s.Names, p.parseIdent(""))
+		}
 	}
 	if !p.at(IN) {
 		d := p.errorf(diag.EUnexpectedToken, p.tok().Span, "expected 'in' in for loop, found %s", describe(p.tok()))
@@ -1860,7 +1901,7 @@ func (p *parser) parseOldFor(start source.Span, s *ForStmt) Stmt {
 		iter = s.Iter.Span().Text()
 	}
 	p.errorf(diag.EUnsupportedSyntax, open.Span.Join(end.Span), "for loops have no parentheses").
-		WithEdit(open.Span.Join(end.Span), strings.Join(names, ", ")+" in "+iter, "write for %s in %s", strings.Join(names, ", "), iter)
+		WithFix(open.Span.Join(end.Span), strings.Join(names, ", ")+" in "+iter, "write for %s in %s", strings.Join(names, ", "), iter)
 	p.skipNL()
 	s.Body = p.parseBody()
 	s.S = p.spanFrom(start)
@@ -1898,7 +1939,7 @@ func (p *parser) parseHeaderBody(keyword string, header Expr) *Block {
 		p.skipBraces()
 		lit := t.S.Join(p.toks[p.pos-1].Span)
 		p.errorf(diag.EUnsupportedSyntax, lit, "a typed literal in a %s header must be parenthesized: its { would start the body", keyword).
-			WithEdit(lit, "("+lit.Text()+")", "write (%s)", lit.Text())
+			WithFix(lit, "("+lit.Text()+")", "write (%s)", lit.Text())
 		if header != nil {
 			p.damaged = append(p.damaged, header.Span().Join(p.toks[p.pos-1].Span))
 		}
@@ -1932,12 +1973,18 @@ func (p *parser) parseHeaderBody(keyword string, header Expr) *Block {
 		p.errorf(diag.EUnexpectedToken, t.Span, "expected '{' after the %s header, found %s", keyword, describe(t))
 		return &Block{S: t.Span.At()}
 	}
+	reported := p.sink.Len()
 	stmt := p.parseStmt()
 	if stmt == nil {
 		return &Block{S: t.Span.At()}
 	}
-	p.errorf(diag.EUnsupportedSyntax, stmt.Span(), "%s bodies are blocks", keyword).
-		WithEdit(stmt.Span(), "{ "+stmt.Span().Text()+" }", "write { %s }", stmt.Span().Text())
+	d := p.errorf(diag.EUnsupportedSyntax, stmt.Span(), "%s bodies are blocks", keyword)
+	if p.sink.Len() == reported+1 {
+		d.WithFix(stmt.Span(), "{ "+stmt.Span().Text()+" }", "write { %s }", stmt.Span().Text())
+	} else {
+		// The statement itself did not parse: braces would not mend it.
+		d.WithHint("write the body in braces: { ... }")
+	}
 	return &Block{Stmts: []Stmt{stmt}, S: stmt.Span()}
 }
 
@@ -2296,7 +2343,7 @@ func (p *parser) parsePrimary() Expr {
 		p.next()
 		if t.Text == "this" {
 			p.errorf(diag.EUnsupportedSyntax, t.Span, "the receiver is called self").
-				WithEdit(t.Span, "self", "write self")
+				WithFix(t.Span, "self", "write self")
 			return &ThisExpr{S: t.Span}
 		}
 		return &Ident{Name: t.Text, S: t.Span}
@@ -2584,7 +2631,7 @@ func (p *parser) parseWhen() Expr {
 		p.skipNL()
 		end := p.expect(RPAREN, "to close the when subject")
 		p.errorf(diag.EUnsupportedSyntax, open.Span.Join(end.Span), "a when subject is bound with :=").
-			WithEdit(open.Span.Join(end.Span), w.Bind.Name+" := "+w.Subject.Span().Text(), "write when %s := %s { ... }", w.Bind.Name, w.Subject.Span().Text())
+			WithFix(open.Span.Join(end.Span), w.Bind.Name+" := "+w.Subject.Span().Text(), "write when %s := %s { ... }", w.Bind.Name, w.Subject.Span().Text())
 	case p.at(THIS) && p.peek(1).Kind == DEFINE:
 		p.selfAsName()
 		fallthrough
@@ -2670,7 +2717,7 @@ func (p *parser) parseSelect() Stmt {
 				names[i] = id.Name
 			}
 			p.errorf(diag.EUnsupportedSyntax, kw.Span, "a select branch binds a received value with :=").
-				WithHint("write %s := %s -> ...", strings.Join(names, ", "), sc.Op.Span().Text())
+				WithFix(kw.Span.Join(sc.Op.Span().At()), strings.Join(names, ", ")+" := ", "write %s := %s -> ...", strings.Join(names, ", "), sc.Op.Span().Text())
 		case p.at(IDENT) && (p.peek(1).Kind == DEFINE || p.peek(1).Kind == COMMA):
 			sc.Names = []*Ident{p.parseIdent("")}
 			for p.accept(COMMA) {
