@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
 <title>Lyth</title>
-<rect width="64" height="64" rx="14" fill="#1d6fd8"/>
-<path d="M21 16h8v25h17v7H21z" fill="#fff"/>
+<rect width="64" height="64" rx="14" fill="#1d5fc0"/>
+<path transform="translate(9.36 13.13) scale(0.02663)" d="M99 1338L274 1338L274 78L99 78L99 0L1138 0L1138 78L964 78L964 1338L1282 1338L1533 883L1601 883L1601 1417L99 1417L99 1338Z" fill="#fff"/>
 </svg>

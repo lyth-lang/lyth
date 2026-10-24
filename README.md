@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="website/public/logo.svg" alt="Lyth" width="128">
+</p>
+
 # Lyth
 
 Lyth is a statically typed language that compiles to readable Go. It takes the

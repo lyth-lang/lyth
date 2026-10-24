@@ -58,6 +58,7 @@ export default defineConfig({
 		lythDocs(),
 		starlight({
 			title: 'Lyth',
+			logo: { src: './src/assets/logo.svg' },
 			description: "Lyth compiles to readable Go: less boilerplate, simpler error handling, nil safety at compile time, and shorter code that is easier to review, with every Go package and Go's speed.",
 			favicon: '/favicon.svg',
 			social: repoUrl ? [{ icon: 'github', label: 'Source', href: repoUrl }] : [],
