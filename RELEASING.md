@@ -34,8 +34,7 @@ the language server changes.
 1. Bump `version` in `editors/vscode-lyth/package.json` and commit.
 2. Tag and push the same version: `git tag vscode-v0.1.1 && git push origin vscode-v0.1.1`.
 3. `.github/workflows/vscode-release.yml` runs the extension's tests, packages
-   `lyth-0.1.1.vsix`, publishes it to Open VSX (repository secret `OVSX_PAT`, a token from
-   https://open-vsx.org/user-settings/tokens), and attaches it to a GitHub release. The run's
+   `lyth-0.1.1.vsix`, attaches it to a GitHub release, and publishes it to Open VSX. The run's
    summary links to every page above.
 4. VS Code Marketplace, by hand: download the `.vsix` from the GitHub release, open
    https://marketplace.visualstudio.com/manage/publishers/lyth-lang, choose **Update** in the
@@ -43,6 +42,17 @@ the language server changes.
 
 To check a change without publishing, run the workflow by hand (Actions, "Release VS Code
 extension", Run workflow): it runs the tests and keeps the `.vsix` as an artifact.
+
+### Open VSX trusted publishing
+
+Open VSX publishes without a stored token: the workflow is registered as the trusted
+publisher of `lyth-lang.lyth` at https://open-vsx.org/user-settings/trusted-publishers
+(repository `lyth-lang/lyth`, workflow `vscode-release.yml`), and authenticates with GitHub's
+short-lived OIDC token (`ovsx publish --trusted-publishing`). Registering needs the owner role
+in the `lyth-lang` namespace, which comes with the approved ownership claim. Until then, or if
+the registration is ever lost, upload the `.vsix` at https://open-vsx.org/publish, or add an
+`OVSX_PAT` secret (a token from https://open-vsx.org/user-settings/tokens), which the workflow
+uses instead.
 
 ### Why the Marketplace upload is manual
 

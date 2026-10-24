@@ -4,9 +4,9 @@
 # ("Run workflow") to test and package without publishing; the .vsix is kept as an
 # artifact. RELEASING.md lists where the extension is published.
 #
-# Needs the repository secret OVSX_PAT (an Open VSX access token). The VS Code
-# Marketplace takes the .vsix from the GitHub release by hand, unless the secret
-# VSCE_PAT is set (see RELEASING.md for why it usually isn't).
+# Open VSX accepts the workflow as the trusted publisher of lyth-lang.lyth (no secret;
+# an OVSX_PAT secret, if set, is used instead). The VS Code Marketplace takes the .vsix
+# from the GitHub release by hand, unless the secret VSCE_PAT is set (see RELEASING.md).
 name: Release VS Code extension
 
 on:
@@ -16,6 +16,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write # Open VSX trusted publishing
 
 jobs:
   release:
@@ -59,17 +60,22 @@ jobs:
           name: lyth-vscode-${{ env.VERSION }}
           path: editors/vscode-lyth/lyth-${{ env.VERSION }}.vsix
 
-      - name: Publish to Open VSX
-        if: github.event_name == 'push'
-        env:
-          OVSX_PAT: ${{ secrets.OVSX_PAT }}
-        run: npx --yes ovsx@1.2.0 publish "lyth-$VERSION.vsix"
-
       - name: Create the GitHub release
         if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" "lyth-$VERSION.vsix" --title "Lyth for VS Code $VERSION" --generate-notes
+
+      - name: Publish to Open VSX
+        if: github.event_name == 'push'
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          if [ -n "$OVSX_PAT" ]; then
+            npx --yes ovsx@1.2.0 publish "lyth-$VERSION.vsix"
+          else
+            npx --yes ovsx@1.2.0 publish "lyth-$VERSION.vsix" --trusted-publishing
+          fi
 
       - name: Publish to the VS Code Marketplace
         if: github.event_name == 'push'
