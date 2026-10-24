@@ -1,0 +1,96 @@
+// constraints: type parameters of generic types constrained by Lyth
+// interfaces (plain or generic, declared before or after), instances in
+// fields, aliases, and signatures that are written before the methods their
+// constraints ask for, F-bounded interfaces, and embedded constraint
+// interfaces. Instances in declarations are validated once every type is
+// defined and every method declared.
+import "fmt"
+
+// Instances used before the types and methods they need are declared.
+struct Holder {
+    plain: Cache[counter]
+    generic: Store[counter]
+    printed: Box[counter]
+}
+
+typealias CounterStore = Store[counter]
+
+func describe(b: Box[counter]): string = b.s.String()
+
+struct Cache[S: Plain] {
+    s: S
+}
+
+func Cache[S].value(): int = self.s.Get()
+
+struct Store[S: Source[int]] {
+    s: S
+}
+
+func Store[S].value(): int = self.s.Get() * 10
+
+struct Box[S: fmt.Stringer] {
+    s: S
+}
+
+interface Plain {
+    Get(): int
+}
+
+interface Source[T] {
+    Get(): T
+}
+
+// An F-bounded interface, and one that embeds a generic interface.
+struct Tree[T: Node[T]] {
+    root: T
+}
+
+func Tree[T].size(): int = self.root.Size()
+
+interface Node[T: Node[T]] {
+    Children(): []T
+    Size(): int
+}
+
+interface Both[S: Source[int]] {
+    Source[int]
+    Self(): S
+}
+
+func twice[S: Both[S]](b: S): int = b.Get() * 2
+
+struct counter {
+    n: int
+}
+
+func counter.Get(): int = self.n
+
+func counter.String(): string = "counter(${self.n})"
+
+func counter.Self(): counter = self
+
+struct leaf {
+    kids: []leaf
+}
+
+func leaf.Children(): []leaf = self.kids
+
+func leaf.Size(): int {
+    n := 1
+    for k in self.kids {
+        n += k.Size()
+    }
+    return n
+}
+
+func main() {
+    c := counter(n = 2)
+    h := Holder(plain = Cache(s = c), generic = Store(s = c), printed = Box(s = c))
+    alias: CounterStore = Store(s = counter(n = 3))
+    tree := Tree(root = leaf(kids = [leaf(kids = []), leaf(kids = [leaf(kids = [])])]))
+    fmt.Println(h.plain.value(), h.generic.value(), describe(h.printed), alias.value(), tree.size(), twice(c))
+}
+
+// Output:
+// 2 20 counter(2) 30 4 4

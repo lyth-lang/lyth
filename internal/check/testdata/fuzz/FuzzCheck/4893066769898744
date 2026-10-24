@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("interface Store[0]000000000}\ninterface A00000[(Store[*00")

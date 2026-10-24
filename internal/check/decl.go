@@ -59,6 +59,13 @@ func (c *Checker) aliasType(ts *TypeSym) types.Type {
 }
 
 func (c *Checker) resolveTypeDecls() {
+	c.defining = map[*types.TypeDecl]bool{}
+	for _, ts := range c.pkg.Types {
+		if ts.Decl != nil {
+			c.defining[ts.Decl] = true
+		}
+	}
+	defer c.finishPending()
 	// Type parameters first: aliases, fields, and signatures instantiate
 	// generic types, which needs the constraints.
 	for _, ts := range c.pkg.Types {
@@ -95,6 +102,8 @@ func (c *Checker) resolveTypeDecls() {
 			c.resolveEnum(ts.Decl, d)
 		}
 	}
+	c.checkEmbedCycles()
+	var ifaces []*gotypes.Interface
 	for _, ts := range c.pkg.Types {
 		decl := ts.Decl
 		switch decl.Kind {
@@ -116,11 +125,14 @@ func (c *Checker) resolveTypeDecls() {
 			}
 			var embeds []gotypes.Type
 			for _, e := range decl.Embeds {
-				embeds = append(embeds, types.Lower(e))
+				// An embed that failed to resolve was reported already.
+				if g := types.Lower(e); g != nil && e != types.Invalid {
+					embeds = append(embeds, g)
+				}
 			}
 			iface := gotypes.NewInterfaceType(funcs, embeds)
-			iface.Complete()
 			decl.Shadow.SetUnderlying(iface)
+			ifaces = append(ifaces, iface)
 		case types.EnumDecl:
 			decl.Shadow.SetUnderlying(gotypes.Typ[gotypes.Int])
 			recv := gotypes.NewVar(token.NoPos, c.shadow, "", decl.Shadow)
@@ -129,6 +141,51 @@ func (c *Checker) resolveTypeDecls() {
 			}
 		}
 	}
+	// An interface's method set includes its embedded interfaces', which may
+	// be declared later in the package: complete them once all are defined.
+	for _, iface := range ifaces {
+		iface.Complete()
+	}
+}
+
+// finishPending sets the constraints that waited for the package's types
+// to be defined.
+func (c *Checker) finishPending() {
+	c.defining = nil
+	for _, set := range c.pendingConstraints {
+		set()
+	}
+	c.pendingConstraints = nil
+}
+
+// validatePendingInstances validates the instances written in
+// declarations, now that every type is defined and every method declared.
+func (c *Checker) validatePendingInstances() {
+	c.declaring = false
+	pending := c.pendingChecks
+	c.pendingChecks = nil
+	for _, check := range pending {
+		check()
+	}
+}
+
+// undefined reports whether t names a Lyth type whose definition is not set
+// yet: go/types cannot compute the type set of such a constraint, nor
+// expand an instance of it.
+func (c *Checker) undefined(t types.Type) bool {
+	n, ok := types.Base(t).(*types.Named)
+	if !ok || n.Decl == nil || c.defining == nil {
+		return false
+	}
+	if c.defining[n.Decl] {
+		return true
+	}
+	for _, a := range n.Args {
+		if c.undefined(a) {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveEnum records the entries of an enum and its generated String
@@ -421,7 +478,12 @@ func (c *Checker) typeParamScope(tps []*syntax.TypeParam, out []*types.TypeParam
 				}
 			}
 			out[i].Constraint = constraint
-			out[i].Go.SetConstraint(types.Lower(constraint))
+			if c.undefined(constraint) {
+				tp, gc := out[i].Go, types.Lower(constraint)
+				c.pendingConstraints = append(c.pendingConstraints, func() { tp.SetConstraint(gc) })
+			} else {
+				out[i].Go.SetConstraint(types.Lower(constraint))
+			}
 		}
 	})
 	return scope
@@ -1345,4 +1407,37 @@ func conformanceNote(decl *types.TypeDecl, iface types.Type) (note string, casca
 		}
 	}
 	return fmt.Sprintf("missing method %s: %s", name, want), false
+}
+
+// checkEmbedCycles reports interfaces of this package that embed
+// themselves, directly or through other interfaces (Go: invalid recursive
+// type), and removes the embedding that closes each cycle.
+func (c *Checker) checkEmbedCycles() {
+	state := map[*types.TypeDecl]int{} // 1 visiting, 2 done
+	var visit func(d *types.TypeDecl) bool
+	visit = func(d *types.TypeDecl) bool {
+		switch state[d] {
+		case 1:
+			return true
+		case 2:
+			return false
+		}
+		state[d] = 1
+		kept := d.Embeds[:0]
+		for _, e := range d.Embeds {
+			if n, ok := types.Base(e).(*types.Named); ok && n.Decl != nil && n.Decl.Kind == types.InterfaceDecl && visit(n.Decl) {
+				c.errorf(diag.EInvalidUse, d.Span, "interface %s embeds itself through %s", d.Name, n.Decl.Name)
+				continue
+			}
+			kept = append(kept, e)
+		}
+		d.Embeds = kept
+		state[d] = 2
+		return false
+	}
+	for _, ts := range c.pkg.Types {
+		if ts.Decl != nil && ts.Decl.Kind == types.InterfaceDecl {
+			visit(ts.Decl)
+		}
+	}
 }

@@ -126,6 +126,19 @@ from their `check.Package`.
 2. Resolve imports.
 3. Resolve type declarations (two passes, so recursive types work), then struct
    fields and interface methods, then function signatures. Build shadow objects.
+   Declaration order within a package does not matter, so three things wait
+   for the declarations they depend on:
+   - A type parameter's constraint that names a Lyth type of the package
+     (`struct Cache[S: Store[int]]`, `struct Box[S: Plain]`) is given to
+     `go/types` only after every type has its definition; `go/types` cannot
+     compute the type set of an interface whose definition is not set.
+   - Interfaces are completed (their method sets computed) after all are
+     defined, since one may embed an interface declared later. Embedding
+     cycles are reported (E0216) and removed first.
+   - An instance written in a declaration (a field `Box[mem]`, a parameter
+     `Cache[T]`, an alias) is checked against its constraints only after all
+     methods are declared, because `mem`'s methods may come later in the
+     file. Instances in bodies are checked as they are met.
 4. Check top-level initializers, then function bodies (each independent, so
    parallelizable later).
 5. Flow analyses per body: definite return, smart-cast narrowing, mutability,

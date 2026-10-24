@@ -3,6 +3,7 @@ package check
 import (
 	"go/constant"
 	gotypes "go/types"
+	"strings"
 
 	"github.com/lyth-lang/lyth/internal/diag"
 	"github.com/lyth-lang/lyth/internal/source"
@@ -200,12 +201,16 @@ func (c *Checker) lythTypeRef(ts *TypeSym, te *syntax.NamedType) types.Type {
 // validInstance reports whether the type arguments of a generic Lyth type
 // satisfy its constraints, reporting an error at span if not.
 func (c *Checker) validInstance(inst *types.Named, span source.Span) bool {
+	if c.declaring {
+		// An instance in a declaration: its arguments may lack methods that
+		// are declared later, and its constraints may not be set yet.
+		c.pendingChecks = append(c.pendingChecks, func() { c.validInstance(inst, span) })
+		return true
+	}
 	if named := inst.Decl.Shadow; named != nil {
 		tps := named.TypeParams()
 		for i := range tps.Len() {
 			if tps.At(i).Constraint() == nil {
-				// struct Page[A: Page[A]]: the constraints are still being
-				// resolved, so the instance cannot be checked against them.
 				c.errorf(diag.EInvalidUse, span, "a type parameter's constraint cannot refer to %s, the type being declared", inst.Decl.Name)
 				return false
 			}
@@ -214,13 +219,44 @@ func (c *Checker) validInstance(inst *types.Named, span source.Span) bool {
 	args := make([]gotypes.Type, len(inst.Args))
 	for i, a := range inst.Args {
 		args[i] = types.Lower(a)
+		if unboundTypeParam(args[i]) {
+			// func f[T: Page[T]]: T's own constraint is being resolved, so
+			// go/types cannot judge the instance yet (nor can Lyth).
+			return true
+		}
 	}
 	if _, err := gotypes.Instantiate(nil, inst.Decl.Shadow, args, true); err != nil {
 		c.errorf(diag.ETypeArgs, span, "invalid type arguments for %s", inst.Decl.Name).
-			WithNote("%s", translateGoMessage(err.Error()))
+			WithNote("%s", c.lythNames(translateGoMessage(err.Error())))
 		return false
 	}
 	return true
+}
+
+// unboundTypeParam reports whether t contains a type parameter whose
+// constraint is not set yet.
+func unboundTypeParam(t gotypes.Type) bool {
+	switch t := t.(type) {
+	case *gotypes.TypeParam:
+		return t.Constraint() == nil
+	case *gotypes.Pointer:
+		return unboundTypeParam(t.Elem())
+	case *gotypes.Slice:
+		return unboundTypeParam(t.Elem())
+	case *gotypes.Array:
+		return unboundTypeParam(t.Elem())
+	case *gotypes.Map:
+		return unboundTypeParam(t.Key()) || unboundTypeParam(t.Elem())
+	case *gotypes.Chan:
+		return unboundTypeParam(t.Elem())
+	case *gotypes.Named:
+		for i := range t.TypeArgs().Len() {
+			if unboundTypeParam(t.TypeArgs().At(i)) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // oldTypeNames maps the type names of Lyth before ADR 0031, and Kotlin's,
@@ -331,9 +367,27 @@ func (c *Checker) qualifiedType(pkg *Package, te *syntax.NamedType) types.Type {
 			args[i] = c.resolveType(a)
 			goArgs[i] = types.Lower(args[i])
 		}
+		report := func(err error) {
+			c.errorf(diag.ETypeArgs, te.S, "invalid type arguments for %s.%s: %s", pkg.Name, name, c.lythNames(translateGoMessage(err.Error())))
+		}
+		if c.declaring {
+			// Validate once the package's methods are declared (see
+			// validInstance).
+			inst, err := gotypes.Instantiate(nil, named, goArgs, false)
+			if err != nil {
+				report(err)
+				return types.Invalid
+			}
+			c.pendingChecks = append(c.pendingChecks, func() {
+				if _, err := gotypes.Instantiate(nil, named, goArgs, true); err != nil {
+					report(err)
+				}
+			})
+			return &types.Named{Go: inst.(*gotypes.Named), Args: args}
+		}
 		inst, err := gotypes.Instantiate(nil, named, goArgs, true)
 		if err != nil {
-			c.errorf(diag.ETypeArgs, te.S, "invalid type arguments for %s.%s: %s", pkg.Name, name, translateGoMessage(err.Error()))
+			report(err)
 			return types.Invalid
 		}
 		return &types.Named{Go: inst.(*gotypes.Named), Args: args}
@@ -343,4 +397,73 @@ func (c *Checker) qualifiedType(pkg *Package, te *syntax.NamedType) types.Type {
 	}
 	// A type written in Lyth source is non-null by default.
 	return types.Base(types.Lift(t))
+}
+
+// lythNames rewrites the qualifiers go/types puts on names, which are package
+// paths (lythrun.mem, example.com/app/lib.Store), the way Lyth writes them:
+// this package's names unqualified, other packages' by package name (mem,
+// lib.Store).
+func (c *Checker) lythNames(msg string) string {
+	quals := map[string]string{c.shadow.Path(): ""}
+	var addGo func(p *gotypes.Package)
+	addGo = func(p *gotypes.Package) {
+		if _, ok := quals[p.Path()]; !ok {
+			quals[p.Path()] = p.Name() + "."
+			for _, q := range p.Imports() {
+				addGo(q)
+			}
+		}
+	}
+	var add func(p *Package)
+	add = func(p *Package) {
+		if _, ok := quals[p.Path]; ok {
+			return
+		}
+		quals[p.Path] = p.Name + "."
+		for _, q := range p.Imports {
+			add(q)
+		}
+		if !p.Lyth && p.Go != nil {
+			for _, q := range p.Go.Imports() {
+				addGo(q)
+			}
+		}
+	}
+	for _, p := range c.pkg.Imports {
+		add(p)
+	}
+	var b strings.Builder
+	for i := 0; i < len(msg); {
+		j := i
+		for j < len(msg) && pathByte(msg[j]) {
+			j++
+		}
+		if j == i {
+			b.WriteByte(msg[i])
+			i++
+			continue
+		}
+		b.WriteString(requalify(msg[i:j], quals))
+		i = j
+	}
+	return b.String()
+}
+
+// requalify replaces the package path that qualifies word (lib.Store,
+// example.com/app/lib.Store.Get) by its entry in quals, if it has one.
+func requalify(word string, quals map[string]string) string {
+	for k := strings.LastIndexByte(word, '/') + 1; k < len(word); k++ {
+		if word[k] == '.' {
+			if q, ok := quals[word[:k]]; ok {
+				return q + word[k+1:]
+			}
+		}
+	}
+	return word
+}
+
+// pathByte reports whether b can appear in a package path or a name.
+func pathByte(b byte) bool {
+	return 'a' <= b && b <= 'z' || 'A' <= b && b <= 'Z' || '0' <= b && b <= '9' ||
+		b == '_' || b == '-' || b == '.' || b == '/' || b == '~' || b >= 0x80
 }

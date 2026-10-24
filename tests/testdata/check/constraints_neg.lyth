@@ -1,0 +1,53 @@
+// Constraints on generic types, checked once every type and method is
+// declared.
+
+struct Holder {
+    c: Cache[int] // ERROR E0213 "int does not satisfy Source[int] (missing method Get)"
+    p: Plainly[counter] // ERROR E0213 "counter does not satisfy Plain"
+}
+
+struct Cache[S: Source[int]] {
+    s: S
+}
+
+struct Plainly[S: Plain] {
+    s: S
+}
+
+struct A[T: Missing] { // ERROR E0101 "undefined type Missing"
+    x: T
+}
+
+struct B[T: Source[int, string]] { // ERROR E0213 "Source takes 1 type argument (T), got 2"
+    x: T
+}
+
+struct C[T: counter] { // ERROR E0201 "the constraint of T must be an interface, not counter"
+    x: T
+}
+
+struct Page[P: Page[P]] { // ERROR E0201 "the constraint of P must be an interface, not Page[P]"
+    x: P
+}
+
+interface Source[T] {
+    Get(): T
+}
+
+interface Plain {
+    Get(): int
+}
+
+struct counter {
+    n: string
+}
+
+func counter.Get(): string = self.n
+
+// Calls name the types as Lyth writes them.
+func total[S: Plain](s: S): int = s.Get()
+
+func calls() {
+    total(counter(n = "a")) // ERROR E0213 "counter does not satisfy Plain (wrong type for method Get)"
+    total[counter](counter(n = "a")) // ERROR E0213 "counter does not satisfy Plain (wrong type for method Get)"
+}

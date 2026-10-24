@@ -547,6 +547,12 @@ func (c *Checker) typeCall(e *syntax.CallExpr, t types.Type, args []*syntax.Arg,
 			WithHint("or string(rune(%s)) for a character", args[0].Value.Span().Short())
 		return invalid(e)
 	}
+	if unboundTypeParam(types.Lower(src)) || unboundTypeParam(types.Lower(t)) {
+		// A conversion inside a type parameter's own constraint
+		// (func f[T: [T(1)]int]): the parameter cannot be used yet.
+		c.errorf(diag.EInvalidUse, e.S, "%s cannot be converted here: a type parameter's constraint cannot use the parameters it declares", args[0].Value.Span().Short())
+		return invalid(e)
+	}
 	if !gotypes.ConvertibleTo(types.Lower(src), types.Lower(t)) {
 		d := c.errorf(diag.EConversion, e.S, "cannot convert %s (type %s) to %s", args[0].Value.Span().Short(), x.typ, t)
 		if types.IsString(src) && types.IsNumeric(t) {

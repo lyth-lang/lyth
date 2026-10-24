@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -656,5 +658,252 @@ func main() {}
 	}
 	if got := render(s.Sink.All()); !strings.Contains(got, "shapes.Shape is sealed: only types declared in package shapes can implement it") {
 		t.Fatalf("missing sealed error:\n%s", got)
+	}
+}
+
+// TestGenericConstraintsAcrossPackages instantiates the generic types of a
+// Lyth package and of a Go package, constrained by their own interfaces, in
+// fields, aliases, and signatures written before the types and methods the
+// constraints need (in the same file and in the files around it), and
+// constrains local generic types by the imported interfaces. Invalid type
+// arguments in the same places are reported in Lyth's names.
+func TestGenericConstraintsAcrossPackages(t *testing.T) {
+	files := map[string]string{
+		"lib/lib.lyth": `// Cache is declared before the interfaces that constrain it.
+struct Cache[S: Store[int]] {
+    Src: S
+}
+
+func Cache[S].Value(): int = self.Src.Get(1) * 10
+
+struct Named[N: Namer] {
+    N: N
+}
+
+func Named[N].Label(): string = "<" + self.N.Name() + ">"
+
+func Lookup[S: Store[int]](s: S, k: int): int = s.Get(k)
+
+interface Store[K] {
+    Get(k: K): int
+}
+
+interface Namer {
+    Name(): string
+}
+`,
+		"golib/golib.go": `package golib
+
+type Store[K any] interface{ Get(K) int }
+
+type Cache[S Store[int]] struct{ Src S }
+
+func (c Cache[S]) Value() int { return c.Src.Get(2) * 100 }
+`,
+		"a_early.lyth": `// early and its methods come before the declarations that use them.
+struct early {
+    base: int
+}
+
+func early.Get(k: int): int = self.base + k
+
+func early.Name(): string = "early"
+`,
+		"b_uses.lyth": `import "fmt"
+import "xgen/golib"
+import "xgen/lib"
+
+// Instances in fields, aliases, and signatures, of types declared in an
+// earlier file (early) and a later one (late).
+struct App {
+    cache: lib.Cache[late]
+    named: lib.Named[late]
+    goCache: golib.Cache[late]
+    wrap: WrapLate
+    early: lib.Cache[early]
+    earlyGo: golib.Cache[early]
+}
+
+typealias WrapLate = Wrap[late]
+
+typealias LateCache = lib.Cache[late]
+
+typealias LateGoCache = golib.Cache[late]
+
+interface Maker {
+    Make(): lib.Cache[late]
+}
+
+// Local generic types and functions constrained by imported interfaces.
+struct Wrap[S: lib.Store[int]] {
+    s: S
+}
+
+func Wrap[S].Value(): int = self.s.Get(3)
+
+struct Holder[S: lib.Store[int]] {
+    c: lib.Cache[S]
+}
+
+struct GoHolder[S: golib.Store[int]] {
+    c: golib.Cache[S]
+}
+
+struct Pair[S: golib.Store[int], N: lib.Namer] {
+    s: S
+    n: N
+}
+
+func Pair[S, N].String(): string = "${self.n.Name()}:${self.s.Get(4)}"
+
+// Generic interfaces that embed imported generic interfaces.
+interface Keyed[K] {
+    lib.Store[K]
+    lib.Namer
+}
+
+interface GoKeyed[K] {
+    golib.Store[K]
+}
+
+struct Both[S: Keyed[int], G: GoKeyed[int]] {
+    s: S
+    g: G
+}
+
+func Both[S, G].String(): string = "${self.s.Name()}/${self.s.Get(5)}/${self.g.Get(6)}"
+
+func total[S: lib.Store[int]](s: S): int = s.Get(7)
+
+func describe(c: lib.Cache[late], g: golib.Cache[late], e: LateCache): string = "${c.Value()} ${g.Value()} ${e.Value()}"
+
+func cacheOf(l: late): lib.Cache[late] = lib.Cache(Src = l)
+
+func newApp(l: late, e: early): App = App(
+    cache = cacheOf(l),
+    named = lib.Named(N = l),
+    goCache = golib.Cache[late](Src = l),
+    wrap = Wrap(s = l),
+    early = lib.Cache(Src = e),
+    earlyGo = golib.Cache[early](Src = e),
+)
+
+func lateCaches(l: late): (LateCache, LateGoCache) {
+    return lib.Cache(Src = l), golib.Cache[late](Src = l)
+}
+
+func main() {
+    l := late(base = 100)
+    e := early(base = 10)
+    app := newApp(l, e)
+    fmt.Println(app.cache.Value(), app.named.Label(), app.goCache.Value(), app.wrap.Value())
+    fmt.Println(app.early.Value(), app.earlyGo.Value(), lib.Lookup(e, 2), total(l))
+    fmt.Println(describe(app.cache, app.goCache, app.cache))
+    lc, lg := lateCaches(l)
+    m: Maker = l
+    fmt.Println(lc.Value(), lg.Value(), m.Make().Value())
+    h := Holder[early](c = lib.Cache(Src = e))
+    g := GoHolder[early](c = golib.Cache[early](Src = e))
+    fmt.Println(h.c.Value(), g.c.Value(), Pair(s = e, n = l), Both(s = l, g = e))
+}
+`,
+		"c_late.lyth": `import "xgen/lib"
+
+// late's methods are declared before the type itself.
+func late.Get(k: int): int = self.base + k
+
+func late.Name(): string = "late"
+
+func late.Make(): lib.Cache[late] = lib.Cache(Src = self)
+
+struct late {
+    base: int
+}
+`,
+	}
+	root := writeModule(t, "xgen", files)
+	s := compileModule(t, root, false)
+	bin := filepath.Join(root, "app.bin")
+	if ok, err := s.GoBuild(bin, []string{"xgen"}, nil); err != nil || !ok {
+		t.Fatalf("build failed: %v\n%s", err, render(s.Sink.All()))
+	}
+	out, err := exec.Command(bin).Output()
+	want := "1010 <late> 10200 103\n110 1200 12 107\n1010 10200 1010\n1010 10200 1010\n110 1200 late:14 late/105/16"
+	if err != nil || strings.TrimSpace(string(out)) != want {
+		t.Fatalf("output %q, err %v", out, err)
+	}
+
+	// Type arguments that do not satisfy the imported constraints.
+	delete(files, "a_early.lyth")
+	delete(files, "c_late.lyth")
+	delete(files, "b_uses.lyth")
+	files["main.lyth"] = `import "xgen/golib"
+import "xgen/lib"
+
+struct App {
+    cache: lib.Cache[bad]
+    goCache: golib.Cache[bad]
+    wrap: Wrap[bad]
+    ptr: lib.Cache[ptrOnly]
+}
+
+typealias BadCache = lib.Cache[bad]
+
+typealias BadGoCache = golib.Cache[bad]
+
+struct Wrap[S: lib.Store[int]] {
+    s: S
+}
+
+struct Holder[S: lib.Namer] {
+    c: lib.Cache[S]
+}
+
+func use(c: lib.Cache[bad], g: golib.Cache[bad]) {}
+
+func main() {
+    println(lib.Lookup(bad(), 1))
+}
+
+struct bad {
+    n: int
+}
+
+struct ptrOnly {
+    n: int
+}
+
+func *ptrOnly.Get(k: int): int = k
+`
+	root = writeModule(t, "xgen", files)
+	s, err = build.Compile(&build.Config{WorkDir: root, Stdout: io.Discard, Stderr: io.Discard}, build.Target{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const missing = "bad does not satisfy lib.Store[int] (missing method Get)"
+	const goMissing = "invalid type arguments for golib.Cache: bad does not satisfy golib.Store[int] (missing method Get)"
+	wantDiags := []string{
+		"5: invalid type arguments for Cache; " + missing,
+		"6: " + goMissing,
+		"7: invalid type arguments for Wrap; " + missing,
+		"8: invalid type arguments for Cache; ptrOnly does not satisfy lib.Store[int] (method Get has pointer receiver)",
+		"11: invalid type arguments for Cache; " + missing,
+		"13: " + goMissing,
+		"20: invalid type arguments for Cache; S does not satisfy lib.Store[int] (missing method Get)",
+		"23: invalid type arguments for Cache; " + missing,
+		"23: " + goMissing,
+		"26: invalid type arguments for lib.Lookup (S = bad); " + missing,
+	}
+	var got []string
+	for _, d := range s.Sink.All() {
+		got = append(got, strconv.Itoa(d.Span.StartPos().Line)+": "+strings.Join(append([]string{d.Message}, d.Notes...), "; "))
+	}
+	slices.Sort(got)
+	slices.Sort(wantDiags)
+	if !slices.Equal(got, wantDiags) {
+		t.Errorf("diagnostics:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(wantDiags, "\n"))
+	}
+	if msgs := render(s.Sink.All()); strings.Contains(msgs, "xgen/") || strings.Contains(msgs, "xgen.") {
+		t.Errorf("a Go package path reached the diagnostics:\n%s", msgs)
 	}
 }

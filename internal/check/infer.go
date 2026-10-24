@@ -111,7 +111,7 @@ func (c *Checker) inferCall(e *syntax.CallExpr, sig *types.Signature, args []*sy
 			names = append(names, tp.Name+" = "+bind[tp.Go].String())
 		}
 		c.errorf(diag.ETypeArgs, e.Fun.Span(), "invalid type arguments for %s (%s)", e.Fun.Span().Short(), strings.Join(names, ", ")).
-			WithNote("%s", translateGoMessage(err.Error()))
+			WithNote("%s", c.lythNames(translateGoMessage(err.Error())))
 		return nil, nil
 	}
 	res := substSig(sig, bind)

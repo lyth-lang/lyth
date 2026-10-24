@@ -50,6 +50,19 @@ type Checker struct {
 	preArgs   map[syntax.Expr]*operand // arguments already checked during inference
 	aliases   []*TypeSym
 	damaged   map[*source.File][]source.Span // syntax.File.Damaged by source file
+	// While the package's types are being defined (resolveTypeDecls), a
+	// constraint that names a Lyth type without its definition yet
+	// (struct Cache[S: Store[int]], struct Box[S: Plain]) is set once all
+	// types are defined.
+	defining           map[*types.TypeDecl]bool
+	pendingConstraints []func()
+	// While declarations are resolved (types, then functions and methods),
+	// instances written in them (a field Box[mem], a parameter Cache[T])
+	// are validated against their constraints only once every type has its
+	// definition and every method is declared: until then mem may not have
+	// the methods its constraint asks for.
+	declaring     bool
+	pendingChecks []func()
 }
 
 // funcCtx describes the function or lambda whose body is being checked.
@@ -106,8 +119,10 @@ func Check(conf *Config, pkgPath string, files []*syntax.File) *Package {
 	for _, f := range files {
 		c.resolveImports(f)
 	}
+	c.declaring = true
 	c.resolveTypeDecls()
 	c.resolveFuncDecls()
+	c.validatePendingInstances()
 	c.checkConformance()
 	c.resolveGlobals()
 	c.checkBodies()

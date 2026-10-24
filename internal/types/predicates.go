@@ -165,6 +165,9 @@ func TermsAll(t Type, f func(Type) bool) bool {
 // type set (the set is a subset of every such union), expanding unions of
 // interfaces, or nil when there is none.
 func typeSetTerms(constraint gotypes.Type) []gotypes.Type {
+	if constraint == nil {
+		return nil // a type parameter whose constraint is still being resolved
+	}
 	iface, ok := constraint.Underlying().(*gotypes.Interface)
 	if !ok {
 		return nil

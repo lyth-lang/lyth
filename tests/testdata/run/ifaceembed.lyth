@@ -1,0 +1,56 @@
+// ifaceembed: interfaces, generic or not, may embed interfaces declared
+// later in the package, and a type parameter may be constrained by an
+// instance of a generic interface (both crashed the checker before), whose
+// methods are seen with the instance's type arguments.
+interface Store[T] {
+    Reader[T]
+    Put(x: T)
+}
+
+interface Reader[T] {
+    Get(): T
+}
+
+interface Named {
+    Labeled
+}
+
+interface Labeled {
+    Label(): string
+}
+
+struct Cache[S: Store[int]] {
+    s: S
+}
+
+func Cache[S].value(): int = self.s.Get()
+
+func describe[S: Reader[string]](s: S): string = s.Get()
+
+struct label {
+    text: string
+}
+
+func label.Get(): string = self.text
+
+struct mem {
+    v: int
+}
+
+func mem.Get(): int = self.v
+
+func mem.Put(x: int) {}
+
+func mem.Label(): string = "mem ${self.v}"
+
+func main() {
+    s: Store[int] = mem(v = 3)
+    n: Named = mem(v = 4)
+    println(s.Get(), n.Label())
+    c := Cache(s = mem(v = 5))
+    println(c.value() + 1, describe(label(text = "ok")))
+}
+
+// Output:
+// 3 mem 4
+// 6 ok

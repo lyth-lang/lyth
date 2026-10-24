@@ -1,0 +1,15 @@
+// Interfaces that embed themselves, directly or through another interface,
+// are reported where the cycle closes.
+interface A {
+    B
+    F()
+}
+
+interface B { // ERROR E0216 "interface B embeds itself through A"
+    A
+    G()
+}
+
+interface Box[T] { // ERROR E0216 "interface Box embeds itself through Box"
+    Box[*T]
+}

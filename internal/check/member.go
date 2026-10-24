@@ -189,7 +189,12 @@ func (c *Checker) lookupMember(t types.Type, name string, id *syntax.Ident) *mem
 	case *types.TypeParam:
 		// The constraint's methods; a Lyth interface keeps its Lyth signatures.
 		if n, ok := b.Constraint.(*types.Named); ok && n.Decl != nil {
-			return c.lythMember(n.Decl, name, id)
+			// S: Store[int]: the constraint's methods with its arguments.
+			m := c.lythMember(n.Decl, name, id)
+			if bind := declBindings(n); m != nil && bind != nil {
+				m.typ = subst(m.typ, bind)
+			}
+			return m
 		}
 		return c.goMember(t, base, name, id)
 	case *types.Basic:
@@ -330,8 +335,24 @@ func (c *Checker) lookupMemberQuiet(t types.Type, name string) *member {
 	switch b := t.(type) {
 	case *types.Named:
 		if b.Decl != nil {
+			// A method of an embedded interface instance (Reader[T] in
+			// Store[T]) is seen with the instance's type arguments.
+			bind := declBindings(b)
 			if m := b.Decl.LookupMethod(name); m != nil {
-				return &member{kind: SelMethod, goName: m.GoName, typ: m.Sig, obj: m}
+				var mt types.Type = m.Sig
+				if bind != nil {
+					mt = subst(mt, bind)
+				}
+				return &member{kind: SelMethod, goName: m.GoName, typ: mt, obj: m}
+			}
+			for _, e := range b.Decl.Embeds {
+				et := types.Base(e)
+				if bind != nil {
+					et = subst(et, bind)
+				}
+				if mm := c.lookupMemberQuiet(et, name); mm != nil {
+					return mm
+				}
 			}
 			return nil
 		}
@@ -597,7 +618,7 @@ func (c *Checker) instantiateFunc(e *syntax.InstantiateExpr) *operand {
 	inst, err := gotypes.Instantiate(nil, sig.GoSig, goArgs, true)
 	if err != nil {
 		c.errorf(diag.ETypeArgs, e.S, "invalid type arguments for %s", e.X.Span().Short()).
-			WithNote("%s", translateGoMessage(err.Error()))
+			WithNote("%s", c.lythNames(translateGoMessage(err.Error())))
 		return invalid(e)
 	}
 	res := substSig(sig, bind)
