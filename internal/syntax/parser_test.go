@@ -285,6 +285,25 @@ func main() throws {
 	}
 }
 
+// A comment after code on its line belongs to that code, not to the next declaration or field.
+func TestTrailingCommentIsNotDoc(t *testing.T) {
+	f := mustParse(t, `struct User {  // header
+    // ID doc
+    ID: int64 // id
+    Name: string
+}  // closing
+
+func find() {}
+`)
+	st := f.Decls[0].(*StructDecl)
+	if st.Fields[0].Doc != "// ID doc" || st.Fields[1].Doc != "" {
+		t.Errorf("field docs = %q, %q; want %q, %q", st.Fields[0].Doc, st.Fields[1].Doc, "// ID doc", "")
+	}
+	if fn := f.Decls[1].(*FunDecl); fn.Doc != "" {
+		t.Errorf("func doc = %q, want none", fn.Doc)
+	}
+}
+
 func TestSyntaxErrors(t *testing.T) {
 	tests := []struct {
 		src  string

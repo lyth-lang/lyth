@@ -23,9 +23,11 @@ See [compiler.md §6.2](../design/compiler.md#62-generated-file-names).
 
 ### 1.2 Comments **[v0.1]**
 
-`// line comment` and `/* block comment */` (not nested). A run of line comments
-immediately preceding a declaration is its doc comment and is copied to the
-generated Go declaration so `go doc` works on Lyth packages.
+`// line comment` and `/* block comment */` (not nested). A run of line comments,
+each on a line of its own, immediately preceding a declaration, struct field, or
+interface method is its doc comment and is copied to the generated Go declaration
+so `go doc` works on Lyth packages. A comment after code on the same line is not a
+doc comment.
 
 ### 1.3 Newlines and statement termination **[v0.1]**
 

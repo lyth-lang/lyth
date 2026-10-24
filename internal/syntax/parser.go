@@ -386,7 +386,9 @@ func (p *parser) docFor(off int) string {
 			continue
 		}
 		pos := p.file.Position(c.Span.Start)
-		if pos.Line != expect || !strings.HasPrefix(c.Text, "//") || strings.HasPrefix(c.Text, "//go:") {
+		// a comment after code on its line (`ID: int64 // ...`) belongs to that code
+		trailing := strings.TrimSpace(string(p.file.Content[p.file.LineStart(pos.Line):c.Span.Start])) != ""
+		if pos.Line != expect || trailing || !strings.HasPrefix(c.Text, "//") || strings.HasPrefix(c.Text, "//go:") {
 			if pos.Line < expect {
 				break
 			}
