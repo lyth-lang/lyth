@@ -2,13 +2,20 @@
 title: The Lyth programming language
 description: Lyth is a statically typed language that compiles to readable Go. Less boilerplate, simpler error handling, nil safety at compile time, and shorter code that is easier to review, with every Go package and Go's speed.
 template: splash
+banner:
+  content: |
+    <strong>Built for AI coding agents.</strong> <code>lyth init</code> gives every project an <code>AGENTS.md</code>, and <code>lyth guide</code> teaches the installed version. <a href="/guide/ai-agents/">Set up your agent</a>
 hero:
   title: All of Go, in fewer lines
-  tagline: Lyth compiles to the Go you would write by hand, minus the boilerplate. An error propagates with one character, the compiler checks for nil, and code does more per line, so it is easier to read and review, whether you or an AI wrote it. Every Go package works as is, and programs run as fast as hand-written Go, because they are Go.
+  tagline: Lyth compiles to the Go you would write by hand, minus the boilerplate. An error propagates with one character, the compiler checks for nil, and code does more per line, so it is easier to read and review, whether you or an AI wrote it. AI coding agents learn Lyth from the compiler itself, which teaches the installed version and corrects what they get wrong. Every Go package works as is, and programs run as fast as hand-written Go, because they are Go.
   actions:
     - text: Take the tour
       link: /guide/tour/
       icon: right-arrow
+    - text: AI coding agents
+      link: /guide/ai-agents/
+      icon: rocket
+      variant: secondary
     - text: Lyth for Go programmers
       link: /guide/lyth-for-go-programmers/
       variant: minimal
@@ -20,9 +27,12 @@ hero:
 import LythToGo from '../../components/LythToGo.astro';
 import Changes from '../../generated/readme-changes.md';
 import Why from '../../generated/readme-why.md';
+import Agents from '../../generated/readme-agents.md';
 import QuickStart from '../../generated/readme-quickstart.md';
 
 <LythToGo />
+
+<Agents />
 
 <Why />
 

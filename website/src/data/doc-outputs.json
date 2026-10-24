@@ -1,5 +1,10 @@
 [
   {
+    "file": "docs/guide/ai-agents.md",
+    "source": "func greet(name: string): string {\n    msg := \"hello, ${name}\"\n    return msg\n}\n\nfunc main() {\n    println(greet(\"agent\"))\n}\n",
+    "output": "hello, agent\n"
+  },
+  {
     "file": "docs/guide/go-interop.md",
     "source": "import \"fmt\"\nimport \"net/url\"\nimport \"strings\"\nimport \"crypto/sha256\" as sha\n\nfunc main() {\n    u := url.Parse(\"https://example.com/a?b=1\") catch { return }\n    fmt.Println(u.Host, u.Query().Get(\"b\"))\n    user, domain, found := strings.Cut(\"ada@example.com\", \"@\")\n    println(user, domain, found)\n    println(len(sha.Sum256([]byte(\"lyth\"))))\n}\n",
     "output": "example.com 1\nada example.com true\n32\n"

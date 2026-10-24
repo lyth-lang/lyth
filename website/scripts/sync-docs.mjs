@@ -30,7 +30,8 @@ export const repoUrl = (process.env.LYTH_REPO_URL ?? '').replace(/\/$/, '');
  * here (ADRs are listed automatically). */
 export const groups = [
 	{ label: 'Learn', pages: ['guide/tour', 'guide/lyth-for-go-programmers', 'guide/cheatsheet'] },
-	{ label: 'Using Lyth', pages: ['guide/go-interop', 'guide/testing', 'guide/tooling', 'guide/writing-lyth', 'examples/todoapi'] },
+	{ label: 'AI coding agents', pages: ['guide/ai-agents', 'guide/writing-lyth'] },
+	{ label: 'Using Lyth', pages: ['guide/go-interop', 'guide/testing', 'guide/tooling', 'examples/todoapi'] },
 	{ label: 'Language reference', pages: ['spec/language', 'spec/types', 'spec/errors'] },
 	{
 		label: 'Design',
@@ -241,6 +242,7 @@ export function syncDocs() {
 	const pages = [
 		...srcs.map(([file, slug]) => page(file, slug, outputs)),
 		readmeSection('Why Lyth', 'why', outputs),
+		readmeSection('AI coding agents', 'agents', outputs),
 		readmeSection('What Lyth changes, and what it does not', 'changes', outputs),
 		readmeSection('Quick start', 'quickstart', outputs),
 		homeExample(),
