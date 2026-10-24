@@ -168,6 +168,7 @@ The documentation is published at [lyth.bkymz.net](https://lyth.bkymz.net); its 
   [diagnostics](docs/design/diagnostics.md), [collections](docs/design/collections.md),
   [benchmarks](docs/design/benchmarks.md)
 - [Architecture decision records](docs/adr/README.md)
+- [Releasing](RELEASING.md): where Lyth and its editor extensions are published, and how to release them
 
 The documentation site in [website/](website) is generated from these files;
 see [website/README.md](website/README.md).

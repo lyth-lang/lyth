@@ -1,0 +1,94 @@
+# Publishes the VS Code extension (editors/vscode-lyth) when a tag vscode-vX.Y.Z is
+# pushed: checks the tag against package.json, runs the extension's tests, packages one
+# .vsix, publishes it to Open VSX, and attaches it to a GitHub release. Run it by hand
+# ("Run workflow") to test and package without publishing; the .vsix is kept as an
+# artifact. RELEASING.md lists where the extension is published.
+#
+# Needs the repository secret OVSX_PAT (an Open VSX access token). The VS Code
+# Marketplace takes the .vsix from the GitHub release by hand, unless the secret
+# VSCE_PAT is set (see RELEASING.md for why it usually isn't).
+name: Release VS Code extension
+
+on:
+  push:
+    tags: ["vscode-v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: editors/vscode-lyth
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: editors/vscode-lyth/package-lock.json
+
+      - name: Check the tag against package.json
+        run: |
+          version=$(node -p "require('./package.json').version")
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF_NAME" != "vscode-v$version" ]; then
+            echo "::error::the tag $GITHUB_REF_NAME does not match version $version in package.json"
+            exit 1
+          fi
+
+      - run: npm ci
+
+      - name: Test
+        # the integration tests start VS Code, which needs a display
+        run: xvfb-run -a npm test
+
+      - name: Package
+        run: npx vsce package --out "lyth-$VERSION.vsix"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lyth-vscode-${{ env.VERSION }}
+          path: editors/vscode-lyth/lyth-${{ env.VERSION }}.vsix
+
+      - name: Publish to Open VSX
+        if: github.event_name == 'push'
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: npx --yes ovsx@1.2.0 publish "lyth-$VERSION.vsix"
+
+      - name: Create the GitHub release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" "lyth-$VERSION.vsix" --title "Lyth for VS Code $VERSION" --generate-notes
+
+      - name: Publish to the VS Code Marketplace
+        if: github.event_name == 'push'
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          if [ -n "$VSCE_PAT" ]; then
+            npx vsce publish --packagePath "lyth-$VERSION.vsix"
+          else
+            echo "::notice::Upload lyth-$VERSION.vsix from the GitHub release to the VS Code Marketplace by hand: https://marketplace.visualstudio.com/manage/publishers/lyth-lang"
+          fi
+
+      - name: Summary
+        if: github.event_name == 'push'
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## Lyth for VS Code $VERSION
+          - GitHub release with the .vsix: https://github.com/$GITHUB_REPOSITORY/releases/tag/$GITHUB_REF_NAME
+          - Open VSX: https://open-vsx.org/extension/lyth-lang/lyth
+          - VS Code Marketplace: https://marketplace.visualstudio.com/items?itemName=lyth-lang.lyth
+            (without VSCE_PAT, upload the .vsix at https://marketplace.visualstudio.com/manage/publishers/lyth-lang)
+          EOF
