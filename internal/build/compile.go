@@ -1,0 +1,602 @@
+package build
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	gotypes "go/types"
+	"io"
+	"os"
+	"path/filepath"
+	"slices"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/lyth-lang/lyth/internal/check"
+	"github.com/lyth-lang/lyth/internal/diag"
+	"github.com/lyth-lang/lyth/internal/emit"
+	"github.com/lyth-lang/lyth/internal/golang"
+	"github.com/lyth-lang/lyth/internal/lower"
+	"github.com/lyth-lang/lyth/internal/source"
+	"github.com/lyth-lang/lyth/internal/syntax"
+)
+
+// MinGoMinor is the minimum supported Go 1.x toolchain (generated code uses
+// Go 1.26 features such as new(expr)).
+const MinGoMinor = 26
+
+// supportImports are standard packages the generated code may use.
+var supportImports = []string{"errors", "fmt", "os", "slices", "strconv", "strings"}
+
+// Config configures a compilation session.
+type Config struct {
+	WorkDir          string // directory lyth was invoked from
+	Verbose          bool
+	NoLineDirectives bool
+	InTree           bool // generate for in-tree output (bare file names in //line)
+	Timings          bool // record phase durations (lyth -timings)
+	Tests            bool // also compile the _test.lyth files of the target packages
+	Tags             []string
+	Env              []string
+	Stdout, Stderr   io.Writer
+}
+
+// Package is one Lyth package in a session.
+type Package struct {
+	Dir       *pkgDir
+	Files     []*source.File
+	Syntax    []*syntax.File
+	Checked   *check.Package
+	Generated []*emit.Result
+	GoTypes   *gotypes.Package // types of the generated Go (validation)
+}
+
+// Session holds the state of one compilation.
+type Session struct {
+	cfg      *Config
+	Mod      *Module
+	Sink     *diag.Sink
+	Packages []*Package // in dependency order
+	byPath   map[string]*Package
+	loader   *golang.Loader
+	goEnv    *golang.Env
+	goPkgs   map[string]*golang.Package
+	GenDir   string
+	Overlay  string
+	// ModFile is the go.mod that go commands use (-modfile) when the
+	// program imports the standard library; StdRoot is the library's
+	// directory in the user cache.
+	ModFile string
+	StdRoot string
+	// Maps from generated file (virtual path in the package directory, or
+	// physical path in single-file mode) to its source map.
+	Maps map[string]*emit.SourceMap
+	// Timings holds phase durations in order.
+	Timings []Timing
+	// Targets are the packages selected on the command line (all packages
+	// when none were named). Other packages are compiled as dependencies.
+	Targets []*Package
+	// available holds every Lyth package discovered in the module, by import
+	// path; packages are added to the session when targeted or imported.
+	available map[string]*pkgDir
+}
+
+// Timing is the duration of one compilation phase.
+type Timing struct {
+	Phase    string
+	Duration time.Duration
+}
+
+// phase records the time since start under name and returns a new start.
+func (s *Session) phase(name string, start time.Time) time.Time {
+	now := time.Now()
+	s.Timings = append(s.Timings, Timing{Phase: name, Duration: now.Sub(start)})
+	return now
+}
+
+// Target selects what to compile.
+type Target struct {
+	File     string   // a single .lyth file (outside or inside a module)
+	Patterns []string // package directories relative to WorkDir; empty means all
+}
+
+// Compile runs the front end, lowering, emission, and validation, and writes
+// generated files. Diagnostics are in Session.Sink; the error is non-nil only
+// for problems that are not about user code (I/O, toolchain).
+func Compile(cfg *Config, target Target) (*Session, error) {
+	s := &Session{cfg: cfg, Sink: &diag.Sink{}, byPath: map[string]*Package{}, Maps: map[string]*emit.SourceMap{}}
+	if wd, err := canonical(cfg.WorkDir); err == nil {
+		cfg.WorkDir = wd
+	}
+	t := time.Now()
+	if err := s.setup(target); err != nil {
+		return s, err
+	}
+	if err := s.checkToolchain(); err != nil {
+		return s, err
+	}
+	t = s.phase("setup", t)
+	s.parse()
+	if s.StdRoot != "" {
+		if err := s.writeModFile(); err != nil {
+			return s, err
+		}
+	}
+	t = s.phase("parse", t)
+	if !s.order() {
+		return s, nil
+	}
+	if err := s.loadGo(); err != nil {
+		return s, err
+	}
+	if s.loader.CacheHit {
+		t = s.phase("load Go packages (cached)", t)
+	} else {
+		t = s.phase("load Go packages", t)
+	}
+	s.check()
+	t = s.phase("check", t)
+	if s.Sink.HasErrors() {
+		return s, nil
+	}
+	if err := s.generate(); err != nil {
+		return s, err
+	}
+	t = s.phase("lower+emit", t)
+	s.validate()
+	t = s.phase("validate", t)
+	if s.Sink.HasErrors() {
+		return s, nil
+	}
+	err := s.write()
+	s.phase("write", t)
+	return s, err
+}
+
+func (s *Session) setup(t Target) error {
+	wd := s.cfg.WorkDir
+	if t.File != "" {
+		file := t.File
+		if !filepath.IsAbs(file) {
+			file = filepath.Join(wd, file)
+		}
+		abs, err := canonical(file)
+		if err != nil {
+			return err
+		}
+		if _, err := os.Stat(abs); err != nil {
+			return fmt.Errorf("cannot read %s: %w", t.File, err)
+		}
+		mod, err := FindModule(filepath.Dir(abs))
+		if err == nil {
+			s.Mod = mod
+			p, err := scanDir(mod, filepath.Dir(abs))
+			if err != nil {
+				return err
+			}
+			// Other Lyth packages of the module are available as imports.
+			all, err := discover(mod)
+			if err != nil {
+				return err
+			}
+			s.makeAvailable(all)
+			s.Targets = append(s.Targets, s.addPkg(p))
+			return nil
+		}
+		// Outside any module: synthesize one in the user cache.
+		cache, err := os.UserCacheDir()
+		if err != nil {
+			cache = os.TempDir()
+		}
+		sum := sha256.Sum256([]byte(abs))
+		root := filepath.Join(cache, "lyth", "run", hex.EncodeToString(sum[:8]))
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module lythrun\n\ngo 1.26\n"), 0o644); err != nil {
+			return err
+		}
+		s.Mod = &Module{Root: root, Path: "lythrun", Synthetic: true}
+		s.Targets = append(s.Targets, s.addPkg(&pkgDir{Dir: filepath.Dir(abs), Rel: ".", ImportPath: "lythrun", Files: []string{abs}}))
+		return nil
+	}
+	mod, err := FindModule(wd)
+	if err != nil {
+		if err == errNoModule {
+			return fmt.Errorf("no go.mod found in %s or any parent directory\n\tcreate one with: go mod init <module-path>\n\tor run a single file: lyth run file.lyth", wd)
+		}
+		return err
+	}
+	s.Mod = mod
+	all, err := discover(mod)
+	if err != nil {
+		return err
+	}
+	if len(all) == 0 {
+		return fmt.Errorf("no .lyth files found in module %s", mod.Path)
+	}
+	// Every Lyth package is compiled (dependencies resolve from the full set);
+	// the selected ones become the targets.
+	selected := map[string]bool{}
+	for _, pat := range t.Patterns {
+		recursive := pat == "./..." || pat == "..." || strings.HasSuffix(pat, "/...")
+		dir := strings.TrimSuffix(strings.TrimSuffix(pat, "..."), "/")
+		if dir == "" || dir == "." {
+			dir = wd
+		} else if !filepath.IsAbs(dir) {
+			dir = filepath.Join(wd, dir)
+		}
+		dir = filepath.Clean(dir)
+		found := false
+		for _, p := range all {
+			if p.Dir == dir || recursive && strings.HasPrefix(p.Dir, dir+string(filepath.Separator)) {
+				selected[p.Dir] = true
+				found = true
+			}
+		}
+		if !found {
+			return fmt.Errorf("no Lyth package in %s", pat)
+		}
+	}
+	s.makeAvailable(all)
+	for _, p := range all {
+		if len(t.Patterns) == 0 || selected[p.Dir] {
+			s.Targets = append(s.Targets, s.addPkg(p))
+		}
+	}
+	return nil
+}
+
+func (s *Session) makeAvailable(all []*pkgDir) {
+	s.available = map[string]*pkgDir{}
+	for _, p := range all {
+		s.available[p.ImportPath] = p
+	}
+}
+
+func (s *Session) addPkg(p *pkgDir) *Package {
+	pkg := &Package{Dir: p}
+	s.Packages = append(s.Packages, pkg)
+	s.byPath[p.ImportPath] = pkg
+	return pkg
+}
+
+func (s *Session) checkToolchain() error {
+	env, err := golang.GoEnv(s.Mod.Root, s.cfg.Env)
+	if err != nil {
+		return fmt.Errorf("the go command is required: %v", err)
+	}
+	s.goEnv = env
+	v, minor := env.Version()
+	if minor != 0 && minor < MinGoMinor {
+		return fmt.Errorf("lyth requires Go 1.%d or newer; found %s\n\tinstall a newer toolchain from https://go.dev/dl/ or set GOTOOLCHAIN=go1.%d.0", MinGoMinor, v, MinGoMinor)
+	}
+	return nil
+}
+
+// parse parses the session's packages, adding Lyth packages of the module
+// that they import (transitively).
+func (s *Session) parse() {
+	if s.available == nil {
+		s.available = map[string]*pkgDir{} // single-file builds
+	}
+	for i := 0; i < len(s.Packages); i++ {
+		p := s.Packages[i]
+		paths := p.Dir.Files
+		if s.cfg.Tests && slices.Contains(s.Targets, p) {
+			// Like go test, only the packages under test get their tests.
+			paths = append(slices.Clip(paths), p.Dir.TestFiles...)
+		}
+		for _, path := range paths {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				s.Sink.Errorf(diag.EImport, source.Span{}, "cannot read %s: %v", path, err)
+				continue
+			}
+			f := source.NewFile(path, displayName(path, s.cfg.WorkDir), data)
+			sf := syntax.Parse(f, s.Sink)
+			if sf.Package != nil && strings.HasSuffix(sf.Package.Name, "_test") {
+				s.Sink.Errorf(diag.EUnsupported, sf.Package.S, "external test packages (package %s) are not supported yet", sf.Package.Name).
+					WithHint("write the test in the package itself (omit the package clause), or as a Go _test.go file")
+				continue
+			}
+			p.Files = append(p.Files, f)
+			p.Syntax = append(p.Syntax, sf)
+			for _, imp := range sf.Imports {
+				if _, ok := s.available[imp.Path]; !ok {
+					if dep := s.stdPackage(imp.Path); dep != nil {
+						s.available[imp.Path] = dep
+					}
+				}
+				if dep, ok := s.available[imp.Path]; ok && s.byPath[imp.Path] == nil {
+					s.addPkg(dep)
+				}
+			}
+		}
+		if len(p.Dir.GoFiles) > 0 && len(p.Files) > 0 {
+			s.Sink.Errorf(diag.EUnsupported, source.Span{File: p.Files[0], Start: 0, End: 0},
+				"package %s mixes Go and Lyth files, which is not supported yet", p.Dir.ImportPath).
+				WithNote("Go files: %s", strings.Join(baseNames(p.Dir.GoFiles), ", ")).
+				WithHint("move the Go code into its own package and import it from Lyth")
+		}
+	}
+}
+
+func baseNames(paths []string) []string {
+	out := make([]string, len(paths))
+	for i, p := range paths {
+		out[i] = filepath.Base(p)
+	}
+	return out
+}
+
+// order sorts packages so that dependencies come first.
+func (s *Session) order() bool {
+	state := map[*Package]int{}
+	var sorted []*Package
+	ok := true
+	var visit func(p *Package, via *syntax.ImportDecl)
+	visit = func(p *Package, via *syntax.ImportDecl) {
+		switch state[p] {
+		case 1:
+			if via != nil {
+				s.Sink.Errorf(diag.EImport, via.PathSpan, "import cycle: %s imports itself through %q", p.Dir.ImportPath, via.Path)
+			}
+			ok = false
+			return
+		case 2:
+			return
+		}
+		state[p] = 1
+		for _, f := range p.Syntax {
+			for _, imp := range f.Imports {
+				if dep := s.byPath[imp.Path]; dep != nil {
+					visit(dep, imp)
+				}
+			}
+		}
+		state[p] = 2
+		sorted = append(sorted, p)
+	}
+	for _, p := range s.Packages {
+		visit(p, nil)
+	}
+	s.Packages = sorted
+	return ok
+}
+
+func (s *Session) loadGo() error {
+	need := map[string]bool{}
+	for _, imp := range supportImports {
+		need[imp] = true
+	}
+	for _, p := range s.Packages {
+		for _, f := range p.Syntax {
+			for _, imp := range f.Imports {
+				if s.byPath[imp.Path] == nil && imp.Path != "" {
+					need[imp.Path] = true
+				}
+			}
+		}
+	}
+	var paths []string
+	for p := range need {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	s.loader = golang.NewLoader(s.Mod.Root, s.cfg.Env, s.cfg.Tags)
+	s.loader.GoEnv = s.goEnv
+	if os.Getenv("LYTH_NO_CACHE") == "" {
+		s.loader.CacheFile = filepath.Join(s.Mod.Root, ".lyth", "cache", "gotypes.json")
+	}
+	res, err := s.loader.Load(paths)
+	if err != nil {
+		return err
+	}
+	s.goPkgs = res
+	return nil
+}
+
+func (s *Session) check() {
+	for _, p := range s.Packages {
+		if len(p.Syntax) == 0 {
+			continue
+		}
+		imp := func(path string) (*check.Package, string) {
+			if dep := s.byPath[path]; dep != nil {
+				if dep.Checked == nil {
+					return nil, "package " + path + " failed to compile"
+				}
+				return dep.Checked, ""
+			}
+			gp := s.goPkgs[path]
+			if gp == nil {
+				return nil, ""
+			}
+			if gp.Types == nil {
+				return nil, strings.Join(gp.Errors, "; ")
+			}
+			return &check.Package{Path: path, Name: gp.Types.Name(), Go: gp.Types}, ""
+		}
+		conf := &check.Config{Sink: s.Sink, Import: imp, DirName: filepath.Base(p.Dir.Dir)}
+		if s.Mod.Synthetic {
+			conf.DirName = "main"
+		}
+		p.Checked = check.Check(conf, p.Dir.ImportPath, p.Syntax)
+	}
+}
+
+func (s *Session) generate() error {
+	opts := emit.Options{LineDirectives: !s.cfg.NoLineDirectives, AbsPaths: !s.cfg.InTree}
+	for _, p := range s.Packages {
+		if p.Checked == nil {
+			continue
+		}
+		var lowered []*lower.File
+		err := protect(s.Sink, p, func() { lowered = lower.Package(p.Checked) })
+		if err != nil {
+			continue
+		}
+		for _, lf := range lowered {
+			res, err := emit.Emit(lf, opts)
+			if err != nil {
+				s.Sink.Errorf(diag.EInternal, source.Span{File: lf.Src}, "internal compiler error while generating Go code: %v", err).
+					WithNote("please report this with the source file")
+				continue
+			}
+			p.Generated = append(p.Generated, res)
+		}
+	}
+	return nil
+}
+
+// protect converts a panic in a compiler stage into an internal-error
+// diagnostic so invalid user code never crashes the compiler.
+func protect(sink *diag.Sink, p *Package, fn func()) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			var span source.Span
+			if len(p.Files) > 0 {
+				span = source.Span{File: p.Files[0]}
+			}
+			sink.Errorf(diag.EInternal, span, "internal compiler error in package %s: %v", p.Dir.ImportPath, r).
+				WithNote("please report this with the source file")
+			err = fmt.Errorf("internal error: %v", r)
+		}
+	}()
+	fn()
+	return nil
+}
+
+// write stores generated files under .lyth/gen and writes the overlay.
+func (s *Session) write() error {
+	if s.Mod.Synthetic {
+		for _, p := range s.Packages {
+			for _, g := range p.Generated {
+				path := filepath.Join(s.Mod.Root, g.Name)
+				if p.Dir.Std {
+					path = filepath.Join(p.Dir.Dir, g.Name)
+				}
+				if err := writeIfChanged(path, g.Code); err != nil {
+					return err
+				}
+				s.Maps[path] = g.Map
+			}
+		}
+		return cleanStale(s.Mod.Root, s.Maps)
+	}
+	s.GenDir = filepath.Join(s.Mod.Root, ".lyth", "gen")
+	if err := os.MkdirAll(s.GenDir, 0o755); err != nil {
+		return err
+	}
+	_ = os.WriteFile(filepath.Join(s.Mod.Root, ".lyth", ".gitignore"), []byte("# Generated by lyth.\n*\n"), 0o644)
+	replace := map[string]string{}
+	written := map[string]*emit.SourceMap{}
+	for _, p := range s.Packages {
+		dir := filepath.Join(s.GenDir, filepath.FromSlash(p.Dir.Rel))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+		for _, g := range p.Generated {
+			real := filepath.Join(dir, g.Name)
+			if err := writeIfChanged(real, g.Code); err != nil {
+				return err
+			}
+			mapData, _ := json.Marshal(g.Map)
+			_ = writeIfChanged(real+".map", mapData)
+			virtual := filepath.Join(p.Dir.Dir, g.Name)
+			replace[virtual] = real
+			s.Maps[virtual] = g.Map
+			written[real] = g.Map
+		}
+	}
+	s.Overlay = filepath.Join(s.Mod.Root, ".lyth", "overlay.json")
+	// Keep entries of packages this session did not compile (a targeted
+	// build must not invalidate the rest of the module), as long as their
+	// sources still exist.
+	inSession := map[string]bool{}
+	for _, p := range s.Packages {
+		inSession[p.Dir.Dir] = true
+	}
+	if data, err := os.ReadFile(s.Overlay); err == nil {
+		var old struct{ Replace map[string]string }
+		if json.Unmarshal(data, &old) == nil {
+			for virtual, real := range old.Replace {
+				dir := filepath.Dir(virtual)
+				if inSession[dir] || !hasLythFiles(dir) {
+					continue
+				}
+				if _, err := os.Stat(real); err == nil {
+					replace[virtual] = real
+					written[real] = nil
+				}
+			}
+		}
+	}
+	if err := cleanStale(s.GenDir, written); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(map[string]any{"Replace": replace}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeIfChanged(s.Overlay, data)
+}
+
+// hasLythFiles reports whether dir contains .lyth source files.
+func hasLythFiles(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".lyth") {
+			return true
+		}
+	}
+	return false
+}
+
+// writeIfChanged avoids touching files whose content is unchanged.
+func writeIfChanged(path string, data []byte) error {
+	if old, err := os.ReadFile(path); err == nil && string(old) == string(data) {
+		return nil
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
+// cleanStale removes generated files that the current build did not produce.
+func cleanStale(dir string, keep map[string]*emit.SourceMap) error {
+	return filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		name := d.Name()
+		if !(strings.HasSuffix(name, ".lyth.go") || strings.HasSuffix(name, ".lyth_test.go") ||
+			strings.HasSuffix(name, ".lyth.go.map") || strings.HasSuffix(name, ".lyth_test.go.map")) {
+			return nil
+		}
+		base := strings.TrimSuffix(path, ".map")
+		if _, ok := keep[base]; !ok {
+			os.Remove(path)
+		}
+		return nil
+	})
+}
+
+// TypesCached reports whether Go type information came from the persistent
+// cache instead of `go list`.
+func (s *Session) TypesCached() bool { return s.loader != nil && s.loader.CacheHit }
+
+// MainPackages returns the target packages named main.
+func (s *Session) MainPackages() []*Package {
+	var out []*Package
+	for _, p := range s.Targets {
+		if p.Checked != nil && p.Checked.Name == "main" {
+			out = append(out, p)
+		}
+	}
+	return out
+}

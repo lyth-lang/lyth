@@ -1,0 +1,346 @@
+package check
+
+import (
+	"go/constant"
+	gotypes "go/types"
+
+	"github.com/lyth-lang/lyth/internal/diag"
+	"github.com/lyth-lang/lyth/internal/source"
+	"github.com/lyth-lang/lyth/internal/syntax"
+	"github.com/lyth-lang/lyth/internal/types"
+)
+
+// resolveType resolves a type expression in the current scope.
+func (c *Checker) resolveType(te syntax.TypeExpr) types.Type {
+	t := c.resolveType0(te)
+	if !c.inConstraint && constraintOnly(t) {
+		c.errorf(diag.EInvalidUse, te.Span(), "%s can only be used as the constraint of a type parameter", t).
+			WithHint("declare a type parameter: func f[T: %s](...)", t)
+		t = types.Invalid
+	}
+	c.info.TypeExprs[te] = t
+	return t
+}
+
+// constraintOnly reports whether t is an interface Go allows only as a
+// constraint: Comparable, or one with a type set such as cmp.Ordered.
+func constraintOnly(t types.Type) bool {
+	n, ok := types.Base(t).(*types.Named)
+	if !ok || n.Go == nil {
+		return false
+	}
+	iface, ok := n.Go.Underlying().(*gotypes.Interface)
+	return ok && !iface.IsMethodSet()
+}
+
+func (c *Checker) resolveType0(te syntax.TypeExpr) types.Type {
+	switch te := te.(type) {
+	case *syntax.NamedType:
+		if te.Pkg != nil {
+			sym := c.lookup(te.Pkg.Name)
+			ps, ok := sym.(*PkgSym)
+			if !ok {
+				if sym == nil {
+					c.errorf(diag.EUndefined, te.Pkg.S, "undefined package %s", te.Pkg.Name)
+				} else {
+					c.errorf(diag.ENotExpected, te.Pkg.S, "%s is not a package", te.Pkg.Name)
+				}
+				return types.Invalid
+			}
+			ps.Used = true
+			c.info.Uses[te.Pkg] = ps
+			if ps.Pkg == nil {
+				return types.Invalid
+			}
+			return c.qualifiedType(ps.Pkg, te)
+		}
+		sym := c.lookup(te.Name.Name)
+		if sym == nil {
+			d := c.errorf(diag.EUndefined, te.Name.S, "undefined type %s", te.Name.Name)
+			if hint, ok := oldTypeNames[te.Name.Name]; ok {
+				d.WithEdit(te.Name.S, hint, "Lyth uses Go's type names: %s", hint)
+			} else if s := c.suggest(te.Name.Name); s != "" {
+				d.WithHint("did you mean %s?", s)
+			}
+			return types.Invalid
+		}
+		ts, ok := sym.(*TypeSym)
+		if !ok {
+			c.errorf(diag.ENotExpected, te.Name.S, "%s is not a type", te.Name.Name)
+			return types.Invalid
+		}
+		c.info.Uses[te.Name] = ts
+		if ts.Alias != nil {
+			if len(te.Args) > 0 {
+				c.errorf(diag.ETypeArgs, te.S, "type alias %s does not take type arguments", te.Name.Name)
+			}
+			return c.aliasType(ts)
+		}
+		if ts.Generic != "" {
+			return c.builtinGeneric(ts.Generic, te)
+		}
+		if ts.Decl != nil {
+			return c.lythTypeRef(ts, te)
+		}
+		if len(te.Args) > 0 {
+			c.errorf(diag.ETypeArgs, te.S, "type %s does not take type arguments", te.Name.Name)
+		}
+		return ts.Type
+	case *syntax.PointerType:
+		elem := c.resolveType(te.Elem)
+		if elem == types.Unit {
+			c.errorf(diag.EInvalidUse, te.Elem.Span(), "cannot point to unit")
+			return types.Invalid
+		}
+		return &types.Pointer{Elem: elem}
+	case *syntax.NullableType:
+		elem := c.resolveType(te.Elem)
+		switch b := elem.(type) {
+		case *types.Slice, *types.Map:
+			c.errorf(diag.ENullableColl, te.S, "%s cannot be nullable; its empty value already represents absence", elem).
+				WithHint("use %s and an empty value instead of null", elem)
+			return elem
+		case *types.Nullable:
+			return b
+		}
+		if elem == types.Unit || elem == types.Invalid {
+			return elem
+		}
+		if _, ok := elem.(*types.TypeParam); ok {
+			c.errorf(diag.ENullableTParam, te.S, "nullable type parameters are not supported yet")
+		}
+		return &types.Nullable{Elem: elem}
+	case *syntax.SliceType:
+		return &types.Slice{Elem: c.resolveType(te.Elem)}
+	case *syntax.MapType:
+		key, elem := c.resolveType(te.Key), c.resolveType(te.Value)
+		if key == types.Unit || elem == types.Unit {
+			c.errorf(diag.EInvalidUse, te.S, "unit cannot be a map key or value")
+			return types.Invalid
+		}
+		// A type parameter used in a constraint may have no bound yet
+		// (func f[K: map[K]int]); go/types cannot judge it then.
+		gk := types.Lower(key)
+		if tp, ok := gk.(*gotypes.TypeParam); ok && tp.Constraint() == nil {
+			return &types.Map{Key: key, Elem: elem}
+		}
+		if key != types.Invalid && !gotypes.Comparable(gk) {
+			c.errorf(diag.ETypeArgs, te.Key.Span(), "%s cannot be a map key: it is not comparable", key)
+		}
+		return &types.Map{Key: key, Elem: elem}
+	case *syntax.ChanType:
+		elem := c.resolveType(te.Elem)
+		if elem == types.Unit {
+			c.errorf(diag.EInvalidUse, te.Elem.Span(), "unit cannot be a channel element")
+			return types.Invalid
+		}
+		dir := map[syntax.ChanDir]types.ChanDir{syntax.ChanBoth: types.SendRecv, syntax.ChanSend: types.SendOnly, syntax.ChanReceive: types.RecvOnly}[te.Dir]
+		return &types.Chan{Dir: dir, Elem: elem}
+	case *syntax.ArrayType:
+		n := int64(0)
+		x := c.expr(te.Len, types.Int)
+		if x.mode != ModeInvalid {
+			if x.val == nil || x.val.Kind() != constant.Int {
+				c.errorf(diag.EInvalidUse, te.Len.Span(), "array length must be a constant integer")
+			} else if v, ok := constant.Int64Val(x.val); !ok || v < 0 {
+				c.errorf(diag.EInvalidUse, te.Len.Span(), "invalid array length %s", x.val)
+			} else {
+				n = v
+			}
+		}
+		return &types.Array{Len: n, Elem: c.resolveType(te.Elem)}
+	case *syntax.FuncType:
+		sig := &types.Signature{Throws: te.Throws}
+		for _, p := range te.Params {
+			sig.Params = append(sig.Params, c.resolveType(p))
+		}
+		if te.Result != nil {
+			for _, r := range te.Result.Types {
+				t := c.resolveType(r)
+				if t != types.Unit {
+					sig.Results = append(sig.Results, t)
+				}
+			}
+		}
+		return sig
+	case *syntax.BadType:
+		return types.Invalid
+	}
+	return types.Invalid
+}
+
+// lythTypeRef resolves a reference to a Lyth-declared type. A generic one
+// takes all its type arguments, which must satisfy its constraints.
+func (c *Checker) lythTypeRef(ts *TypeSym, te *syntax.NamedType) types.Type {
+	d := ts.Decl
+	if len(d.TypeParams) == 0 {
+		if len(te.Args) > 0 {
+			c.errorf(diag.ETypeArgs, te.S, "type %s does not take type arguments", te.Name.Name)
+		}
+		return ts.Type
+	}
+	if len(te.Args) != len(d.TypeParams) {
+		c.errorf(diag.ETypeArgs, te.S, "%s takes %s (%s), got %d", d.Name, plural(len(d.TypeParams), "type argument"), typeParamNames(d.TypeParams), len(te.Args)).
+			WithHint("write %s[%s]", d.Name, typeParamNames(d.TypeParams))
+		return types.Invalid
+	}
+	args := make([]types.Type, len(te.Args))
+	for i, a := range te.Args {
+		if args[i] = c.resolveType(a); args[i] == types.Invalid {
+			return types.Invalid
+		}
+	}
+	inst := &types.Named{Decl: d, Args: args}
+	if !c.validInstance(inst, te.S) {
+		return types.Invalid
+	}
+	return inst
+}
+
+// validInstance reports whether the type arguments of a generic Lyth type
+// satisfy its constraints, reporting an error at span if not.
+func (c *Checker) validInstance(inst *types.Named, span source.Span) bool {
+	if named := inst.Decl.Shadow; named != nil {
+		tps := named.TypeParams()
+		for i := range tps.Len() {
+			if tps.At(i).Constraint() == nil {
+				// struct Page[A: Page[A]]: the constraints are still being
+				// resolved, so the instance cannot be checked against them.
+				c.errorf(diag.EInvalidUse, span, "a type parameter's constraint cannot refer to %s, the type being declared", inst.Decl.Name)
+				return false
+			}
+		}
+	}
+	args := make([]gotypes.Type, len(inst.Args))
+	for i, a := range inst.Args {
+		args[i] = types.Lower(a)
+	}
+	if _, err := gotypes.Instantiate(nil, inst.Decl.Shadow, args, true); err != nil {
+		c.errorf(diag.ETypeArgs, span, "invalid type arguments for %s", inst.Decl.Name).
+			WithNote("%s", translateGoMessage(err.Error()))
+		return false
+	}
+	return true
+}
+
+// oldTypeNames maps the type names of Lyth before ADR 0031, and Kotlin's,
+// to Lyth's (Go's) spelling.
+var oldTypeNames = map[string]string{
+	"Bool": "bool", "Int": "int", "Int8": "int8", "Int16": "int16", "Int32": "int32", "Int64": "int64",
+	"UInt": "uint", "UInt8": "uint8", "UInt16": "uint16", "UInt32": "uint32", "UInt64": "uint64",
+	"UIntPtr": "uintptr", "Float32": "float32", "Float64": "float64", "Complex64": "complex64",
+	"Complex128": "complex128", "String": "string", "Byte": "byte", "Rune": "rune",
+	"Any": "any", "Error": "error", "Comparable": "comparable", "Unit": "unit", "Nothing": "nothing",
+	"Long": "int64", "Double": "float64", "Boolean": "bool", "Float": "float32", "Char": "rune",
+	"Integer": "int", "Object": "any", "Short": "int16", "Void": "unit",
+}
+
+// builtinGeneric reports the collection spellings of Lyth before ADR 0031
+// (Map<K, V>, Chan<T>, ...) and Kotlin's List<T>, resolving them for recovery.
+func (c *Checker) builtinGeneric(name string, te *syntax.NamedType) types.Type {
+	want := 1
+	if name == "Map" || name == "HashMap" {
+		want = 2
+	}
+	args := make([]string, len(te.Args))
+	for i, a := range te.Args {
+		args[i] = a.Span().Text()
+	}
+	if len(te.Args) != want {
+		c.errorf(diag.EUnsupportedSyntax, te.S, "Lyth uses Go's spelling for %s types", map[bool]string{true: "map", false: "slice and channel"}[want == 2])
+		return types.Invalid
+	}
+	var spelling string
+	switch name {
+	case "List", "MutableList", "ArrayList", "Array":
+		spelling = "[]" + args[0]
+	case "Map", "HashMap":
+		spelling = "map[" + args[0] + "]" + args[1]
+	case "Chan":
+		spelling = "chan " + args[0]
+	case "SendChan":
+		spelling = "chan<- " + args[0]
+	case "ReceiveChan":
+		spelling = "<-chan " + args[0]
+	}
+	c.errorf(diag.EUnsupportedSyntax, te.S, "Lyth uses Go's spelling for this type").
+		WithEdit(te.S, spelling, "write %s", spelling)
+	elems := make([]types.Type, len(te.Args))
+	for i, a := range te.Args {
+		elems[i] = c.resolveType(a)
+	}
+	switch name {
+	case "Map", "HashMap":
+		return &types.Map{Key: elems[0], Elem: elems[1]}
+	case "Chan":
+		return &types.Chan{Dir: types.SendRecv, Elem: elems[0]}
+	case "SendChan":
+		return &types.Chan{Dir: types.SendOnly, Elem: elems[0]}
+	case "ReceiveChan":
+		return &types.Chan{Dir: types.RecvOnly, Elem: elems[0]}
+	}
+	return &types.Slice{Elem: elems[0]}
+}
+
+// qualifiedType resolves pkg.Name type references.
+func (c *Checker) qualifiedType(pkg *Package, te *syntax.NamedType) types.Type {
+	name := te.Name.Name
+	if pkg.Lyth {
+		sym := pkg.Scope.LookupLocal(name)
+		ts, ok := sym.(*TypeSym)
+		if ok && ts.Alias != nil {
+			if !ts.AliasPub {
+				c.errorf(diag.EPrivate, te.Name.S, "type %s is not exported by package %s", name, pkg.Name).WithHint("rename it to %s to export it", exportedName(name))
+			}
+			c.info.Uses[te.Name] = ts
+			return ts.Type
+		}
+		if !ok || ts.Decl == nil {
+			c.errorf(diag.EUnknownPkgName, te.Name.S, "package %s has no type %s", pkg.Name, name)
+			return types.Invalid
+		}
+		if !ts.Decl.Pub {
+			c.errorf(diag.EPrivate, te.Name.S, "type %s is not exported by package %s", name, pkg.Name).WithHint("rename it to %s to export it", exportedName(name))
+		}
+		c.info.Uses[te.Name] = ts
+		return c.lythTypeRef(ts, te)
+	}
+	obj := pkg.Go.Scope().Lookup(name)
+	if obj == nil || !obj.Exported() {
+		d := c.errorf(diag.EUnknownPkgName, te.Name.S, "package %s has no exported type %s", pkg.Name, name)
+		if s := suggestGoName(pkg.Go, name, true); s != "" {
+			d.WithHint("did you mean %s.%s?", pkg.Name, s)
+		}
+		return types.Invalid
+	}
+	tn, ok := obj.(*gotypes.TypeName)
+	if !ok {
+		c.errorf(diag.ENotExpected, te.Name.S, "%s.%s is not a type", pkg.Name, name)
+		return types.Invalid
+	}
+	c.info.Uses[te.Name] = &GoObj{Obj: obj, Pkg: pkg}
+	t := tn.Type()
+	if named, ok := gotypes.Unalias(t).(*gotypes.Named); ok && named.TypeParams().Len() > 0 && named.TypeArgs().Len() == 0 {
+		if len(te.Args) != named.TypeParams().Len() {
+			c.errorf(diag.ETypeArgs, te.S, "%s.%s requires %s", pkg.Name, name, plural(named.TypeParams().Len(), "type argument"))
+			return types.Invalid
+		}
+		args := make([]types.Type, len(te.Args))
+		goArgs := make([]gotypes.Type, len(te.Args))
+		for i, a := range te.Args {
+			args[i] = c.resolveType(a)
+			goArgs[i] = types.Lower(args[i])
+		}
+		inst, err := gotypes.Instantiate(nil, named, goArgs, true)
+		if err != nil {
+			c.errorf(diag.ETypeArgs, te.S, "invalid type arguments for %s.%s: %s", pkg.Name, name, translateGoMessage(err.Error()))
+			return types.Invalid
+		}
+		return &types.Named{Go: inst.(*gotypes.Named), Args: args}
+	}
+	if len(te.Args) > 0 {
+		c.errorf(diag.ETypeArgs, te.S, "%s.%s does not take type arguments", pkg.Name, name)
+	}
+	// A type written in Lyth source is non-null by default.
+	return types.Base(types.Lift(t))
+}

@@ -1,0 +1,78 @@
+import "errors"
+import "fmt"
+import "log/slog"
+import "strings"
+import "time"
+
+// Config is the service configuration. It comes from the environment, so
+// the same binary runs locally, in CI, and in a container.
+struct Config {
+    // Addr is the listen address, such as ":8080".
+    Addr: string
+    // DatabaseURL is a PostgreSQL connection string.
+    DatabaseURL: string
+    // Tokens maps API bearer tokens to user names.
+    Tokens: map[string]string
+    LogLevel: slog.Level
+    ShutdownTimeout: time.Duration
+}
+
+// Load reads the configuration through getenv: os.Getenv in production, a
+// map lookup in tests.
+//
+//   DATABASE_URL      required
+//   API_TOKENS        required, "user:token" pairs separated by commas
+//   ADDR              default ":8080"
+//   LOG_LEVEL         debug, info (default), warn, or error
+//   SHUTDOWN_TIMEOUT  default "10s"
+func Load(getenv: (string) -> string): Config throws {
+    databaseURL := getenv("DATABASE_URL")
+    if databaseURL == "" {
+        throw errors.New("DATABASE_URL is required")
+    }
+    return Config(
+        Addr = orDefault(getenv("ADDR"), ":8080"),
+        DatabaseURL = databaseURL,
+        Tokens = parseTokens(getenv("API_TOKENS"))?,
+        LogLevel = parseLevel(getenv("LOG_LEVEL"))?,
+        ShutdownTimeout = parseDuration("SHUTDOWN_TIMEOUT", orDefault(getenv("SHUTDOWN_TIMEOUT"), "10s"))?,
+    )
+}
+
+func orDefault(v: string, def: string): string = if v == "" { def } else { v }
+
+// parseTokens parses "user:token" pairs into a token -> user map.
+func parseTokens(s: string): map[string]string throws {
+    tokens: map[string]string = [:]
+    for pair in strings.Split(s, ",") {
+        p := strings.TrimSpace(pair)
+        if p == "" {
+            continue
+        }
+        user, token, ok := strings.Cut(p, ":")
+        if !ok || user == "" || token == "" {
+            throw fmt.Errorf("API_TOKENS: want user:token pairs, got %q", p)
+        }
+        tokens[token] = user
+    }
+    if len(tokens) == 0 {
+        throw errors.New("API_TOKENS must list at least one user:token pair")
+    }
+    return tokens
+}
+
+func parseLevel(s: string): slog.Level throws = when strings.ToLower(s) {
+    "debug" -> slog.LevelDebug
+    "", "info" -> slog.LevelInfo
+    "warn" -> slog.LevelWarn
+    "error" -> slog.LevelError
+    else -> throw fmt.Errorf("LOG_LEVEL: unknown level %q", s)
+}
+
+func parseDuration(name: string, s: string): time.Duration throws {
+    d := time.ParseDuration(s) catch (err) { throw err.wrap(name) }
+    if d <= 0 {
+        throw fmt.Errorf("%s must be positive, got %s", name, s)
+    }
+    return d
+}

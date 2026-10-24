@@ -1,0 +1,85 @@
+import "context"
+import "errors"
+
+import "github.com/jackc/pgx/v5"
+import "github.com/jackc/pgx/v5/pgxpool"
+
+// PgStore is a Store backed by PostgreSQL through a pgx connection pool.
+struct PgStore {
+    pool: *pgxpool.Pool
+}
+
+func NewPgStore(pool: *pgxpool.Pool): *PgStore = &PgStore(pool = pool)
+
+// schema creates the table if it does not exist; it is safe to run on every
+// start.
+const schema = `
+CREATE TABLE IF NOT EXISTS todos (
+    id         BIGSERIAL PRIMARY KEY,
+    owner      TEXT NOT NULL,
+    title      TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 200),
+    done       BOOLEAN NOT NULL DEFAULT false,
+    due        TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS todos_owner_id ON todos (owner, id);
+`
+
+// Migrate creates the schema.
+func Migrate(ctx: context.Context, pool: *pgxpool.Pool) throws {
+    pool.Exec(ctx, schema)?
+}
+
+const columns = "id, owner, title, done, due, created_at, updated_at"
+
+func *PgStore.List(ctx: context.Context, owner: string, filter: Filter): []Todo throws {
+    rows := pool.Query(ctx,
+        "SELECT " + columns + " FROM todos WHERE owner = $1 AND id > $2 AND ($3::boolean IS NULL OR done = $3) ORDER BY id LIMIT $4",
+        owner, filter.After, filter.Done, filter.Limit)?
+    return pgx.CollectRows(rows, pgx.RowToStructByName[Todo])?
+}
+
+func *PgStore.Get(ctx: context.Context, owner: string, id: int64): Todo throws {
+    rows := pool.Query(ctx, "SELECT " + columns + " FROM todos WHERE owner = $1 AND id = $2", owner, id)?
+    return one(rows)?
+}
+
+func *PgStore.Create(ctx: context.Context, owner: string, input: NewTodo): Todo throws {
+    rows := pool.Query(ctx,
+        "INSERT INTO todos (owner, title, due) VALUES ($1, $2, $3) RETURNING " + columns,
+        owner, input.Title, input.Due)?
+    return one(rows)?
+}
+
+func *PgStore.Update(ctx: context.Context, owner: string, id: int64, patch: Patch): Todo throws {
+    rows := pool.Query(ctx, `
+        UPDATE todos
+        SET title = COALESCE($3, title), done = COALESCE($4, done), due = COALESCE($5, due), updated_at = now()
+        WHERE owner = $1 AND id = $2
+        RETURNING ` + columns,
+        owner, id, patch.Title, patch.Done, patch.Due)?
+    return one(rows)?
+}
+
+func *PgStore.Remove(ctx: context.Context, owner: string, id: int64) throws {
+    tag := pool.Exec(ctx, "DELETE FROM todos WHERE owner = $1 AND id = $2", owner, id)?
+    if tag.RowsAffected() == 0 {
+        throw ErrNotFound
+    }
+}
+
+// Ping checks the database connection (used by the health check).
+func *PgStore.Ping(ctx: context.Context) throws {
+    pool.Ping(ctx)?
+}
+
+// one collects exactly one row, reporting "no rows" as ErrNotFound.
+func one(rows: pgx.Rows): Todo throws {
+    return pgx.CollectExactlyOneRow(rows, pgx.RowToStructByName[Todo]) catch (err) {
+        if errors.Is(err, pgx.ErrNoRows) {
+            throw ErrNotFound
+        }
+        throw err
+    }
+}

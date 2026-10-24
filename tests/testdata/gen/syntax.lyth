@@ -1,0 +1,68 @@
+import "cmp"
+import "strconv"
+
+// The Go spellings of ADR 0031, and what they lower to.
+
+struct Account {
+    ID: int64
+    balance: int
+}
+
+func Account.Balance(): int = self.balance
+
+func *Account.Deposit(n: int) {
+    self.balance += n
+}
+
+func Max[T: cmp.Ordered](items: []T): T {
+    best := items[0]
+    for x in items {
+        if x > best {
+            best = x
+        }
+    }
+    return best
+}
+
+func parseAll(texts: []string): []int throws {
+    out: []int = []
+    for i, t in texts {
+        n, err := strconv.Atoi(t)
+        if err != null {
+            throw err.wrap("item ${i}")
+        }
+        out = append(out, n)
+    }
+    return out
+}
+
+func count(words: []string): map[string]int {
+    seen := make(map[string]int)
+    for w in words {
+        seen[w]++
+    }
+    return seen
+}
+
+func drain(ch: <-chan int): int {
+    total := 0
+    for v in ch {
+        total += v
+    }
+    return total
+}
+
+func main() {
+    a := &Account(ID = 1)
+    a.Deposit(5)
+    numbers := [3, 8, 2]
+    result := Max(numbers)
+    other := Max[int](numbers)
+    lo, hi := 0, len(numbers)
+    lo, hi = hi, lo
+    println(a.Balance(), result, other, lo, hi, count(["a", "a"]))
+    ch := make(chan int, 2)
+    ch.send(1)
+    ch.close()
+    println(drain(ch), parseAll(["1"]) catch { [] })
+}

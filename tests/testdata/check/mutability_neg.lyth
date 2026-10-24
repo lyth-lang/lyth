@@ -1,0 +1,44 @@
+import "encoding/json"
+import "sync"
+
+const Limit = 3
+
+struct Counter {
+    Count: int
+}
+
+func Counter.bump() {
+    Count++ // ERROR E0502 "value receiver"
+}
+
+func *Counter.inc() {
+    Count++
+}
+
+func *Counter.reset() {
+    self = &Counter(Count = 0) // ERROR E0501 "the receiver is read-only"
+}
+
+func params(n: int) {
+    n = 5 // ERROR E0501 "parameters are read-only"
+}
+
+func main() {
+    // Locals declared with := are mutable, as in Go.
+    x := 1
+    x = 2
+    c := Counter(Count = 0)
+    c.Count = 3
+    c.inc()
+    data: []byte = []
+    json.Unmarshal(data, &x) catch {}
+    json.Unmarshal(data, &c) catch {}
+    mu := sync.Mutex()
+    mu.Lock()
+    mu.Unlock()
+    for i in 0..<3 {
+        i = 4 // ERROR E0501 "loop variable"
+    }
+    Limit = 4 // ERROR E0501 "Limit"
+    println(x, c.Count)
+}

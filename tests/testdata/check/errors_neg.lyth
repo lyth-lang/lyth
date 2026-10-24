@@ -1,0 +1,42 @@
+import "errors"
+import "os"
+
+func mayFail(): int throws = 1
+
+func notThrowing(): int {
+    return mayFail()? // ERROR E0301 "can only be used in a function that throws"
+}
+
+func nullableTry(x: string?): int throws {
+    y := x? // ERROR E0302 "for a nullable value use ?:"
+    return 1
+}
+
+func unhandled() throws {
+    os.Remove("x") // ERROR E0303 "is not handled"
+    mayFail() // ERROR E0303 "is not handled"
+}
+
+func badThrow() {
+    throw errors.New("x") // ERROR E0304 "can only be used in a function that throws"
+}
+
+func throwNullable(e: error?) throws {
+    throw e // ERROR E0305 "it may be null"
+}
+
+func throwString() throws {
+    throw "oops" // ERROR E0305 "throw needs an error"
+}
+
+func catchNonFallible(): int {
+    return 5 catch { 0 } // ERROR E0306 "catch needs a call that returns an error"
+}
+
+func catchNoValue(): int {
+    return mayFail() catch (e) { println(e) } // ERROR E0307 "must end with a value"
+}
+
+func main() {
+    notThrowing()
+}

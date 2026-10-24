@@ -1,0 +1,54 @@
+import "fmt"
+import "io"
+import "sort"
+
+interface Shape {
+    Area(): float64
+}
+
+// Value receivers: Circle and *Circle implement both interfaces.
+struct Circle : Shape, fmt.Stringer {
+    R: float64
+}
+
+func Circle.Area(): float64 = 3 * R * R
+func Circle.String(): string = "circle(${R})"
+
+// A pointer receiver: only *counter implements io.Writer.
+struct counter : io.Writer {
+    N: int
+}
+
+func *counter.Write(p: []byte): int throws {
+    N += len(p)
+    return len(p)
+}
+
+// Conformance to a Go interface with several methods.
+struct byLen : sort.Interface {
+    Words: []string
+}
+
+func byLen.Len(): int = len(Words)
+func byLen.Less(i: int, j: int): bool = len(Words[i]) < len(Words[j])
+func byLen.Swap(i: int, j: int) {
+    a, b := Words[j], Words[i]
+    Words[i] = a
+    Words[j] = b
+}
+
+func main() throws {
+    s: Shape = Circle(R = 2)
+    println(s.Area(), Circle(R = 1))
+    c := counter(N = 0)
+    fmt.Fprintf(&c, "hello %d", 42)?
+    println(c.N)
+    words := ["banana", "fig", "kiwi"]
+    sort.Sort(byLen(Words = words))
+    println(words)
+}
+
+// Output:
+// 12 circle(1)
+// 8
+// [fig kiwi banana]

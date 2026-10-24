@@ -1,0 +1,66 @@
+import "errors"
+import "fmt"
+import "os"
+import "strconv"
+
+struct NotFound {
+    Key: string
+}
+
+func *NotFound.Error(): string = "not found: ${Key}"
+
+struct Invalid {
+    Reason: string
+}
+
+func *Invalid.Error(): string = "invalid: ${Reason}"
+
+func lookup(key: string): int throws {
+    when key {
+        "a" -> return 1
+        "" -> throw &Invalid(Reason = "empty key")
+        "io" -> throw errors.New("disk on fire")
+    }
+    throw fmt.Errorf("lookup: %w", &NotFound(Key = key))   // wrapped: typed catch sees through it
+}
+
+// Handle NotFound, propagate everything else with ?.
+func orZero(key: string): int throws {
+    n := lookup(key) catch (e: *NotFound) {
+        println("missing", e.Key)
+        0
+    }?
+    return n
+}
+
+// A chain: each clause is tried in order, and the last catch takes the rest.
+func describe(key: string): string {
+    n := lookup(key) catch (e: *NotFound) {
+        return "no ${e.Key}"
+    } catch (e: *Invalid) {
+        return "bad request: ${e.Reason}"
+    } catch (err) {
+        return "failed: ${err}"
+    }
+    return "found ${n}"
+}
+
+func main() throws {
+    println(orZero("a")?, orZero("b")?)
+    println(orZero("") catch (err) { -1 })
+    println(describe("a"), describe("zz"), describe(""), describe("io"))
+
+    // A statement: the handler needs no value; other errors propagate.
+    strconv.Atoi("x") catch (e: *strconv.NumError) { println("not a number:", e.Num) }?
+
+    // Errors.Is-style sentinel checks still use a catch of all errors.
+    os.ReadFile("/nope") catch (err) { println("missing file:", errors.Is(err, os.ErrNotExist)) }
+}
+
+// Output:
+// missing b
+// 1 0
+// -1
+// found 1 no zz bad request: empty key failed: disk on fire
+// not a number: x
+// missing file: true

@@ -1,0 +1,10 @@
+import "context"
+
+// Store persists todos. Every operation is scoped to one owner.
+interface Store {
+    List(ctx: context.Context, owner: string, filter: Filter): []Todo throws
+    Get(ctx: context.Context, owner: string, id: int64): Todo throws
+    Create(ctx: context.Context, owner: string, input: NewTodo): Todo throws
+    Update(ctx: context.Context, owner: string, id: int64, patch: Patch): Todo throws
+    Remove(ctx: context.Context, owner: string, id: int64) throws
+}

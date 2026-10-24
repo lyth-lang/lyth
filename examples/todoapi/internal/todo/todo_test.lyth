@@ -1,0 +1,42 @@
+import "strings"
+import "testing"
+
+func TestNewTodoNormalize(t: *testing.T) throws {
+    got := NewTodo(Title = "  write docs ").Normalize()?
+    if got.Title != "write docs" {
+        t.Errorf("title = %v, want trimmed", got.Title)
+    }
+}
+
+func TestNewTodoValidation(t: *testing.T) {
+    cases := [
+        NewTodo(),
+        NewTodo(Title = "   "),
+        NewTodo(Title = strings.Repeat("x", MaxTitle + 1)),
+    ]
+    for input in cases {
+        got := input.Normalize() catch (err) {
+            if err !is *ValidationError {
+                t.Errorf("normalize(%+v): error %v, want *ValidationError", input, err)
+            } else if err.Fields["title"] == "" {
+                t.Errorf("normalize(%+v): fields %v, want a title problem", input, err.Fields)
+            }
+            continue
+        }
+        t.Errorf("normalize(%+v) = %+v, want an error", input, got)
+    }
+}
+
+func TestPatchNormalize(t: *testing.T) throws {
+    p := Patch(Done = true).Normalize()?
+    if p.Done != true || p.Title != null {
+        t.Errorf("patch = %+v", p)
+    }
+    empty := Patch().Normalize() catch (err) {
+        if !strings.Contains(err.Error(), "must set at least one") {
+            t.Errorf("unexpected error %v", err)
+        }
+        return
+    }
+    t.Errorf("empty patch accepted: %+v", empty)
+}

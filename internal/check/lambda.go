@@ -1,0 +1,205 @@
+package check
+
+import (
+	gotypes "go/types"
+
+	"github.com/lyth-lang/lyth/internal/diag"
+	"github.com/lyth-lang/lyth/internal/syntax"
+	"github.com/lyth-lang/lyth/internal/types"
+)
+
+// signatureOf returns the function signature underlying t, or nil.
+func signatureOf(t types.Type) *types.Signature {
+	switch b := types.Base(t).(type) {
+	case *types.Signature:
+		return b
+	case *types.Named:
+		if b.Go != nil {
+			if sig, ok := b.Go.Underlying().(*gotypes.Signature); ok {
+				return types.LiftSignature(sig)
+			}
+		}
+	}
+	return nil
+}
+
+// lambda checks a lambda against an optional expected function type.
+func (c *Checker) lambda(e *syntax.LambdaExpr, want types.Type) *operand {
+	var exp *types.Signature
+	unknown := want == types.Invalid // the argument of a call that failed to check
+	if unknown {
+		want = nil
+	}
+	if want != nil {
+		exp = signatureOf(want)
+		if exp == nil && !types.IsInterface(want) {
+			c.errorf(diag.ETypeMismatch, e.S, "a lambda cannot be used where %s is expected", want)
+		}
+	}
+	scope := newScope(c.scope, FuncScope)
+	fn := &funcCtx{isLambda: true, name: "lambda", declSpan: e.S}
+	if c.fn != nil {
+		fn.recv, fn.recvDecl = c.fn.recv, c.fn.recvDecl
+	}
+	scope.fn = fn
+	info := &LambdaInfo{}
+	sig := &types.Signature{}
+
+	// A result that is still an unbound type parameter of a generic call
+	// (R in map(xs) { ... }) comes from the body; the call unifies it.
+	inferResult := false
+	if exp != nil {
+		for _, r := range exp.Results {
+			inferResult = inferResult || c.foreignTypeParams(r)
+		}
+	}
+	if exp != nil {
+		sig.Variadic = exp.Variadic
+		sig.Results = exp.Results
+		sig.Throws = exp.Throws
+		sig.Params = exp.Params
+		switch {
+		case len(e.Params) == 0 && !e.HasArrow && len(exp.Params) == 1:
+			it := &VarSym{name: "it", Type: exp.Params[0], Kind: ParamVar, Span: e.S.At(), Implicit: true, Used: true}
+			scope.Insert(it)
+			info.Params = []*VarSym{it}
+		case len(e.Params) != len(exp.Params):
+			d := c.errorf(diag.EArgCount, e.S.At().Join(e.Body.Lbrace), "lambda declares %s, but %s expects %s",
+				plural(len(e.Params), "parameter"), want, plural(len(exp.Params), "parameter"))
+			if len(e.Params) == 0 && len(exp.Params) > 1 {
+				d.WithHint("declare them: { %s -> ... }", placeholderNames(len(exp.Params)))
+			}
+		default:
+			for i, p := range e.Params {
+				t := exp.Params[i]
+				if p.Type != nil {
+					at := c.resolveType(p.Type)
+					if !types.IdenticalIgnoringNull(at, t) {
+						c.errorf(diag.ETypeMismatch, p.Type.Span(), "parameter %s has type %s, but %s is expected here", p.Name.Name, at, t)
+					} else {
+						t = at
+					}
+				}
+				v := &VarSym{name: p.Name.Name, Type: t, Kind: ParamVar, Span: p.Name.S, Used: true}
+				if p.Name.Name != "_" {
+					c.declare(scope, v, p.Name.S)
+				}
+				c.info.Defs[p.Name] = v
+				info.Params = append(info.Params, v)
+			}
+		}
+		fn.fallible, fn.rawTuple = fallibleResults(exp)
+		if n := len(exp.Results); !exp.Throws && n > 0 && types.IsErrorType(exp.Results[n-1]) && types.IsPlatform(exp.Results[n-1]) {
+			// A Go callback returning error (func() error, func(T) (U, error)):
+			// the lambda is fallible and its success values precede the error.
+			// A function type written in Lyth says throws when it can fail; an
+			// Error result there is a value, as in a fun with that type.
+			fn.fallible, fn.rawTuple = true, false
+			sig = &types.Signature{Params: exp.Params, Variadic: exp.Variadic, Results: exp.Results[:n-1], Throws: true}
+		}
+		if inferResult && !fn.fallible {
+			sig.Results = nil
+			fn.infer = true
+		}
+	} else {
+		if unknown && len(e.Params) == 0 && !e.HasArrow {
+			it := &VarSym{name: "it", Type: types.Invalid, Kind: ParamVar, Span: e.S.At(), Implicit: true, Used: true}
+			scope.Insert(it)
+			info.Params = []*VarSym{it}
+		}
+		for _, p := range e.Params {
+			var t types.Type = types.Invalid
+			if p.Type == nil && !unknown {
+				c.errorf(diag.ECannotInfer, p.S, "cannot infer the type of lambda parameter %s", p.Name.Name).
+					WithHint("annotate it: { %s: Type -> ... }", p.Name.Name)
+			} else {
+				t = c.resolveType(p.Type)
+			}
+			v := &VarSym{name: p.Name.Name, Type: t, Kind: ParamVar, Span: p.Name.S, Used: true}
+			if p.Name.Name != "_" {
+				c.declare(scope, v, p.Name.S)
+			}
+			c.info.Defs[p.Name] = v
+			info.Params = append(info.Params, v)
+			sig.Params = append(sig.Params, t)
+		}
+		fn.infer = true
+	}
+	fn.sig = sig
+	info.Fallible = fn.fallible
+	if c.fn != nil {
+		fn.reassigned = c.fn.reassigned // the enclosing body's analysis covers the lambda
+	}
+
+	saveScope, saveFn := c.scope, c.fn
+	c.scope, c.fn = scope, fn
+	stmts := e.Body.Stmts
+	n := len(stmts)
+	var lastExpr syntax.Expr
+	if n > 0 {
+		if es, ok := stmts[n-1].(*syntax.ExprStmt); ok {
+			if _, isJump := es.X.(*syntax.JumpExpr); !isJump {
+				lastExpr = es.X
+			}
+		}
+	}
+	if !fn.infer {
+		needValue := len(sig.Results) == 1
+		if needValue && lastExpr != nil {
+			terminated := c.stmtList(stmts[:n-1])
+			x := c.expr(lastExpr, sig.Results[0])
+			if !terminated && x.mode != ModeInvalid {
+				x = c.singleValue(x)
+				if x.mode != ModeInvalid && !isNothing(x.typ) {
+					c.assign(x, sig.Results[0], "lambda result")
+					info.ResultExpr = lastExpr
+				}
+			}
+		} else {
+			terminated := c.stmtList(stmts)
+			if needValue && !terminated {
+				c.errorf(diag.EMissingReturn, e.Body.Rbrace, "lambda must end with a value of type %s", sig.Results[0])
+			} else if len(sig.Results) > 1 && !terminated {
+				c.errorf(diag.EMissingReturn, e.Body.Rbrace, "lambda must return %s", (&types.Tuple{Elems: sig.Results}).String())
+			}
+		}
+	} else {
+		var resultT types.Type
+		if lastExpr != nil {
+			c.stmtList(stmts[:n-1])
+			x := c.expr(lastExpr, nil)
+			if x.mode == ModeValue {
+				x = c.singleValue(x)
+				if x.mode != ModeInvalid {
+					resultT = c.defaultValueType(x, "lambda result")
+					info.ResultExpr = lastExpr
+				}
+			} else if x.mode == ModeNoValue {
+				resultT = types.Unit
+			}
+		} else {
+			c.stmtList(stmts)
+		}
+		for _, rt := range fn.inferred {
+			if resultT == nil || isNothing(resultT) {
+				resultT = rt
+			} else if !types.Identical(resultT, rt) && rt != types.Unit && !isNothing(rt) {
+				c.errorf(diag.ECannotInfer, e.S, "lambda returns both %s and %s", resultT, rt).
+					WithHint("annotate the expected function type")
+			}
+		}
+		if resultT != nil && resultT != types.Unit && !isNothing(resultT) && resultT != types.Invalid {
+			sig.Results = []types.Type{resultT}
+		}
+	}
+	info.Unused = c.finishLocals(fn)
+	c.scope, c.fn = saveScope, saveFn
+	info.Sig = sig
+	c.info.Lambdas[e] = info
+	if exp != nil && !inferResult {
+		// The lambda has exactly the expected function type (including a Go
+		// callback type returning error).
+		return &operand{mode: ModeValue, typ: types.Base(want)}
+	}
+	return &operand{mode: ModeValue, typ: sig}
+}

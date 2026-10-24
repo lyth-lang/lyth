@@ -1,0 +1,13 @@
+# The documentation site in website/. Its pages are generated from docs/, README.md and
+# examples/todoapi/README.md, with the Go that this checkout's `lyth gen` produces, so the
+# build needs Go.
+[build]
+  base = "website"
+  publish = "dist"
+  command = "npm run build"
+  # rebuild only when something the site is generated from changed
+  ignore = "git diff --quiet $CACHED_COMMIT_REF $COMMIT_REF -- . ../netlify.toml ../docs ../README.md ../examples/todoapi/README.md ../cmd ../internal ../go.mod ../go.sum"
+
+[build.environment]
+  NODE_VERSION = "24"
+  GO_VERSION = "1.26.7"

@@ -1,0 +1,72 @@
+// extensions checks extension functions: on strings, slices, maps, Go types,
+// pointers to Go types, and interfaces, generic or not, with members taking
+// precedence.
+import "strings"
+import "time"
+
+func string.Shout(): string = strings.ToUpper(self) + "!"
+
+func string.Repeat(times: int = 2, sep: string = ""): string = strings.Repeat(self + sep, times)
+
+func []T.Second[T](): T = self[1]
+
+func []T.Keep[T](keep: (T) -> bool): []T {
+    out: []T = []
+    for x in self {
+        if keep(x) {
+            out = append(out, x)
+        }
+    }
+    return out
+}
+
+func []T.Each[T, R](transform: (T) -> R): []R {
+    out: []R = []
+    for x in self {
+        out = append(out, transform(x))
+    }
+    return out
+}
+
+func map[K]V.Has[K: comparable, V](key: K): bool = key in self
+
+func time.Duration.Halved(): time.Duration = self / 2
+
+func *strings.Builder.Line(s: string) {
+    self.WriteString(s)
+    self.WriteString(";")
+}
+
+interface Shape {
+    Area(): float64
+}
+
+func Shape.Describe(): string = "area ${self.Area()}"
+
+struct Square {
+    Side: float64
+}
+
+func Square.Area(): float64 = Side * Side
+
+// A member wins over an extension of the same name.
+func time.Duration.String(): string = "never used"
+
+func main() {
+    println("hi".Shout(), "ab".Repeat(), "ab".Repeat(sep = "-", times = 3))
+    nums := [1, 2, 3, 4, 5]
+    println(nums.Second(), nums.Keep { it % 2 == 1 }.Each { it * 10 }, ["x"].Each { len(it) })
+    println(["a": 1].Has("a"), ["a": 1].Has("b"))
+    println((3 * time.Second).Halved(), time.Minute.String())
+    sb := strings.Builder()
+    sb.Line("one")
+    sb.Line("two")
+    println(sb.String(), Square(Side = 2).Describe())
+}
+
+// Output:
+// HI! abab ab-ab-ab-
+// 2 [10 30 50] [1]
+// true false
+// 1.5s 1m0s
+// one;two; area 4

@@ -1,0 +1,60 @@
+import "slices"
+import "sort"
+import "strings"
+
+struct Person {
+    Name: string
+    Age: int
+}
+
+func apply(xs: []int, f: (int) -> int): []int {
+    out: []int = []
+    for x in xs {
+        out = append(out, f(x))
+    }
+    return out
+}
+
+func counter(): () -> int {
+    n := 0
+    return {
+        n++
+        n
+    }
+}
+
+func main() {
+    println(apply([1, 2, 3]) { it * 10 })
+    println(apply([1, 2, 3], { x -> x + 1 }))
+
+    next := counter()
+    next()
+    next()
+    println(next())
+
+    people := [Person("ada", 36), Person("linus", 28), Person("grace", 45)]
+    sort.Slice(people) { i, j -> people[i].Age < people[j].Age }
+    println(people[0].Name, people[2].Name)
+
+    slices.SortFunc(people) { a, b -> strings.Compare(a.Name, b.Name) }
+    println(people[0].Name, people[1].Name)
+
+    idx := slices.IndexFunc(people) { it.Age > 40 }
+    println(idx)
+
+    upper := strings.Map({ r -> if r == 'a' { 'A' } else { r } }, "banana")
+    println(upper)
+
+    adder := { a: int, b: int -> a + b }
+    println(adder(2, 3))
+}
+
+// Output:
+// [10 20 30]
+// [2 3 4]
+// 3
+// linus grace
+// ada grace
+// 1
+// bAnAnA
+// 5

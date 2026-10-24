@@ -1,0 +1,14 @@
+func f(xs: []int, m: map[string]int, s: string, nested: [][]int, maybe: int?) {
+    a := "x" in xs // ERROR E0201 "expected int, found string"
+    b := 1 in m // ERROR E0201 "expected string, found int"
+    c := 1.5 in s // ERROR E0209 "in a string, in looks for a string or a rune"
+    d := 3 in 5 // ERROR E0209 "in needs a range, slice, array, map, or string on the right"
+    e := xs in nested // ERROR E0209 "elements cannot be compared"
+    g := maybe in 1..3 // ERROR E0401 "it may be null"
+    h := "a" in 1..3 // ERROR E0201 "expected int, found string"
+    r := 1..3 // ERROR E0216 "ranges can only be used in for loops and in tests"
+    when {
+        in xs -> println("x") // ERROR E0216 "in conditions need a when subject"
+    }
+    println(a, b, c, d, e, g, h, r)
+}

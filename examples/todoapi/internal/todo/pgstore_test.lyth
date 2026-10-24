@@ -1,0 +1,67 @@
+import "context"
+import "errors"
+import "fmt"
+import "os"
+import "testing"
+import "time"
+
+import "github.com/jackc/pgx/v5/pgxpool"
+
+// TestPgStore runs against a real PostgreSQL database when DATABASE_URL is
+// set (for example DATABASE_URL=postgres:///todo_test), and is skipped
+// otherwise.
+func TestPgStore(t: *testing.T) throws {
+    url := os.Getenv("DATABASE_URL")
+    if url == "" {
+        t.Skip("DATABASE_URL is not set")
+    }
+    ctx := context.Background()
+    pool := pgxpool.New(ctx, url)?
+    defer pool.Close()
+    Migrate(ctx, pool)?
+
+    // A unique owner keeps runs independent of each other and of real data.
+    owner := fmt.Sprintf("test-%d", time.Now().UnixNano())
+    defer pool.Exec(context.Background(), "DELETE FROM todos WHERE owner = $1", owner) catch {}
+
+    store := NewPgStore(pool)
+    store.Ping(ctx)?
+    a := store.Create(ctx, owner, NewTodo(Title = "first"))?
+    b := store.Create(ctx, owner, NewTodo(Title = "second"))?
+    if a.ID == 0 || b.ID <= a.ID || a.CreatedAt.IsZero() {
+        t.Fatalf("created %+v and %+v", a, b)
+    }
+
+    got := store.Get(ctx, owner, a.ID)?
+    if got.Title != "first" || got.Done {
+        t.Fatalf("get = %+v", got)
+    }
+    store.Get(ctx, "someone-else", a.ID) catch (err) {
+        if !errors.Is(err, ErrNotFound) {
+            t.Fatalf("get by another owner: %v", err)
+        }
+    }
+
+    updated := store.Update(ctx, owner, a.ID, Patch(Done = true))?
+    if !updated.Done || updated.Title != "first" {
+        t.Fatalf("update = %+v", updated)
+    }
+
+    open := store.List(ctx, owner, Filter(Done = false, Limit = 10))?
+    if len(open) != 1 || open[0].ID != b.ID {
+        t.Fatalf("list done=false = %+v", open)
+    }
+    page := store.List(ctx, owner, Filter(After = a.ID, Limit = 10))?
+    if len(page) != 1 || page[0].ID != b.ID {
+        t.Fatalf("list after = %+v", page)
+    }
+
+    store.Remove(ctx, owner, a.ID)?
+    store.Remove(ctx, owner, a.ID) catch (err) {
+        if !errors.Is(err, ErrNotFound) {
+            t.Fatalf("second remove: %v", err)
+        }
+        return
+    }
+    t.Fatal("second remove succeeded")
+}

@@ -1,0 +1,172 @@
+goos: darwin
+goarch: arm64
+pkg: lythbench/errprop
+cpu: Apple M1 Pro
+                                    │ results/go.txt │          results/lyth.txt           │
+                                    │     sec/op     │   sec/op     vs base               │
+Chain/depth=1/fail=false-10             4.211n ±  9%   4.197n ± 4%       ~ (p=0.225 n=10)
+Chain/depth=1/fail=true-10              4.192n ± 16%   4.195n ± 2%       ~ (p=0.631 n=10)
+Chain/depth=10/fail=false-10            15.82n ± 15%   15.81n ± 5%       ~ (p=0.424 n=10)
+Chain/depth=10/fail=true-10             12.96n ± 23%   12.91n ± 3%       ~ (p=0.382 n=10)
+ChainWrapped/depth=10/fail=false-10     15.83n ±  8%   15.84n ± 4%       ~ (p=0.684 n=10)
+ChainWrapped/depth=10/fail=true-10      1.264µ ± 94%   1.237µ ± 9%       ~ (p=0.393 n=10)
+Fallback-10                             12.60n ± 15%   12.59n ± 4%       ~ (p=0.670 n=10)
+geomean                                 19.05n         18.98n       -0.40%
+
+                                    │ results/go.txt │           results/lyth.txt           │
+                                    │      B/op      │    B/op     vs base                 │
+Chain/depth=1/fail=false-10             0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+Chain/depth=1/fail=true-10              0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+Chain/depth=10/fail=false-10            0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+Chain/depth=10/fail=true-10             0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+ChainWrapped/depth=10/fail=false-10     0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+ChainWrapped/depth=10/fail=true-10      952.0 ± 0%     952.0 ± 0%       ~ (p=1.000 n=10) ¹
+Fallback-10                             0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+geomean                                            ²               +0.00%                ²
+¹ all samples are equal
+² summaries must be >0 to compute geomean
+
+                                    │ results/go.txt │           results/lyth.txt           │
+                                    │   allocs/op    │ allocs/op   vs base                 │
+Chain/depth=1/fail=false-10             0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+Chain/depth=1/fail=true-10              0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+Chain/depth=10/fail=false-10            0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+Chain/depth=10/fail=true-10             0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+ChainWrapped/depth=10/fail=false-10     0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+ChainWrapped/depth=10/fail=true-10      20.00 ± 0%     20.00 ± 0%       ~ (p=1.000 n=10) ¹
+Fallback-10                             0.000 ± 0%     0.000 ± 0%       ~ (p=1.000 n=10) ¹
+geomean                                            ²               +0.00%                ²
+¹ all samples are equal
+² summaries must be >0 to compute geomean
+
+pkg: lythbench/fanout
+                         │ results/go.txt │           results/lyth.txt           │
+                         │     sec/op     │    sec/op     vs base               │
+ProcessAll/ok-10             1.593m ± 17%   1.613m ± 28%       ~ (p=0.684 n=10)
+ProcessAll/fail-early-10     1.098m ± 15%   1.137m ± 30%       ~ (p=0.912 n=10)
+geomean                      1.323m         1.354m        +2.35%
+
+                         │ results/go.txt │           results/lyth.txt           │
+                         │      B/op      │     B/op      vs base               │
+ProcessAll/ok-10             172.9Ki ± 0%   172.9Ki ± 0%       ~ (p=0.631 n=10)
+ProcessAll/fail-early-10     172.2Ki ± 0%   172.2Ki ± 0%       ~ (p=0.446 n=10)
+geomean                      172.5Ki        172.5Ki       +0.00%
+
+                         │ results/go.txt │           results/lyth.txt            │
+                         │   allocs/op    │  allocs/op   vs base                 │
+ProcessAll/ok-10              4.006k ± 0%   4.006k ± 0%       ~ (p=1.000 n=10)
+ProcessAll/fail-early-10      4.005k ± 0%   4.005k ± 0%       ~ (p=1.000 n=10) ¹
+geomean                       4.005k        4.005k       +0.00%
+¹ all samples are equal
+
+pkg: lythbench/httpapi
+                 │ results/go.txt │           results/lyth.txt           │
+                 │     sec/op     │    sec/op     vs base               │
+Handler-10           15.82µ ± 20%   16.07µ ± 31%       ~ (p=0.631 n=10)
+ServerLatency-10     75.97µ ± 10%   79.82µ ± 15%       ~ (p=0.481 n=10)
+geomean              34.66µ         35.82µ        +3.34%
+
+                 │ results/go.txt │           results/lyth.txt           │
+                 │      B/op      │     B/op      vs base               │
+Handler-10           11.32Ki ± 0%   11.32Ki ± 0%       ~ (p=0.195 n=10)
+ServerLatency-10     12.96Ki ± 0%   12.96Ki ± 0%       ~ (p=0.699 n=10)
+geomean              12.11Ki        12.11Ki       -0.01%
+
+                 │ results/go.txt │           results/lyth.txt           │
+                 │   allocs/op    │ allocs/op   vs base                 │
+Handler-10             71.00 ± 0%   71.00 ± 0%       ~ (p=1.000 n=10) ¹
+ServerLatency-10       137.0 ± 0%   137.0 ± 0%       ~ (p=1.000 n=10) ¹
+geomean                98.63        98.63       +0.00%
+¹ all samples are equal
+
+                 │ results/go.txt │        results/lyth.txt        │
+                 │     p50-µs     │   p50-µs     vs base          │
+ServerLatency-10       69.50 ± 8%   68.50 ± 14%  ~ (p=0.986 n=10)
+
+                 │ results/go.txt │        results/lyth.txt        │
+                 │     p90-µs     │   p90-µs     vs base          │
+ServerLatency-10      96.50 ± 18%   93.00 ± 23%  ~ (p=0.591 n=10)
+
+                 │ results/go.txt │        results/lyth.txt        │
+                 │     p99-µs     │   p99-µs     vs base          │
+ServerLatency-10      154.0 ± 16%   162.0 ± 77%  ~ (p=0.516 n=10)
+
+pkg: lythbench/index
+              │ results/go.txt │           results/lyth.txt           │
+              │     sec/op     │    sec/op     vs base               │
+BuildIndex-10      900.4µ ± 6%   897.3µ ± 14%       ~ (p=0.912 n=10)
+Summaries-10       392.8µ ± 6%   398.8µ ± 17%       ~ (p=0.739 n=10)
+geomean            594.7µ        598.2µ        +0.59%
+
+              │ results/go.txt │           results/lyth.txt           │
+              │      B/op      │     B/op      vs base               │
+BuildIndex-10     678.0Ki ± 0%   678.0Ki ± 0%       ~ (p=1.000 n=10)
+Summaries-10      357.6Ki ± 0%   357.6Ki ± 0%       ~ (p=0.616 n=10)
+geomean           492.4Ki        492.4Ki       -0.00%
+
+              │ results/go.txt │           results/lyth.txt            │
+              │   allocs/op    │  allocs/op   vs base                 │
+BuildIndex-10      3.331k ± 0%   3.331k ± 0%       ~ (p=1.000 n=10) ¹
+Summaries-10       2.902k ± 0%   2.902k ± 0%       ~ (p=1.000 n=10) ¹
+geomean            3.109k        3.109k       +0.00%
+¹ all samples are equal
+
+pkg: lythbench/jsoncodec
+                        │ results/go.txt │          results/lyth.txt           │
+                        │     sec/op     │   sec/op     vs base               │
+DecodeTotal/items=5-10       4.877µ ± 5%   4.797µ ± 3%       ~ (p=0.631 n=10)
+DecodeTotal/items=50-10      28.16µ ± 4%   28.23µ ± 4%       ~ (p=0.780 n=10)
+RoundTrip-10                 32.84µ ± 6%   33.03µ ± 4%       ~ (p=0.853 n=10)
+geomean                      16.52µ        16.48µ       -0.27%
+
+                        │ results/go.txt │            results/lyth.txt            │
+                        │      B/op      │     B/op      vs base                 │
+DecodeTotal/items=5-10      1.164Ki ± 0%   1.164Ki ± 0%       ~ (p=1.000 n=10) ¹
+DecodeTotal/items=50-10     5.742Ki ± 0%   5.742Ki ± 0%       ~ (p=1.000 n=10) ¹
+RoundTrip-10                8.496Ki ± 0%   8.496Ki ± 0%       ~ (p=0.978 n=10)
+geomean                     3.844Ki        3.844Ki       +0.00%
+¹ all samples are equal
+
+                        │ results/go.txt │           results/lyth.txt           │
+                        │   allocs/op    │ allocs/op   vs base                 │
+DecodeTotal/items=5-10        28.00 ± 0%   28.00 ± 0%       ~ (p=1.000 n=10) ¹
+DecodeTotal/items=50-10       76.00 ± 0%   76.00 ± 0%       ~ (p=1.000 n=10) ¹
+RoundTrip-10                  78.00 ± 0%   78.00 ± 0%       ~ (p=1.000 n=10) ¹
+geomean                       54.96        54.96       +0.00%
+¹ all samples are equal
+
+                        │ results/go.txt │           results/lyth.txt           │
+                        │      B/s       │     B/s       vs base               │
+DecodeTotal/items=5-10      80.96Mi ± 6%   82.31Mi ± 3%       ~ (p=0.631 n=10)
+DecodeTotal/items=50-10     90.23Mi ± 4%   90.00Mi ± 4%       ~ (p=0.780 n=10)
+RoundTrip-10                77.37Mi ± 6%   76.92Mi ± 4%       ~ (p=0.853 n=10)
+geomean                     82.68Mi        82.90Mi       +0.27%
+
+pkg: lythbench/logagg
+             │ results/go.txt │        results/lyth.txt         │
+             │     sec/op     │    sec/op     vs base          │
+Aggregate-10      982.3µ ± 5%   1002.7µ ± 6%  ~ (p=0.529 n=10)
+
+             │ results/go.txt │        results/lyth.txt         │
+             │      B/op      │     B/op      vs base          │
+Aggregate-10     782.0Ki ± 0%   782.0Ki ± 0%  ~ (p=0.409 n=10)
+
+             │ results/go.txt │         results/lyth.txt         │
+             │   allocs/op    │  allocs/op   vs base            │
+Aggregate-10      10.01k ± 0%   10.01k ± 0%  ~ (p=1.000 n=10) ¹
+¹ all samples are equal
+
+pkg: lythbench/pgapi
+             │ results/go.txt │        results/lyth.txt         │
+             │     sec/op     │    sec/op     vs base          │
+FetchJSON-10     24.74µ ± 10%   25.92µ ± 12%  ~ (p=0.579 n=10)
+
+             │ results/go.txt │        results/lyth.txt         │
+             │      B/op      │    B/op     vs base            │
+FetchJSON-10       712.0 ± 0%   712.0 ± 0%  ~ (p=1.000 n=10) ¹
+¹ all samples are equal
+
+             │ results/go.txt │        results/lyth.txt         │
+             │   allocs/op    │ allocs/op   vs base            │
+FetchJSON-10       13.00 ± 0%   13.00 ± 0%  ~ (p=1.000 n=10) ¹
+¹ all samples are equal

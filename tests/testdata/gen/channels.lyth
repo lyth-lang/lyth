@@ -1,0 +1,42 @@
+import "context"
+
+func produce(out: chan<- int, n: int) {
+    defer out.close()
+    for i in 0..<n {
+        out.send(i)
+    }
+}
+
+func first(ch: <-chan *string): string {
+    s := ch.receive() ?: return "closed"
+    return *s
+}
+
+func total(results: <-chan int, ctx: context.Context): int throws {
+    sum := 0
+    while true {
+        select {
+            r, ok := results.receive() -> {
+                if !ok {
+                    break
+                }
+                sum += r
+            }
+            ctx.Done().receive() -> throw ctx.Err()
+        }
+    }
+    return sum
+}
+
+func tryOffer(ch: chan<- int, v: int): bool {
+    select {
+        ch.send(v) -> return true
+        else -> return false
+    }
+}
+
+func main() {
+    ch := make(chan int, 3)
+    produce(ch, 3)
+    println(total(ch, context.Background()) catch { -1 }, tryOffer(ch, 1))
+}

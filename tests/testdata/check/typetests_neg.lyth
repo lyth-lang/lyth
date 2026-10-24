@@ -1,0 +1,33 @@
+import "io"
+
+interface Shape {
+    Area(): float64
+}
+
+struct Circle {
+    R: float64
+}
+
+func Circle.Area(): float64 = R * R
+
+struct Plain {
+    N: int
+}
+
+typealias Loop = Loop // ERROR E0216 "type alias Loop refers to itself"
+typealias Nothing2 = Missing // ERROR E0101 "undefined type Missing"
+
+func tests(s: Shape, c: Circle, r: io.Reader) {
+    a := c is Circle // ERROR E0209 "type tests need an interface value"
+    b := s is Plain // ERROR E0209 "impossible type test: Shape can never hold a Plain"
+    d := s as? Circle? // ERROR E0216 "test for the non-null type Circle"
+    e := r as Plain // ERROR E0209 "impossible type test"
+    when {
+        is Circle -> println("x") // ERROR E0216 "is conditions need a when subject"
+    }
+    m: Shape = c
+    if m is Circle {
+        println(m.r) // ERROR E0205 "has no field or method r"
+    }
+    println(a, b, d, e)
+}

@@ -1,0 +1,32 @@
+// Private expression-bodied functions may leave out the result type.
+
+struct Point {
+    X: int
+    Y: int
+}
+
+func Point.plus(o: Point) = Point(X = X + o.X, Y = Y + o.Y)
+func Point.lengthSquared() = X * X + Y * Y
+
+// twice uses square before its declaration: inference follows references.
+func twice(n: int) = square(n) * 2
+func square(n: int) = n * n
+
+func greeting(name: string) = "hello ${name}"
+func half(x: float64) = x / 2
+func ratio() = 3 / 2.0
+func origin() = Point(0, 0)
+func describe(p: Point) = "${p.X},${p.Y} (${p.lengthSquared()})"
+func log(msg: string) = println("log:", msg)
+
+func Area(w: float64, h: float64): float64 = w * h
+
+func main() {
+    p := origin().plus(Point(3, 4))
+    println(describe(p), twice(3), greeting("lyth"), half(5), ratio(), Area(2, 3))
+    log("done")
+}
+
+// Output:
+// 3,4 (25) 18 hello lyth 2.5 1.5 6
+// log: done

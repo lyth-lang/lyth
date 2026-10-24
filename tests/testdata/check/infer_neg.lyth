@@ -1,0 +1,10 @@
+import "strconv"
+
+func Visible(x: int) = x * 2 // ERROR E0208 "declare the result type of this expression-bodied function"
+func countdown(n: int) = if n == 0 { 0 } else { countdown(n - 1) } // ERROR E0208 "cannot infer the result type of countdown: it depends on itself"
+func parse(s: string) = strconv.Atoi(s) // ERROR E0208 "parse can fail, so it declares its result type with throws"
+func nothing() = null // ERROR E0208 "cannot infer a type from null"
+
+func use() {
+    println(Visible(1), countdown(3), parse("1"), nothing())
+}

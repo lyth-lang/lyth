@@ -1,0 +1,73 @@
+// catchbox checks catches whose value is an optional of the call's value:
+// catch { null } makes an Int an Int?.
+import "fmt"
+
+struct NotFound {
+    Key: string
+}
+
+func *NotFound.Error(): string = "not found: ${Key}"
+
+func lookup(key: string): int throws {
+    when key {
+        "a" -> return 1
+        "io" -> throw fmt.Errorf("disk")
+    }
+    throw &NotFound(Key = key)
+}
+
+func parse(s: string): int? = s.toInt() catch { null }
+
+func parseBlock(s: string): int? {
+    return s.toInt() catch { null }
+}
+
+func show(n: int?): string = if n == null { "none" } else { "${n}" }
+
+func logged(s: string): int? {
+    n := s.toInt() catch (err) {
+        println("bad:", err)
+        null
+    }
+    return n
+}
+
+func withDefault(s: string): int? {
+    n: int? = s.toInt() catch { 5 }
+    return n
+}
+
+func branch(s: string, c: bool): int? {
+    n: int? = if c { s.toInt() catch { 6 } } else { null }
+    return n
+}
+
+func chained(key: string): int? {
+    n := lookup(key) catch (_: *NotFound) { 0 } catch { null }
+    return n
+}
+
+func propagated(s: string): int? throws {
+    n: int? = s.toInt()?
+    return n
+}
+
+func main() throws {
+    println(show(parse("1")), show(parse("x")), show(parseBlock("2")), show(parseBlock("y")))
+    println(show("3".toInt() catch { null }), show("z".toInt() catch { null }))
+    println(show(logged("4")), show(logged("w")))
+    println(show(withDefault("7")), show(withDefault("v")))
+    println(show(branch("8", true)), show(branch("u", true)), show(branch("8", false)))
+    println(show(chained("a")), show(chained("zz")), show(chained("io")))
+    println(show(propagated("9")?), propagated("t") catch { -1 })
+}
+
+// Output:
+// 1 none 2 none
+// 3 none
+// bad: strconv.Atoi: parsing "w": invalid syntax
+// 4 none
+// 7 5
+// 8 6 none
+// 1 0 none
+// 9 -1

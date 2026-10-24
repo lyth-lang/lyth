@@ -1,0 +1,192 @@
+[
+  {
+    "file": "docs/guide/go-interop.md",
+    "source": "import \"fmt\"\nimport \"net/url\"\nimport \"strings\"\nimport \"crypto/sha256\" as sha\n\nfunc main() {\n    u := url.Parse(\"https://example.com/a?b=1\") catch { return }\n    fmt.Println(u.Host, u.Query().Get(\"b\"))\n    user, domain, found := strings.Cut(\"ada@example.com\", \"@\")\n    println(user, domain, found)\n    println(len(sha.Sum256([]byte(\"lyth\"))))\n}\n",
+    "output": "example.com 1\nada example.com true\n32\n"
+  },
+  {
+    "file": "docs/guide/go-interop.md",
+    "source": "import \"fmt\"\nimport \"net/http\"\nimport \"strings\"\nimport \"time\"\n\nfunc main() {\n    srv := \u0026http.Server(Addr = \":8080\", ReadHeaderTimeout = 5 * time.Second)\n    srv.IdleTimeout = time.Minute\n    fmt.Println(srv.Addr, srv.ReadHeaderTimeout, srv.IdleTimeout)\n\n    sb := strings.Builder()\n    sb.WriteString(\"built \")\n    sb.WriteString(\"in Lyth\")\n    println(sb.String(), sb.Len())\n}\n",
+    "output": ":8080 5s 1m0s\nbuilt in Lyth 13\n"
+  },
+  {
+    "file": "docs/guide/go-interop.md",
+    "source": "import \"fmt\"\nimport \"sort\"\n\nstruct Temperature {\n    Celsius: float64\n}\n\nfunc Temperature.String(): string = \"${Celsius}°C\"\n\nstruct NotFound {\n    Key: string\n}\n\nfunc *NotFound.Error(): string = \"not found: ${Key}\"\n\nstruct byLength : sort.Interface {\n    Words: []string\n}\n\nfunc byLength.Len(): int = len(Words)\nfunc byLength.Less(i: int, j: int): bool = len(Words[i]) \u003c len(Words[j])\nfunc byLength.Swap(i: int, j: int) {\n    Words[i], Words[j] = Words[j], Words[i]\n}\n\nfunc lookup(key: string): int throws {\n    throw \u0026NotFound(Key = key)\n}\n\nfunc main() {\n    fmt.Println(Temperature(Celsius = 21.5))\n    words := [\"banana\", \"fig\", \"kiwi\"]\n    sort.Sort(byLength(Words = words))\n    println(words)\n    lookup(\"answer\") catch (e: *NotFound) {\n        println(\"missing\", e.Key)\n    } catch {\n        println(\"lookup failed\")\n    }\n}\n",
+    "output": "21.5°C\n[fig kiwi banana]\nmissing answer\n"
+  },
+  {
+    "file": "docs/guide/go-interop.md",
+    "source": "import \"cmp\"\nimport \"errors\"\nimport \"io/fs\"\nimport \"os\"\nimport \"slices\"\n\nstruct Item {\n    Name: string\n    Price: int\n}\n\nfunc main() {\n    items := [Item(Name = \"tea\", Price = 4), Item(Name = \"cake\", Price = 7), Item(Name = \"jam\", Price = 2)]\n    slices.SortFunc(items, { a, b -\u003e cmp.Compare(a.Price, b.Price) })\n    println(items[0].Name, slices.IndexFunc(items, { it.Name == \"cake\" }))\n    println(slices.Max([3, 9, 4]), slices.Contains([\"a\", \"b\"], \"b\"))\n\n    os.Remove(\"/no/such/file\") catch (err) {\n        pe, ok := errors.AsType[*fs.PathError](err)\n        println(ok, pe.Op, pe.Path)\n    }\n}\n",
+    "output": "jam 2\n9 true\ntrue remove /no/such/file\n"
+  },
+  {
+    "file": "docs/guide/go-interop.md",
+    "source": "import \"fmt\"\nimport \"net/http\"\nimport \"net/http/httptest\"\nimport \"strings\"\nimport \"unicode\"\n\ntypealias Middleware = (http.Handler) -\u003e http.Handler\n\nfunc withHeader(name: string, value: string): Middleware = { next -\u003e\n    http.HandlerFunc({ w, r -\u003e\n        w.Header().Set(name, value)\n        next.ServeHTTP(w, r)\n    })\n}\n\nfunc main() {\n    println(strings.Map({ r -\u003e unicode.ToUpper(r) }, \"shout\"))\n    app := withHeader(\"X-Powered-By\", \"Lyth\")(http.HandlerFunc({ w, r -\u003e\n        fmt.Fprint(w, \"ok\") catch {}\n    }))\n    rec := httptest.NewRecorder()\n    app.ServeHTTP(rec, httptest.NewRequest(\"GET\", \"/\", null))\n    println(rec.Header().Get(\"X-Powered-By\"), rec.Body.String())\n}\n",
+    "output": "SHOUT\nLyth ok\n"
+  },
+  {
+    "file": "docs/guide/lyth-for-go-programmers.md",
+    "source": "import \"errors\"\nimport \"strconv\"\nimport \"strings\"\n\nstruct Order {\n    Item: string\n    Qty: int\n}\n\nfunc parseOrder(line: string): Order throws {\n    item, qty, found := strings.Cut(line, \"=\")\n    if !found {\n        throw errors.New(\"missing = in ${line}\")\n    }\n    return Order(Item = item, Qty = strconv.Atoi(qty)?)\n}\n\nfunc parseAll(lines: []string): []Order throws {\n    orders: []Order = []\n    for line in lines {\n        orders = append(orders, parseOrder(line)?)\n    }\n    return orders\n}\n\nfunc main() {\n    orders := parseAll([\"tea=2\", \"cake=1\"]) catch (err) {\n        println(\"error:\", err)\n        return\n    }\n    println(len(orders), orders[0].Item, orders[1].Qty)\n    parseAll([\"tea=2\", \"cake\"]) catch (err) { println(\"error:\", err) }\n}\n",
+    "output": "2 tea 1\nerror: missing = in cake\n"
+  },
+  {
+    "file": "docs/guide/lyth-for-go-programmers.md",
+    "source": "import \"strconv\"\nimport \"time\"\n\nstruct Config {\n    Port: int\n    Timeout: time.Duration\n    Debug: bool\n}\n\nfunc load(env: map[string]string): Config throws {\n    return Config(\n        Port = strconv.Atoi(env[\"PORT\"])?,\n        Timeout = time.ParseDuration(env[\"TIMEOUT\"])?,\n        Debug = strconv.ParseBool(env[\"DEBUG\"])?,\n    )\n}\n\nfunc main() {\n    cfg := load([\"PORT\": \"8080\", \"TIMEOUT\": \"5s\", \"DEBUG\": \"true\"]) catch (err) {\n        println(err)\n        return\n    }\n    println(cfg)\n    load([\"PORT\": \"80\", \"TIMEOUT\": \"soon\", \"DEBUG\": \"no\"]) catch (err) { println(\"error:\", err) }\n}\n",
+    "output": "{8080 5s true}\nerror: time: invalid duration \"soon\"\n"
+  },
+  {
+    "file": "docs/guide/lyth-for-go-programmers.md",
+    "source": "import \"errors\"\n\nstruct User {\n    Name: string\n    Email: string?\n}\n\nvar users: map[string]User = [\n    \"ada\": User(Name = \"Ada\", Email = \"ada@example.com\"),\n    \"bob\": User(Name = \"Bob\", Email = null),\n]\n\nfunc find(id: string): User? throws {\n    if id == \"\" {\n        throw errors.New(\"empty id\")\n    }\n    user, ok := users[id]\n    if !ok {\n        return null\n    }\n    return user\n}\n\nfunc describe(id: string): string throws {\n    user := find(id)? ?: return \"nobody\"\n    email := user.Email ?: \"no email\"\n    return \"${user.Name} \u003c${email}\u003e\"\n}\n\nfunc main() {\n    for id in [\"ada\", \"bob\", \"eve\", \"\"] {\n        println(describe(id) catch (err) { \"error: ${err}\" })\n    }\n}\n",
+    "output": "Ada \u003cada@example.com\u003e\nBob \u003cno email\u003e\nnobody\nerror: empty id\n"
+  },
+  {
+    "file": "docs/guide/lyth-for-go-programmers.md",
+    "source": "struct Address {\n    City: string\n}\n\nstruct Customer {\n    Address: Address?\n}\n\nstruct Order {\n    Customer: Customer?\n}\n\nfunc cityOf(o: Order?): string = o?.Customer?.Address?.City ?: \"unknown\"\n\nfunc main() {\n    full := Order(Customer = Customer(Address = Address(City = \"Oslo\")))\n    println(cityOf(full), cityOf(Order(Customer = Customer(Address = null))), cityOf(null))\n}\n",
+    "output": "Oslo unknown unknown\n"
+  },
+  {
+    "file": "docs/guide/lyth-for-go-programmers.md",
+    "source": "struct ValidationError {\n    Field: string\n}\n\nfunc *ValidationError.Error(): string = \"invalid ${Field}\"\n\nfunc validate(name: string): *ValidationError? = if name == \"\" { \u0026ValidationError(Field = \"name\") } else { null }\n\nfunc check(name: string): error? = validate(name)\n\nfunc main() {\n    println(check(\"ada\") == null, check(\"\"))\n}\n",
+    "output": "true invalid name\n"
+  },
+  {
+    "file": "docs/guide/lyth-for-go-programmers.md",
+    "source": "func portOr(s: string, fallback: int): int = s.toInt() catch { fallback }\n\nfunc percent(s: string): int throws {\n    n := s.toInt() catch { throw Problem(Field = \"percent\", Reason = \"not a number: ${s}\") }\n    if n \u003c 0 || n \u003e 100 {\n        throw Problem(Field = \"percent\", Reason = \"out of range: ${n}\")\n    }\n    return n\n}\n\nstruct Problem {\n    Field: string\n    Reason: string\n}\n\nfunc Problem.Error(): string = \"${Field}: ${Reason}\"\n\nfunc main() {\n    println(portOr(\"8080\", 80), portOr(\"http\", 80))\n    println(percent(\"42\") catch { -1 })\n    percent(\"142\") catch (err) { println(err) }\n    percent(\"lots\") catch (err) { println(err) }\n}\n",
+    "output": "8080 80\n42\npercent: out of range: 142\npercent: not a number: lots\n"
+  },
+  {
+    "file": "docs/guide/lyth-for-go-programmers.md",
+    "source": "import \"errors\"\nimport \"os\"\n\nfunc loadProfile(user: string, attempt: int): string throws {\n    data := os.ReadFile(\"/profiles/${user}.json\") catch (err) {\n        throw err.wrap(\"loading profile of ${user} (attempt ${attempt})\")\n    }\n    return string(data)\n}\n\nfunc main() {\n    loadProfile(\"ada\", 2) catch (err) {\n        println(err)\n        println(\"not found:\", errors.Is(err, os.ErrNotExist))\n    }\n}\n",
+    "output": "loading profile of ada (attempt 2): open /profiles/ada.json: no such file or directory\nnot found: true\n"
+  },
+  {
+    "file": "docs/guide/lyth-for-go-programmers.md",
+    "source": "import \"errors\"\nimport \"fmt\"\n\nstruct NotFound {\n    ID: int\n}\n\nfunc *NotFound.Error(): string = \"user ${ID} not found\"\n\nfunc find(id: int): string throws {\n    if id \u003c 0 {\n        throw errors.New(\"database unavailable\")\n    }\n    if id != 1 {\n        throw fmt.Errorf(\"find: %w\", \u0026NotFound(ID = id))\n    }\n    return \"Ada\"\n}\n\nfunc status(id: int): int {\n    find(id) catch (_: *NotFound) {\n        return 404\n    } catch {\n        return 500\n    }\n    return 200\n}\n\nfunc nameOr(id: int, fallback: string): string throws {\n    name := find(id) catch (_: *NotFound) { fallback }?\n    return name\n}\n\nfunc main() {\n    println(status(1), status(2), status(-1))\n    println(nameOr(2, \"guest\") catch { \"?\" }, nameOr(-1, \"guest\") catch (err) { \"error: ${err}\" })\n}\n",
+    "output": "200 404 500\nguest error: database unavailable\n"
+  },
+  {
+    "file": "docs/guide/lyth-for-go-programmers.md",
+    "source": "import \"time\"\n\nfunc connect(host: string, port: int = 5432, tls: bool = true, timeout: time.Duration = 5 * time.Second): string =\n    \"${host}:${port} tls=${tls} timeout=${timeout}\"\n\nfunc main() {\n    println(connect(\"db\"))\n    println(connect(\"db\", tls = false))\n    println(connect(\"replica\", 6432, timeout = time.Second))\n}\n",
+    "output": "db:5432 tls=true timeout=5s\ndb:5432 tls=false timeout=5s\nreplica:6432 tls=true timeout=1s\n"
+  },
+  {
+    "file": "docs/guide/lyth-for-go-programmers.md",
+    "source": "import \"io\"\nimport \"strings\"\n\nfunc writeText(w: io.Writer, s: string): int throws {\n    if w is io.StringWriter {\n        return w.WriteString(s)    // w is an io.StringWriter here\n    }\n    return w.Write([]byte(s))\n}\n\nfunc kind(v: any): string = when v {\n    is int -\u003e \"int\"\n    is string -\u003e \"string of ${len(v)} bytes\"\n    is error -\u003e \"error: ${v.Error()}\"\n    else -\u003e \"something else\"\n}\n\nfunc main() {\n    sb := strings.Builder()\n    println(writeText(\u0026sb, \"hello\") catch { 0 }, sb.String())\n    println(kind(42), kind(\"lyth\"), kind(io.EOF), kind(1.5))\n}\n",
+    "output": "5 hello\nint string of 4 bytes error: EOF something else\n"
+  },
+  {
+    "file": "docs/guide/lyth-for-go-programmers.md",
+    "source": "enum Method { Get, Post, Delete }\n\nsealed interface Result {\n    Status(): int\n}\n\nstruct Ok : Result {\n    Body: string\n}\n\nfunc Ok.Status(): int = 200\n\nstruct NotFound : Result {\n    Path: string\n}\n\nfunc NotFound.Status(): int = 404\n\nfunc allowed(m: Method): bool = when m {\n    Get -\u003e true\n    Post, Delete -\u003e false\n}\n\nfunc render(r: Result): string = when r {\n    is Ok -\u003e r.Body\n    is NotFound -\u003e \"no page at ${r.Path}\"\n}\n\nfunc main() {\n    println(Method.Get, allowed(Method.Get), allowed(Method.Delete))\n    println(render(Ok(Body = \"hi\")), render(NotFound(Path = \"/x\")))\n}\n",
+    "output": "Get true false\nhi no page at /x\n"
+  },
+  {
+    "file": "docs/guide/lyth-for-go-programmers.md",
+    "source": "import \"time\"\n\nfunc main() {\n    results := make(chan int, 3)\n    for i in 1..3 {\n        go { results.send(i * 10) }\n    }\n    sum := 0\n    for _ in 1..3 {\n        sum += results.receive()\n    }\n    println(sum)\n\n    never := make(chan int)\n    select {\n        v := never.receive() -\u003e println(v)\n        time.After(10 * time.Millisecond).receive() -\u003e println(\"timed out\")\n    }\n}\n",
+    "output": "60\ntimed out\n"
+  },
+  {
+    "file": "docs/guide/lyth-for-go-programmers.md",
+    "source": "import \"lyth/coll\"\n\nstruct Order {\n    Customer: string\n    Total: int\n    Paid: bool\n}\n\nfunc main() {\n    orders := [\n        Order(Customer = \"ada\", Total = 30, Paid = true),\n        Order(Customer = \"linus\", Total = 12, Paid = false),\n        Order(Customer = \"ada\", Total = 8, Paid = false),\n    ]\n    unpaid := orders.Filter { !it.Paid }.Map { it.Customer }.Distinct()\n    byCustomer := orders.GroupBy { it.Customer }\n    revenue := orders.Fold(0) { sum, o -\u003e sum + o.Total }\n    println(unpaid, byCustomer.SortedKeys(), len(byCustomer[\"ada\"]), revenue)\n}\n",
+    "output": "[linus ada] [ada linus] 2 50\n"
+  },
+  {
+    "file": "docs/guide/lyth-for-go-programmers.md",
+    "source": "import \"encoding/json\"\nimport \"net/http\"\nimport \"net/http/httptest\"\n\nstruct Greeting {\n    Message: string\n}\n\nfunc hello(w: http.ResponseWriter, r: *http.Request) {\n    name := r.URL.Query().Get(\"name\")\n    w.Header().Set(\"Content-Type\", \"application/json\")\n    json.NewEncoder(w).Encode(Greeting(Message = \"hello ${name}\")) catch {}\n}\n\nfunc main() {\n    mux := http.NewServeMux()\n    mux.HandleFunc(\"GET /hello\", hello)\n    rec := httptest.NewRecorder()\n    mux.ServeHTTP(rec, httptest.NewRequest(\"GET\", \"/hello?name=gopher\", null))\n    print(rec.Code, \" \", rec.Body.String())\n}\n",
+    "output": "200 {\"message\":\"hello gopher\"}\n"
+  },
+  {
+    "file": "docs/guide/tour.md",
+    "source": "func main() {\n    name := \"Lyth\"\n    println(\"Hello, ${name}!\")\n}\n",
+    "output": "Hello, Lyth!\n"
+  },
+  {
+    "file": "docs/guide/tour.md",
+    "source": "func main() {\n    limit := 3              // declares; the type is inferred\n    count := 0\n    while count \u003c limit {\n        count++\n    }\n    ratio: float64 = 2.5\n    println(count, ratio * float64(count))\n}\n",
+    "output": "3 7.5\n"
+  },
+  {
+    "file": "docs/guide/tour.md",
+    "source": "import \"strings\"\n\nfunc area(w: float64, h: float64) = w * h\n\nfunc Greet(name: string, times: int = 1, sep: string = \", \"): string {\n    parts: []string = []\n    for _ in 0..\u003ctimes {\n        parts = append(parts, \"hi ${name}\")\n    }\n    return strings.Join(parts, sep)\n}\n\nfunc main() {\n    println(area(3, 4))\n    println(Greet(\"Ada\"), Greet(\"Ada\", 2), Greet(\"Ada\", times = 3, sep = \" \"))\n}\n",
+    "output": "12\nhi Ada hi Ada, hi Ada hi Ada hi Ada hi Ada\n"
+  },
+  {
+    "file": "docs/guide/tour.md",
+    "source": "import \"fmt\"\n\nstruct Point {\n    X: int\n    Y: int\n}\n\nfunc Point.plus(o: Point): Point = Point(X = X + o.X, Y = Y + o.Y)\n\nfunc *Point.moveBy(dx: int) {\n    X += dx\n}\n\n// String makes Point a fmt.Stringer, so printing uses it.\nfunc Point.String(): string = \"(${X}, ${Y})\"\n\nfunc main() {\n    p := Point(1, 2)\n    p.moveBy(10)\n    println(p.plus(Point(X = 1, Y = 1)))\n    fmt.Printf(\"%v and %+v\\n\", p, p)\n}\n",
+    "output": "(12, 3)\n(11, 2) and (11, 2)\n"
+  },
+  {
+    "file": "docs/guide/tour.md",
+    "source": "func main() {\n    primes := [2, 3, 5, 7]\n    squares: []int = []\n    for p in primes {\n        squares = append(squares, p * p)\n    }\n    ages := [\"ada\": 36, \"linus\": 54]\n    ages[\"guido\"] = 67\n    println(squares, len(ages), 5 in primes, \"grace\" !in ages)\n    for i, p in primes {\n        if i \u003e= 2 {\n            println(\"primes[${i}] =\", p)\n        }\n    }\n}\n",
+    "output": "[4 9 25 49] 3 true true\nprimes[2] = 5\nprimes[3] = 7\n"
+  },
+  {
+    "file": "docs/guide/tour.md",
+    "source": "func fib(n: int): int {\n    a, b := 0, 1\n    for _ in 0..\u003cn {\n        a, b = b, a + b\n    }\n    return a\n}\n\nfunc main() {\n    println(fib(10))\n    grid := [[1, 2], [3, 4], [5, 6]]\n    outer@ for i, row in grid {\n        for v in row {\n            if v == 4 {\n                println(\"found 4 in row\", i)\n                break@outer\n            }\n        }\n    }\n}\n",
+    "output": "55\nfound 4 in row 1\n"
+  },
+  {
+    "file": "docs/guide/tour.md",
+    "source": "import \"slices\"\nimport \"strings\"\n\nfunc mapAll(xs: []int, f: (int) -\u003e int): []int {\n    out: []int = []\n    for x in xs {\n        out = append(out, f(x))\n    }\n    return out\n}\n\nfunc main() {\n    println(mapAll([1, 2, 3], { x -\u003e x * 10 }))\n    println(mapAll([1, 2, 3]) { it + 1 })\n    words := [\"kiwi\", \"fig\", \"banana\"]\n    slices.SortFunc(words, { a, b -\u003e len(a) - len(b) })\n    println(strings.Join(words, \",\"))\n}\n",
+    "output": "[10 20 30]\n[2 3 4]\nfig,kiwi,banana\n"
+  },
+  {
+    "file": "docs/guide/tour.md",
+    "source": "func size(n: int): string = if n \u003c 10 { \"small\" } else { \"large\" }\n\nfunc describe(code: int): string = when code {\n    200, 204 -\u003e \"ok\"\n    404 -\u003e \"not found\"\n    in 500..599 -\u003e \"server error\"\n    else -\u003e \"status ${code}\"\n}\n\nfunc sign(n: int): string = when {\n    n \u003c 0 -\u003e \"negative\"\n    n == 0 -\u003e \"zero\"\n    else -\u003e \"positive\"\n}\n\nfunc main() {\n    println(size(3), size(30))\n    println(describe(204), describe(404), describe(503), describe(302))\n    println(sign(-2), sign(0), sign(7))\n}\n",
+    "output": "small large\nok not found server error status 302\nnegative zero positive\n"
+  },
+  {
+    "file": "docs/guide/tour.md",
+    "source": "struct User {\n    Name: string\n    Email: string?\n}\n\nfunc find(id: int): User? {\n    when id {\n        1 -\u003e return User(Name = \"Ada\", Email = \"ada@example.com\")\n        2 -\u003e return User(Name = \"Linus\", Email = null)\n    }\n    return null\n}\n\nfunc main() {\n    for id in 1..3 {\n        user := find(id)\n        if user == null {\n            println(id, \"nobody\")\n            continue\n        }\n        // here user is a User, not a User?\n        println(id, user.Name, user.Email ?: \"no email\")\n    }\n    println(find(2)?.Name, find(3)?.Name)\n}\n",
+    "output": "1 Ada ada@example.com\n2 Linus no email\n3 nobody\nLinus null\n"
+  },
+  {
+    "file": "docs/guide/tour.md",
+    "source": "import \"errors\"\nimport \"strconv\"\n\nvar ErrNegative = errors.New(\"negative quantity\")\n\nfunc parseQuantity(s: string): int throws {\n    n := strconv.Atoi(s)?\n    if n \u003c 0 {\n        throw ErrNegative\n    }\n    return n\n}\n\nfunc total(items: []string): int throws {\n    sum := 0\n    for item in items {\n        sum += parseQuantity(item)?\n    }\n    return sum\n}\n\nfunc main() {\n    println(total([\"1\", \"2\", \"3\"]) catch { -1 })\n    n := total([\"4\", \"x\"]) catch (err) {\n        println(\"error:\", err)\n        0\n    }\n    println(n)\n    total([\"-5\"]) catch (err) {\n        println(\"negative?\", errors.Is(err, ErrNegative))\n    }\n}\n",
+    "output": "6\nerror: strconv.Atoi: parsing \"x\": invalid syntax\n0\nnegative? true\n"
+  },
+  {
+    "file": "docs/guide/tour.md",
+    "source": "import \"os\"\n\nfunc readConfig(path: string): string throws {\n    data := os.ReadFile(path) catch (err) { throw err.wrap(\"reading config ${path}\") }\n    return string(data)\n}\n\nfunc main() throws {\n    println(readConfig(\"missing.toml\")?)\n}\n",
+    "output": "error: reading config missing.toml: open missing.toml: no such file or directory\n(exit status 1)\n"
+  },
+  {
+    "file": "docs/guide/tour.md",
+    "source": "interface Shape {\n    Area(): float64\n}\n\nstruct Circle : Shape {\n    R: float64\n}\n\nfunc Circle.Area(): float64 = 3 * R * R\n\nstruct Rect {\n    W: float64\n    H: float64\n}\n\nfunc Rect.Area(): float64 = W * H\n\nfunc describe(s: Shape): string = when s {\n    is Circle -\u003e \"circle of radius ${s.R}\"\n    is Rect -\u003e \"${s.W}x${s.H} rectangle\"\n    else -\u003e \"some shape\"\n}\n\nfunc main() {\n    shapes: []Shape = [Circle(R = 1), Rect(W = 2, H = 3)]\n    for s in shapes {\n        println(describe(s), s.Area())\n    }\n    first := shapes[0] as? Rect\n    println(first == null)\n}\n",
+    "output": "circle of radius 1 3\n2x3 rectangle 6\ntrue\n"
+  },
+  {
+    "file": "docs/guide/tour.md",
+    "source": "enum Suit { Hearts, Diamonds, Clubs, Spades }\n\nfunc Suit.color(): string = when self {\n    Hearts, Diamonds -\u003e \"red\"\n    Clubs, Spades -\u003e \"black\"\n}\n\nsealed interface Payment {\n    Cents(): int\n}\n\nstruct Card : Payment {\n    Last4: string\n    Amount: int\n}\n\nfunc Card.Cents(): int = Amount\n\nstruct Voucher : Payment {\n    Code: string\n}\n\nfunc Voucher.Cents(): int = 500\n\nfunc receipt(p: Payment): string = when p {\n    is Card -\u003e \"card ending ${p.Last4}\"\n    is Voucher -\u003e \"voucher ${p.Code}\"\n}\n\nfunc main() {\n    println(Suit.Spades, Suit.Spades.color())\n    payments: []Payment = [Card(Last4 = \"4242\", Amount = 1999), Voucher(Code = \"WELCOME\")]\n    for p in payments {\n        println(receipt(p), p.Cents())\n    }\n}\n",
+    "output": "Spades black\ncard ending 4242 1999\nvoucher WELCOME 500\n"
+  },
+  {
+    "file": "docs/guide/tour.md",
+    "source": "import \"cmp\"\nimport \"lyth/coll\"\n\nfunc maxOf[T: cmp.Ordered](a: T, b: T): T = if a \u003e b { a } else { b }\n\nstruct Page[T] {\n    Items: []T\n    Total: int\n}\n\nfunc Page[T].Empty(): bool = len(Items) == 0\n\nfunc string.Shout(): string = self + \"!\"\n\nstruct Todo {\n    Title: string\n    Done: bool\n}\n\nfunc main() {\n    println(maxOf(3, 7), maxOf(\"go\", \"lyth\"))\n    todos := [Todo(Title = \"spec\", Done = true), Todo(Title = \"ship\", Done = false)]\n    open := Page(Items = todos.Filter { !it.Done }.Map { it.Title }, Total = len(todos))\n    println(open.Items, open.Empty(), \"done\".Shout())\n}\n",
+    "output": "7 lyth\n[ship] false done!\n"
+  },
+  {
+    "file": "docs/guide/tour.md",
+    "source": "import \"sync\"\n\nfunc main() {\n    wg := sync.WaitGroup()\n    mu := sync.Mutex()\n    total := 0\n    for i in 1..10 {\n        wg.Add(1)\n        go {\n            defer wg.Done()\n            mu.Lock()\n            total += i\n            mu.Unlock()\n        }\n    }\n    wg.Wait()\n    println(total)\n}\n",
+    "output": "55\n"
+  },
+  {
+    "file": "docs/guide/tour.md",
+    "source": "import \"time\"\n\nstruct Job {\n    ID: int\n}\n\nfunc produce(jobs: chan\u003c- *Job, n: int) {\n    defer jobs.close()\n    for i in 1..n {\n        jobs.send(\u0026Job(ID = i))\n    }\n}\n\nfunc main() {\n    jobs := make(chan *Job, 2)\n    go { produce(jobs, 3) }\n    while true {\n        job := jobs.receive() ?: break\n        println(\"job\", job.ID)\n    }\n\n    results := make(chan string)\n    go {\n        time.Sleep(time.Second)\n        results.send(\"slow answer\")\n    }\n    select {\n        r := results.receive() -\u003e println(r)\n        time.After(10 * time.Millisecond).receive() -\u003e println(\"gave up waiting\")\n    }\n}\n",
+    "output": "job 1\njob 2\njob 3\ngave up waiting\n"
+  },
+  {
+    "file": "docs/spec/language.md",
+    "source": "enum Level { Debug, Info, Warn }\n\nsealed interface Event {\n    Level(): Level\n}\n\nstruct Login : Event {\n    User: string\n}\n\nfunc Login.Level(): Level = Level.Info\n\nstruct Failure : Event {\n    Reason: string\n}\n\nfunc Failure.Level(): Level = Level.Warn\n\nfunc describe(e: Event): string = when e {\n    is Login -\u003e \"login by ${e.User}\"\n    is Failure -\u003e \"failure: ${e.Reason}\"\n}\n\nfunc main() {\n    events: []Event = [Login(User = \"ada\"), Failure(Reason = \"disk full\")]\n    for e in events {\n        tag := when e.Level() {\n            Debug -\u003e \"D\"\n            Info -\u003e \"I\"\n            Warn -\u003e \"W\"\n        }\n        println(tag, describe(e))\n    }\n}\n",
+    "output": "I login by ada\nW failure: disk full\n"
+  },
+  {
+    "file": "docs/spec/language.md",
+    "source": "import \"time\"\n\nfunc main() {\n    results := make(chan int, 3)\n    for i in 1..3 {\n        go { results.send(i * i) }\n    }\n    sum := 0\n    for _ in 1..3 {\n        sum += results.receive()\n    }\n    results.close()\n    _, open := results.receive()\n\n    never := make(chan string)\n    select {\n        s := never.receive() -\u003e println(\"got\", s)\n        time.After(10 * time.Millisecond).receive() -\u003e println(\"timeout\")\n    }\n    println(sum, open)\n}\n",
+    "output": "timeout\n14 false\n"
+  },
+  {
+    "file": "README.md",
+    "source": "import \"errors\"\n\nstruct User {\n    ID: int64\n    Name: string\n    Email: string?                     // nullable: *string in Go, null in JSON\n}\n\nvar ErrNotFound = errors.New(\"not found\")\n\nfunc find(id: int64): User? throws {        // Go: func find(id int64) (*User, error)\n    if id \u003c 0 {\n        throw errors.New(\"negative id ${id}\")\n    }\n    if id == 0 {\n        return null                        // absent is a value, not an error\n    }\n    return User(ID = id, Name = \"Ada\", Email = null)\n}\n\nfunc describe(raw: string): string throws {\n    id := raw.toInt64()?                // ? propagates the parse error\n    user := find(id)? ?: return \"nobody\"\n    email := user.Email ?: \"no email\"\n    return \"${user.Name} \u003c${email}\u003e\"\n}\n\nfunc main() throws {\n    println(describe(\"1\")?)\n    println(describe(\"x\") catch (err) { \"error: ${err}\" })\n}\n",
+    "output": "Ada \u003cno email\u003e\nerror: strconv.ParseInt: parsing \"x\": invalid syntax\n"
+  }
+]

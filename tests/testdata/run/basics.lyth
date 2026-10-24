@@ -1,0 +1,60 @@
+const limit = 3
+const pi = 3.14159
+
+func fib(n: int): int = if n < 2 { n } else { fib(n - 1) + fib(n - 2) }
+
+func grade(score: int): string = when {
+    score >= 90 -> "A"
+    score >= 80 -> "B"
+    else -> "C"
+}
+
+func main() {
+    name := "Lyth"
+    count := 0
+    count += 2
+    count++
+    println("Hello, ${name}! count=${count}")
+
+    big: int64 = 1 << 40
+    ratio := 7.0 / 2
+    flag := count > 2 && name != ""
+    println("big=${big} ratio=${ratio} flag=${flag}")
+
+    i := 0
+    while i < limit {
+        print(i, ",")
+        i++
+    }
+    println()
+
+    for k in 1..3 {
+        print(fib(k * 3), ";")
+    }
+    println()
+
+    println(grade(95), grade(85), grade(10))
+
+    label := when count {
+        1, 2 -> "few"
+        3 -> "three"
+        else -> "many"
+    }
+    println(label)
+
+    r: rune = 'Z'
+    println("rune=${r} pi=${pi} bytes=${len("héllo")}")
+
+    area := pi * float64(limit * limit)
+    println("area=${area}")
+}
+
+// Output:
+// Hello, Lyth! count=3
+// big=1099511627776 ratio=3.5 flag=true
+// 0,1,2,
+// 2;8;34;
+// A B C
+// three
+// rune=Z pi=3.14159 bytes=6
+// area=28.27431

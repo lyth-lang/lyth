@@ -1,0 +1,25 @@
+func Classify(n: int): string {
+    size := if n > 100 { "large" } else { "small" }
+    sign := when {
+        n < 0 -> "negative"
+        n == 0 -> "zero"
+        else -> "positive"
+    }
+    return "${size}/${sign}"
+}
+
+func SumTo(n: int): int {
+    total := 0
+    for i in 1..n {
+        total += i
+    }
+    return total
+}
+
+func CountWords(words: []string): map[string]int {
+    counts: map[string]int = [:]
+    for w in words {
+        counts[w] = counts[w] + 1
+    }
+    return counts
+}

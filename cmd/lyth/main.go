@@ -1,0 +1,513 @@
+// Command lyth compiles Lyth source code to Go and drives the Go toolchain.
+//
+// Usage:
+//
+//	lyth build [-o output] [packages] [-- go build flags]
+//	lyth run [file.lyth | package] [-- program arguments]
+//	lyth check [packages]
+//	lyth gen [-stdout | -in-tree] [packages]
+//	lyth vet [packages]
+//	lyth test [packages] [go test flags]
+//	lyth version
+package main
+
+import (
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/lyth-lang/lyth/internal/build"
+	"github.com/lyth-lang/lyth/internal/diag"
+)
+
+const version = "0.1.0-dev"
+
+func main() {
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+const usage = `lyth is the Lyth compiler: Kotlin-inspired syntax, compiled to Go.
+
+Usage:
+  lyth build [-o output] [packages] [-- go build flags]   compile packages with the Go toolchain
+  lyth run [file.lyth | package] [-- arguments]           build and run a program
+  lyth check [packages]                                   type-check without building
+  lyth gen [-stdout | -in-tree] [packages]                emit the generated Go code
+  lyth vet [packages]                                     run go vet on generated code
+  lyth test [packages] [go test flags]                    run tests (_test.lyth and _test.go files)
+  lyth mod tidy                                           go mod tidy that sees imports in .lyth files
+  lyth version                                            print the compiler version
+
+Common flags:
+  -v                     verbose diagnostics (include original Go toolchain messages)
+  -diagnostics=json      print diagnostics as JSON lines
+  -no-line-directives    omit //line directives from generated code
+  -tags=a,b              build tags
+  -timings               print compilation phase durations
+`
+
+type common struct {
+	verbose  bool
+	jsonDiag bool
+	noLines  bool
+	timings  bool
+	tags     string
+	tests    bool // include _test.lyth files (check, vet, gen, test)
+}
+
+func (c *common) register(fs *flag.FlagSet) {
+	fs.BoolVar(&c.verbose, "v", false, "verbose diagnostics")
+	diagFmt := fs.String("diagnostics", "text", "diagnostic format: text or json")
+	fs.BoolVar(&c.noLines, "no-line-directives", false, "omit //line directives")
+	fs.BoolVar(&c.timings, "timings", false, "print compilation phase durations")
+	fs.StringVar(&c.tags, "tags", "", "comma-separated build tags")
+	_ = diagFmt
+}
+
+func (c *common) parseDiag(fs *flag.FlagSet) {
+	if f := fs.Lookup("diagnostics"); f != nil && f.Value.String() == "json" {
+		c.jsonDiag = true
+	}
+}
+
+func (c *common) config(stdout, stderr io.Writer) *build.Config {
+	wd, _ := os.Getwd()
+	cfg := &build.Config{WorkDir: wd, Verbose: c.verbose, NoLineDirectives: c.noLines, Timings: c.timings, Tests: c.tests, Stdout: stdout, Stderr: stderr}
+	if c.tags != "" {
+		cfg.Tags = strings.Split(c.tags, ",")
+	}
+	return cfg
+}
+
+// splitArgs separates arguments after "--".
+func splitArgs(args []string) ([]string, []string) {
+	for i, a := range args {
+		if a == "--" {
+			return args[:i], args[i+1:]
+		}
+	}
+	return args, nil
+}
+
+func run(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprint(stderr, usage)
+		return 2
+	}
+	cmd, rest := args[0], args[1:]
+	switch cmd {
+	case "version", "-version", "--version":
+		fmt.Fprintf(stdout, "lyth version %s\n", version)
+		return 0
+	case "help", "-h", "-help", "--help":
+		fmt.Fprint(stdout, usage)
+		return 0
+	case "build":
+		return cmdBuild(rest, stdout, stderr)
+	case "run":
+		return cmdRun(rest, stdout, stderr)
+	case "check":
+		return cmdCheck(rest, stdout, stderr)
+	case "gen":
+		return cmdGen(rest, stdout, stderr)
+	case "vet":
+		return cmdVet(rest, stdout, stderr)
+	case "test":
+		return cmdTest(rest, stdout, stderr)
+	case "mod":
+		if len(rest) == 1 && rest[0] == "tidy" {
+			var c common
+			sink, err := build.ModTidy(c.config(stdout, stderr), nil)
+			if sink != nil && len(sink.All()) > 0 {
+				diag.Render(stderr, sink.All(), diag.RenderOptions{Color: isTerminal(stderr)})
+			}
+			if err != nil {
+				fmt.Fprintf(stderr, "lyth: %v\n", err)
+				return 1
+			}
+			return 0
+		}
+		fmt.Fprintln(stderr, "usage: lyth mod tidy")
+		return 2
+	}
+	if strings.HasSuffix(cmd, ".lyth") {
+		return cmdRun(args, stdout, stderr)
+	}
+	fmt.Fprintf(stderr, "lyth: unknown command %q\n\n%s", cmd, usage)
+	return 2
+}
+
+// printTimings writes phase durations when -timings is set.
+func printTimings(s *build.Session, c *common, stderr io.Writer) {
+	if s == nil || !c.timings {
+		return
+	}
+	var total time.Duration
+	for _, t := range s.Timings {
+		fmt.Fprintf(stderr, "lyth: %-26s %8.1fms\n", t.Phase, float64(t.Duration.Microseconds())/1000)
+		total += t.Duration
+	}
+	fmt.Fprintf(stderr, "lyth: %-26s %8.1fms\n", "total", float64(total.Microseconds())/1000)
+}
+
+// reported counts diagnostics already printed per session, so later
+// stages print only new ones.
+var reported = map[*build.Session]int{}
+
+// report prints new diagnostics and returns true if there were errors.
+func report(s *build.Session, c *common, stderr io.Writer) bool {
+	if s == nil {
+		return false
+	}
+	all := s.Sink.Since(reported[s])
+	reported[s] = s.Sink.Len()
+	if len(all) == 0 {
+		return s.Sink.HasErrors()
+	}
+	if c.jsonDiag {
+		diag.RenderJSON(stderr, all)
+	} else {
+		diag.Render(stderr, all, diag.RenderOptions{Color: isTerminal(stderr), Verbose: c.verbose})
+		if n := countErrors(all); n > 0 {
+			word := "errors"
+			if n == 1 {
+				word = "error"
+			}
+			fmt.Fprintf(stderr, "\n%d %s\n", n, word)
+		}
+	}
+	return s.Sink.HasErrors()
+}
+
+func countErrors(ds []*diag.Diagnostic) int {
+	n := 0
+	for _, d := range ds {
+		if d.Severity == diag.Error {
+			n++
+		}
+	}
+	return n
+}
+
+func isTerminal(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	st, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return st.Mode()&os.ModeCharDevice != 0 && os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb"
+}
+
+// target interprets positional arguments.
+func target(args []string) build.Target {
+	if len(args) == 1 && strings.HasSuffix(args[0], ".lyth") {
+		return build.Target{File: args[0]}
+	}
+	return build.Target{Patterns: args}
+}
+
+func compile(c *common, args []string, stdout, stderr io.Writer) (*build.Session, bool) {
+	s, err := build.Compile(c.config(stdout, stderr), target(args))
+	if report(s, c, stderr) {
+		return s, false
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "lyth: %v\n", err)
+		return s, false
+	}
+	return s, true
+}
+
+func cmdCheck(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("check", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var c common
+	c.tests = true
+	c.register(fs)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	c.parseDiag(fs)
+	s, ok := compile(&c, fs.Args(), stdout, stderr)
+	printTimings(s, &c, stderr)
+	if !ok {
+		return 1
+	}
+	return 0
+}
+
+func cmdBuild(args []string, stdout, stderr io.Writer) int {
+	pos, extra := splitArgs(args)
+	fs := flag.NewFlagSet("build", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var c common
+	c.register(fs)
+	out := fs.String("o", "", "output file or directory")
+	if err := fs.Parse(pos); err != nil {
+		return 2
+	}
+	c.parseDiag(fs)
+	s, ok := compile(&c, fs.Args(), stdout, stderr)
+	if !ok {
+		return 1
+	}
+	var pkgs []string
+	if s.Mod.Synthetic {
+		pkgs = []string{"."}
+	} else {
+		for _, p := range s.Targets {
+			pkgs = append(pkgs, p.Dir.ImportPath)
+		}
+	}
+	output := *out
+	if output != "" && !filepath.IsAbs(output) {
+		wd, _ := os.Getwd()
+		output = filepath.Join(wd, output)
+	}
+	if output == "" && len(s.MainPackages()) == 1 && len(pkgs) == 1 {
+		wd, _ := os.Getwd()
+		name := filepath.Base(s.MainPackages()[0].Dir.Dir)
+		if s.Mod.Synthetic {
+			name = strings.TrimSuffix(filepath.Base(fs.Arg(0)), ".lyth")
+		}
+		output = filepath.Join(wd, name)
+	}
+	okBuild, err := s.GoBuild(output, pkgs, extra)
+	printTimings(s, &c, stderr)
+	if report(s, &c, stderr) || !okBuild {
+		return 1
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "lyth: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func cmdRun(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("run", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var c common
+	c.register(fs)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	c.parseDiag(fs)
+	rest := fs.Args()
+	var tgt []string
+	var progArgs []string
+	if len(rest) > 0 && rest[0] != "--" {
+		tgt, progArgs = rest[:1], rest[1:]
+	} else {
+		progArgs = rest
+	}
+	if len(progArgs) > 0 && progArgs[0] == "--" {
+		progArgs = progArgs[1:]
+	}
+	s, ok := compile(&c, tgt, stdout, stderr)
+	if !ok {
+		return 1
+	}
+	mains := s.MainPackages()
+	if len(mains) == 0 {
+		fmt.Fprintln(stderr, "lyth: no main package to run (declare func main())")
+		return 1
+	}
+	pkg := mains[0].Dir.ImportPath
+	if len(mains) > 1 {
+		if len(tgt) == 0 {
+			var names []string
+			for _, m := range mains {
+				names = append(names, m.Dir.Rel)
+			}
+			sort.Strings(names)
+			fmt.Fprintf(stderr, "lyth: several main packages (%s); choose one: lyth run <dir>\n", strings.Join(names, ", "))
+			return 1
+		}
+		wd, _ := os.Getwd()
+		dir, _ := filepath.Abs(filepath.Join(wd, tgt[0]))
+		for _, m := range mains {
+			if m.Dir.Dir == dir {
+				pkg = m.Dir.ImportPath
+			}
+		}
+	}
+	if s.Mod.Synthetic {
+		pkg = "."
+	}
+	code, err := s.GoRun(pkg, progArgs, nil)
+	if report(s, &c, stderr) {
+		return 1
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "lyth: %v\n", err)
+		return 1
+	}
+	return code
+}
+
+func cmdGen(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("gen", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var c common
+	c.tests = true
+	c.register(fs)
+	toStdout := fs.Bool("stdout", false, "print generated code to standard output")
+	inTree := fs.Bool("in-tree", false, "write generated files next to their .lyth sources")
+	force := fs.Bool("force", false, "with -stdout, print generated code even if it fails validation (debugging)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	c.parseDiag(fs)
+	cfg := c.config(stdout, stderr)
+	cfg.InTree = *inTree
+	s, err := build.Compile(cfg, target(fs.Args()))
+	if report(s, &c, stderr) {
+		if *force && *toStdout && s != nil {
+			for _, p := range s.Packages {
+				for _, g := range p.Generated {
+					fmt.Fprintf(stdout, "// ---- %s/%s\n%s", p.Dir.Rel, g.Name, g.Code)
+				}
+			}
+		}
+		return 1
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "lyth: %v\n", err)
+		return 1
+	}
+	switch {
+	case *inTree:
+		files, err := s.WriteInTree()
+		for _, f := range files {
+			fmt.Fprintln(stdout, f)
+		}
+		if err != nil {
+			fmt.Fprintf(stderr, "lyth: %v\n", err)
+			return 1
+		}
+	case *toStdout:
+		for _, p := range s.Packages {
+			if p.Dir.Std {
+				continue // the standard library is the toolchain's, not the module's code
+			}
+			for _, g := range p.Generated {
+				fmt.Fprintf(stdout, "// ---- %s/%s\n%s", p.Dir.Rel, g.Name, g.Code)
+			}
+		}
+	default:
+		fmt.Fprintf(stdout, "generated Go code is in %s\n", s.GenDir)
+	}
+	return 0
+}
+
+func cmdVet(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("vet", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var c common
+	c.tests = true
+	c.register(fs)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	c.parseDiag(fs)
+	s, ok := compile(&c, fs.Args(), stdout, stderr)
+	if !ok {
+		return 1
+	}
+	var pkgs []string
+	for _, p := range s.Targets {
+		pkgs = append(pkgs, p.Dir.ImportPath)
+	}
+	okVet, err := s.GoVet(pkgs)
+	if report(s, &c, stderr) || !okVet {
+		return 1
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "lyth: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// goTestValueFlags are go test flags whose value may follow as a separate
+// argument (-run TestX). lyth test must know them to tell values from
+// package patterns.
+var goTestValueFlags = map[string]bool{
+	"bench": true, "benchtime": true, "blockprofile": true, "blockprofilerate": true, "count": true,
+	"covermode": true, "coverpkg": true, "coverprofile": true, "cpu": true, "cpuprofile": true,
+	"exec": true, "fuzz": true, "fuzzminimizetime": true, "fuzztime": true, "gcflags": true,
+	"ldflags": true, "list": true, "memprofile": true, "memprofilerate": true, "mutexprofile": true,
+	"mutexprofilefraction": true, "o": true, "outputdir": true, "p": true, "parallel": true,
+	"run": true, "shuffle": true, "skip": true, "timeout": true, "trace": true, "vet": true,
+}
+
+// cmdTest compiles the packages with their tests and runs go test. Flags
+// other than Lyth's own (-diagnostics, -no-line-directives, -tags, -timings)
+// go to go test, so lyth test -v -run TestX ./... works like go test.
+func cmdTest(args []string, stdout, stderr io.Writer) int {
+	var c common
+	var patterns, goArgs []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			goArgs = append(goArgs, args[i+1:]...)
+			break
+		}
+		if !strings.HasPrefix(a, "-") {
+			patterns = append(patterns, a)
+			continue
+		}
+		name, value, hasValue := strings.Cut(strings.TrimLeft(a, "-"), "=")
+		next := func() string {
+			if hasValue || i+1 >= len(args) {
+				return value
+			}
+			i++
+			return args[i]
+		}
+		switch name {
+		case "diagnostics":
+			c.jsonDiag = next() == "json"
+		case "no-line-directives":
+			c.noLines = true
+		case "timings":
+			c.timings = true
+		case "tags":
+			c.tags = next()
+		default:
+			goArgs = append(goArgs, a)
+			if !hasValue && goTestValueFlags[name] && i+1 < len(args) {
+				i++
+				goArgs = append(goArgs, args[i])
+			}
+		}
+	}
+	if len(patterns) == 0 {
+		patterns = []string{"."}
+	}
+	c.tests = true
+	s, err := build.Compile(c.config(stdout, stderr), build.Target{Patterns: patterns})
+	printTimings(s, &c, stderr)
+	if report(s, &c, stderr) {
+		return 1
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "lyth: %v\n", err)
+		return 1
+	}
+	code, err := s.GoTest(patterns, goArgs)
+	if err != nil {
+		fmt.Fprintf(stderr, "lyth: %v\n", err)
+		return 1
+	}
+	return code
+}

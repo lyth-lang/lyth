@@ -1,0 +1,32 @@
+import "strconv"
+
+func f() {
+    a := 1
+    b := 2
+    a, b = b, a
+    b, b += 1, 2 // ERROR E0216 "+= cannot assign several values"
+    b, b = 1, 2, 3 // ERROR E0210 "3 values assigned to 2 targets"
+    b, b = strconv.Itoa(1) // ERROR E0210 "cannot assign a single value of type string to 2 targets"
+    t := (1, 2) // ERROR E0216 "tuples can only be used in assignments and destructuring declarations"
+    s := ""
+    e: error? = null
+    s, e = strconv.Atoi("1") // ERROR E0201 "cannot assign value 1 of strconv.Atoi"
+    println(t, s, e)
+}
+
+struct NotFound {
+    Key: string
+}
+
+func *NotFound.Error(): string = Key
+
+func pair(): (*NotFound?, int) {
+    return null, 1
+}
+
+func g() {
+    err: error? = null
+    k := 0
+    err, k = pair() // ERROR E0201 "a null value needs a check to become a nil interface"
+    println(err, k)
+}

@@ -1,0 +1,47 @@
+interface Shape {
+    Area(): float64
+}
+
+struct Circle {
+    R: float64
+}
+
+func Circle.Area(): float64 = 3 * R * R
+
+struct NotFound {
+    Key: string
+}
+
+func *NotFound.Error(): string = "not found: ${Key}"
+
+func describe(s: Shape): string {
+    if s is Circle {
+        return "circle ${s.R}"
+    }
+    return "shape"
+}
+
+func explain(err: error): string {
+    if err !is *NotFound {
+        return err.Error()
+    }
+    return "missing ${err.Key}"
+}
+
+func classify(x: any): string = when x {
+    is int -> "int ${x + 1}"
+    is string -> "string"
+    else -> "other"
+}
+
+func mixed(x: any): string = when x {
+    "zero" -> "zero"
+    is string -> "string ${x}"
+    else -> "other"
+}
+
+func probe(s: Shape, err: error): bool {
+    isCircle := s is Circle
+    nf := err as? *NotFound
+    return isCircle && nf == null
+}

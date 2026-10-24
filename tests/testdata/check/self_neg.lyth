@@ -1,0 +1,18 @@
+// self is a keyword: it cannot be declared, so nothing can shadow it.
+
+struct Box {
+    Size: int
+}
+
+func Box.area(self: int): int = Size // ERROR E0003 "self is the method receiver; it cannot be declared or redeclared"
+
+func Box.twice(): int {
+    self := 2 // ERROR E0003 "self is the method receiver"
+    return Size * 2
+}
+
+func Box.each(xs: []int) {
+    for self in xs { // ERROR E0003 "self is the method receiver"
+        println(self)
+    }
+}

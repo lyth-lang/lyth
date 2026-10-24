@@ -1,0 +1,20 @@
+func f(xs: []int) {
+    for x in xs {
+        break@nope // ERROR E0101 "no enclosing loop is labeled nope"
+    }
+    outer@ for x in xs {
+        outer@ for y in xs { // ERROR E0102 "label outer is already used by an enclosing loop"
+            println(x, y)
+        }
+    }
+    outer@ for x in xs {
+        g := { ->
+            for y in xs {
+                continue@outer // ERROR E0101 "no enclosing loop is labeled outer"
+            }
+        }
+        g()
+    }
+    done@ z := 1 // ERROR E0008 "labels can only be placed on for and while loops"
+    println(z)
+}

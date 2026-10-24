@@ -1,0 +1,166 @@
+import "context"
+import "crypto/subtle"
+import "encoding/json"
+import "errors"
+import "log/slog"
+import "net/http"
+import "net/url"
+import "strconv"
+import "strings"
+
+import "todoapi/internal/todo"
+
+// Server is the todo HTTP API.
+struct Server {
+    store: todo.Store
+    tokens: map[string]string
+    log: *slog.Logger
+}
+
+// NewServer returns an API over store. tokens maps bearer tokens to users.
+func NewServer(store: todo.Store, tokens: map[string]string, log: *slog.Logger): *Server {
+    return &Server(store = store, tokens = tokens, log = log)
+}
+
+// Handler returns the routes, wrapped in logging and panic recovery.
+func *Server.Handler(): http.Handler {
+    mux := http.NewServeMux()
+    mux.HandleFunc("GET /healthz", healthz)
+    mux.Handle("GET /v1/todos", authed(list))
+    mux.Handle("POST /v1/todos", authed(create))
+    mux.Handle("GET /v1/todos/{id}", authed(get))
+    mux.Handle("PATCH /v1/todos/{id}", authed(update))
+    mux.Handle("DELETE /v1/todos/{id}", authed(remove))
+    return recoverer(log, logRequests(log, mux))
+}
+
+// apiHandler serves an authenticated request for user. A returned error
+// becomes a JSON error response.
+typealias apiHandler = (http.ResponseWriter, *http.Request, string) -> unit throws
+
+// authed requires a valid bearer token.
+func *Server.authed(h: apiHandler): http.Handler = http.HandlerFunc({ w, r ->
+    user := userFor(r)
+    if user == null {
+        w.Header().Set("WWW-Authenticate", `Bearer realm="todo"`)
+        writeError(w, r, &apiError(status = http.StatusUnauthorized, code = "unauthorized", message = "missing or invalid bearer token"))
+        return
+    }
+    h(w, r, user) catch (err) { writeError(w, r, err) }
+})
+
+// userFor returns the user whose token authorizes r. Every token is
+// compared, in constant time, so timing reveals nothing about them.
+func *Server.userFor(r: *http.Request): string? {
+    scheme, token, found := strings.Cut(r.Header.Get("Authorization"), " ")
+    if !found || !strings.EqualFold(scheme, "Bearer") || token == "" {
+        return null
+    }
+    user: string? = null
+    for t, u in tokens {
+        if subtle.ConstantTimeCompare([]byte(t), []byte(token)) == 1 {
+            user = u
+        }
+    }
+    return user
+}
+
+// pinger is implemented by stores that can check their backend.
+interface pinger {
+    Ping(ctx: context.Context) throws
+}
+
+func *Server.healthz(w: http.ResponseWriter, r: *http.Request) {
+    s := store
+    if s is pinger {
+        s.Ping(r.Context()) catch (err) {
+            log.WarnContext(r.Context(), "health check failed", "error", err)
+            writeJSON(w, http.StatusServiceUnavailable, ["status": "unavailable"])
+            return
+        }
+    }
+    writeJSON(w, http.StatusOK, ["status": "ok"])
+}
+
+// listResponse is one page of todos. next is the cursor (the after
+// parameter) for the following page, absent on the last page.
+struct listResponse {
+    Todos: []todo.Todo
+    Next: int64?   `json:"next,omitempty"`
+}
+
+func *Server.list(w: http.ResponseWriter, r: *http.Request, user: string) throws {
+    filter := parseFilter(r.URL.Query())?
+    todos := store.List(r.Context(), user, filter)?
+    resp := listResponse(Todos = todos)
+    if len(todos) == filter.Limit {
+        resp.Next = todos[len(todos) - 1].ID
+    }
+    writeJSON(w, http.StatusOK, resp)
+}
+
+func *Server.get(w: http.ResponseWriter, r: *http.Request, user: string) throws {
+    t := store.Get(r.Context(), user, pathID(r)?)?
+    writeJSON(w, http.StatusOK, t)
+}
+
+func *Server.create(w: http.ResponseWriter, r: *http.Request, user: string) throws {
+    input := todo.NewTodo()
+    decode(w, r, &input)?
+    t := store.Create(r.Context(), user, input.Normalize()?)?
+    w.Header().Set("Location", "/v1/todos/${t.ID}")
+    writeJSON(w, http.StatusCreated, t)
+}
+
+func *Server.update(w: http.ResponseWriter, r: *http.Request, user: string) throws {
+    id := pathID(r)?
+    patch := todo.Patch()
+    decode(w, r, &patch)?
+    t := store.Update(r.Context(), user, id, patch.Normalize()?)?
+    writeJSON(w, http.StatusOK, t)
+}
+
+func *Server.remove(w: http.ResponseWriter, r: *http.Request, user: string) throws {
+    store.Remove(r.Context(), user, pathID(r)?)?
+    w.WriteHeader(http.StatusNoContent)
+}
+
+// parseFilter reads ?done=true|false&after=ID&limit=N.
+func parseFilter(q: url.Values): todo.Filter throws {
+    f := todo.Filter(Limit = todo.DefaultLimit)
+    done := q.Get("done")
+    if done != "" {
+        f.Done = strconv.ParseBool(done) catch { throw badRequest("done must be true or false") }
+    }
+    after := q.Get("after")
+    if after != "" {
+        f.After = after.toInt64() catch { throw badRequest("after must be an integer") }
+    }
+    limit := q.Get("limit")
+    if limit != "" {
+        n := limit.toInt() catch { throw badRequest("limit must be an integer") }
+        if n < 1 || n > todo.MaxLimit {
+            throw badRequest("limit must be between 1 and ${todo.MaxLimit}")
+        }
+        f.Limit = n
+    }
+    return f
+}
+
+// pathID parses the {id} path segment. A malformed id names no todo.
+func pathID(r: *http.Request): int64 throws {
+    return r.PathValue("id").toInt64() catch { throw todo.ErrNotFound }
+}
+
+// decode reads a JSON body of at most 1 MiB into v, rejecting unknown fields.
+func decode(w: http.ResponseWriter, r: *http.Request, v: any) throws {
+    dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1 << 20))
+    dec.DisallowUnknownFields()
+    dec.Decode(v) catch (err) {
+        _, tooLarge := errors.AsType[*http.MaxBytesError](err)
+        if tooLarge {
+            throw &apiError(status = http.StatusRequestEntityTooLarge, code = "too_large", message = "request body exceeds 1 MiB")
+        }
+        throw badRequest("invalid JSON body: ${err.Error()}")
+    }
+}

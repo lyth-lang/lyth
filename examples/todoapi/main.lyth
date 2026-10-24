@@ -1,0 +1,50 @@
+import "context"
+import "errors"
+import "log/slog"
+import "net/http"
+import "os"
+import "os/signal"
+import "syscall"
+import "time"
+
+import "github.com/jackc/pgx/v5/pgxpool"
+
+import "todoapi/internal/api"
+import "todoapi/internal/config"
+import "todoapi/internal/todo"
+
+func main() throws {
+    cfg := config.Load(os.Getenv)?
+    log := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions(Level = cfg.LogLevel)))
+
+    // Stop on Ctrl-C, or on SIGTERM as sent by container runtimes.
+    ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+    defer stop()
+
+    pool := pgxpool.New(ctx, cfg.DatabaseURL)?
+    defer pool.Close()
+    todo.Migrate(ctx, pool)?
+
+    server := api.NewServer(todo.NewPgStore(pool), cfg.Tokens, log)
+    srv := &http.Server(Addr = cfg.Addr, Handler = server.Handler(), ReadHeaderTimeout = 5 * time.Second)
+
+    // When ctx ends, stop accepting connections and let in-flight requests
+    // finish (up to the shutdown timeout). done is closed when that is over.
+    done := make(chan bool)
+    go {
+        defer done.close()
+        ctx.Done().receive()
+        sctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+        defer cancel()
+        srv.Shutdown(sctx) catch (err) { log.Error("shutdown", "error", err) }
+    }
+
+    log.Info("listening", "addr", cfg.Addr)
+    srv.ListenAndServe() catch (err) {
+        if !errors.Is(err, http.ErrServerClosed) {
+            throw err.wrap("serve")
+        }
+    }
+    done.receive()
+    log.Info("stopped")
+}

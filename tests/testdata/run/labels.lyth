@@ -1,0 +1,76 @@
+// break@label and continue@label target an enclosing loop by name.
+
+func findPair(grid: [][]int, target: int): string {
+    result := "none"
+    outer@ for i, row in grid {
+        for j, v in row {
+            if v == target {
+                result = "${i},${j}"
+                break@outer
+            }
+        }
+    }
+    return result
+}
+
+func skipNegativeRows(grid: [][]int): int {
+    sum := 0
+    rows@ for row in grid {
+        rowSum := 0
+        for v in row {
+            if v < 0 {
+                continue@rows
+            }
+            rowSum += v
+        }
+        sum += rowSum
+    }
+    return sum
+}
+
+func firstBig(xs: []int): int {
+    i := 0
+    found := -1
+    scan@ while i < len(xs) {
+        when {
+            xs[i] > 100 -> {
+                found = xs[i]
+                break@scan
+            }
+            xs[i] < 0 -> {
+                i += 2
+                continue@scan
+            }
+        }
+        i++
+    }
+    return found
+}
+
+// A labeled break in a nested loop exits while (true), so the return is reachable.
+func spin(limit: int): int {
+    n := 0
+    loop@ while true {
+        for k in 0..<limit {
+            n++
+            if n >= limit * 2 {
+                break@loop
+            }
+        }
+    }
+    return n
+}
+
+func main() {
+    grid := [[1, 2], [3, 4], [5, 6]]
+    println(findPair(grid, 4), findPair(grid, 9))
+    println(skipNegativeRows([[1, 2], [-1, 100], [3]]))
+    println(firstBig([1, -5, 7, 200, 300]), firstBig([1, 2]))
+    println(spin(3))
+}
+
+// Output:
+// 1,1 none
+// 6
+// 200 -1
+// 6

@@ -1,0 +1,142 @@
+import "encoding/json"
+import "io"
+import "log/slog"
+import "net/http"
+import "net/http/httptest"
+import "strings"
+import "testing"
+import "time"
+
+import "todoapi/internal/todo"
+
+// newTestAPI returns the API over an in-memory store, with users alice
+// (token "alice-token") and bob (token "bob-token").
+func newTestAPI(): http.Handler {
+    clock := { -> time.Date(2026, time.October, 24, 12, 0, 0, 0, time.UTC) }
+    log := slog.New(slog.NewTextHandler(io.Discard, null))
+    return NewServer(todo.NewMemStore(clock), ["alice-token": "alice", "bob-token": "bob"], log).Handler()
+}
+
+// send performs a request against h. An empty token sends no credentials.
+func send(h: http.Handler, method: string, target: string, token: string, body: string): *httptest.ResponseRecorder {
+    req := httptest.NewRequest(method, target, strings.NewReader(body))
+    if token != "" {
+        req.Header.Set("Authorization", "Bearer " + token)
+    }
+    rec := httptest.NewRecorder()
+    h.ServeHTTP(rec, req)
+    return rec
+}
+
+// expect checks the status code and decodes the JSON body into out, if given.
+func expect(t: *testing.T, rec: *httptest.ResponseRecorder, status: int, out: any?) {
+    t.Helper()
+    if rec.Code != status {
+        t.Fatalf("status %d, want %d; body: %s", rec.Code, status, rec.Body.String())
+    }
+    if out != null {
+        json.Unmarshal(rec.Body.Bytes(), out) catch (err) {
+            t.Fatalf("decoding %q: %v", rec.Body.String(), err)
+        }
+    }
+}
+
+struct errorBody {
+    Error: errorDetail
+}
+
+func TestTodoLifecycle(t: *testing.T) {
+    h := newTestAPI()
+
+    created := todo.Todo()
+    rec := send(h, "POST", "/v1/todos", "alice-token", `{"title": "  buy milk  ", "due": "2026-11-01T09:00:00Z"}`)
+    expect(t, rec, http.StatusCreated, &created)
+    if created.ID == 0 || created.Title != "buy milk" || created.Due == null {
+        t.Fatalf("created %+v", created)
+    }
+    if (rec.Header().Get("Location") != "/v1/todos/${created.ID}") {
+        t.Errorf("Location = %q", rec.Header().Get("Location"))
+    }
+
+    got := todo.Todo()
+    expect(t, send(h, "GET", "/v1/todos/${created.ID}", "alice-token", ""), http.StatusOK, &got)
+    if got.Title != "buy milk" || got.Done {
+        t.Fatalf("got %+v", got)
+    }
+
+    patched := todo.Todo()
+    expect(t, send(h, "PATCH", "/v1/todos/${created.ID}", "alice-token", `{"done": true}`), http.StatusOK, &patched)
+    if !patched.Done || patched.Title != "buy milk" {
+        t.Fatalf("patched %+v", patched)
+    }
+
+    expect(t, send(h, "DELETE", "/v1/todos/${created.ID}", "alice-token", ""), http.StatusNoContent, null)
+    expect(t, send(h, "GET", "/v1/todos/${created.ID}", "alice-token", ""), http.StatusNotFound, null)
+}
+
+func TestAuthentication(t: *testing.T) {
+    h := newTestAPI()
+    rec := send(h, "GET", "/v1/todos", "", "")
+    expect(t, rec, http.StatusUnauthorized, null)
+    if !strings.HasPrefix(rec.Header().Get("WWW-Authenticate"), "Bearer") {
+        t.Errorf("WWW-Authenticate = %q", rec.Header().Get("WWW-Authenticate"))
+    }
+    expect(t, send(h, "GET", "/v1/todos", "wrong-token", ""), http.StatusUnauthorized, null)
+    expect(t, send(h, "GET", "/healthz", "", ""), http.StatusOK, null)
+}
+
+func TestUsersAreIsolated(t: *testing.T) {
+    h := newTestAPI()
+    created := todo.Todo()
+    expect(t, send(h, "POST", "/v1/todos", "alice-token", `{"title": "secret"}`), http.StatusCreated, &created)
+    expect(t, send(h, "GET", "/v1/todos/${created.ID}", "bob-token", ""), http.StatusNotFound, null)
+    expect(t, send(h, "DELETE", "/v1/todos/${created.ID}", "bob-token", ""), http.StatusNotFound, null)
+    page := listResponse()
+    expect(t, send(h, "GET", "/v1/todos", "bob-token", ""), http.StatusOK, &page)
+    if len(page.Todos) != 0 {
+        t.Fatalf("bob sees %+v", page.Todos)
+    }
+}
+
+func TestValidation(t: *testing.T) {
+    h := newTestAPI()
+    body := errorBody()
+    expect(t, send(h, "POST", "/v1/todos", "alice-token", `{"title": "   "}`), http.StatusUnprocessableEntity, &body)
+    if body.Error.Code != "invalid" || body.Error.Fields["title"] == "" {
+        t.Errorf("error body %+v", body)
+    }
+    expect(t, send(h, "POST", "/v1/todos", "alice-token", `{"title": "x", "color": "red"}`), http.StatusBadRequest, null)
+    expect(t, send(h, "POST", "/v1/todos", "alice-token", `{"title": `), http.StatusBadRequest, null)
+    expect(t, send(h, "PATCH", "/v1/todos/1", "alice-token", `{}`), http.StatusUnprocessableEntity, null)
+    expect(t, send(h, "GET", "/v1/todos/abc", "alice-token", ""), http.StatusNotFound, null)
+    expect(t, send(h, "GET", "/v1/todos?limit=0", "alice-token", ""), http.StatusBadRequest, null)
+    expect(t, send(h, "GET", "/v1/todos?done=maybe", "alice-token", ""), http.StatusBadRequest, null)
+}
+
+func TestPaging(t: *testing.T) {
+    h := newTestAPI()
+    for i in 1..5 {
+        expect(t, send(h, "POST", "/v1/todos", "alice-token", "{\"title\": \"task ${i}\"}"), http.StatusCreated, null)
+    }
+    first := listResponse()
+    expect(t, send(h, "GET", "/v1/todos?limit=3", "alice-token", ""), http.StatusOK, &first)
+    next := first.Next
+    if len(first.Todos) != 3 || next == null {
+        t.Fatalf("first page %+v", first)
+    }
+    second := listResponse()
+    expect(t, send(h, "GET", "/v1/todos?limit=3&after=${next}", "alice-token", ""), http.StatusOK, &second)
+    if len(second.Todos) != 2 || second.Next != null || second.Todos[0].Title != "task 4" {
+        t.Fatalf("second page %+v", second)
+    }
+}
+
+func TestRecoverer(t: *testing.T) {
+    log := slog.New(slog.NewTextHandler(io.Discard, null))
+    h := recoverer(log, http.HandlerFunc({ w, r -> panic("boom") }))
+    body := errorBody()
+    expect(t, send(h, "GET", "/", "", ""), http.StatusInternalServerError, &body)
+    if body.Error.Code != "internal" {
+        t.Errorf("error body %+v", body)
+    }
+}

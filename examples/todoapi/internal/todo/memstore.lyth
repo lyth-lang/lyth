@@ -1,0 +1,85 @@
+import "cmp"
+import "context"
+import "slices"
+import "sync"
+import "time"
+
+// MemStore is an in-memory Store for tests and local development.
+struct MemStore {
+    mu: sync.Mutex
+    todos: map[int64]Todo
+    lastID: int64
+    now: () -> time.Time
+}
+
+// NewMemStore returns an empty store whose timestamps come from now.
+func NewMemStore(now: () -> time.Time): *MemStore = &MemStore(todos = [:], now = now)
+
+func *MemStore.List(ctx: context.Context, owner: string, filter: Filter): []Todo throws {
+    mu.Lock()
+    defer mu.Unlock()
+    done := filter.Done
+    out: []Todo = []
+    for _, t in todos {
+        if t.Owner == owner && t.ID > filter.After && (done == null || done == t.Done) {
+            out = append(out, t)
+        }
+    }
+    slices.SortFunc(out, { a, b -> cmp.Compare(a.ID, b.ID) })
+    if len(out) > filter.Limit {
+        out = out[:filter.Limit]
+    }
+    return out
+}
+
+func *MemStore.Get(ctx: context.Context, owner: string, id: int64): Todo throws {
+    mu.Lock()
+    defer mu.Unlock()
+    return find(owner, id)?
+}
+
+func *MemStore.Create(ctx: context.Context, owner: string, input: NewTodo): Todo throws {
+    mu.Lock()
+    defer mu.Unlock()
+    lastID++
+    ts := now()
+    t := Todo(ID = lastID, Owner = owner, Title = input.Title ?: "", Due = input.Due, CreatedAt = ts, UpdatedAt = ts)
+    todos[t.ID] = t
+    return t
+}
+
+func *MemStore.Update(ctx: context.Context, owner: string, id: int64, patch: Patch): Todo throws {
+    mu.Lock()
+    defer mu.Unlock()
+    t := find(owner, id)?
+    title := patch.Title
+    if title != null {
+        t.Title = title
+    }
+    done := patch.Done
+    if done != null {
+        t.Done = done
+    }
+    if patch.Due != null {
+        t.Due = patch.Due
+    }
+    t.UpdatedAt = now()
+    todos[id] = t
+    return t
+}
+
+func *MemStore.Remove(ctx: context.Context, owner: string, id: int64) throws {
+    mu.Lock()
+    defer mu.Unlock()
+    find(owner, id)?
+    delete(todos, id)
+}
+
+// find returns the owner's todo; the caller holds mu.
+func *MemStore.find(owner: string, id: int64): Todo throws {
+    t, ok := todos[id]
+    if !ok || t.Owner != owner {
+        throw ErrNotFound
+    }
+    return t
+}

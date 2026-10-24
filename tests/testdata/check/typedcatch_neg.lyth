@@ -1,0 +1,21 @@
+struct NotFound {
+    Key: string
+}
+
+func *NotFound.Error(): string = "not found: ${Key}"
+
+func f(): int throws {
+    return 1
+}
+
+func g() {
+    f() catch (e: *NotFound) { println(e.Key) } // ERROR E0303 "errors other than *NotFound are not handled"
+    f() catch (e: string) { println(e) } // ERROR E0201 "string is not an error type"
+    f() catch (e: *NotFound?) { println(e) } // ERROR E0216 "catch types are non-null"
+    n: int = f() catch (e: *NotFound) { 0 } // ERROR E0303 "this catch handles only *NotFound"
+    println(n)
+}
+
+func h(): int {
+    return f() catch (e: *NotFound) { 0 }? // ERROR E0301 "? can only be used in a function that throws"
+}

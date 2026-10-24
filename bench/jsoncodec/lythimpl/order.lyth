@@ -1,0 +1,61 @@
+// Package lythimpl is the Lyth version of the jsoncodec workload.
+package lythimpl
+
+import "encoding/json"
+import "errors"
+
+struct Item {
+    Sku: string
+    Quantity: int
+    PriceCents: int64
+}
+
+struct Customer {
+    ID: int64
+    Name: string
+    Email: string?
+    Vip: bool
+}
+
+struct Order {
+    ID: int64
+    Customer: Customer
+    Items: []Item
+    Note: string?
+    Tags: []string
+}
+
+// Validate checks business rules.
+func Order.Validate() throws {
+    if len(Items) == 0 {
+        throw errors.New("order ${ID}: no items")
+    }
+    for it in Items {
+        if it.Quantity <= 0 {
+            throw errors.New("order ${ID}: bad quantity for ${it.Sku}")
+        }
+    }
+}
+
+// Total returns the order total in cents.
+func Order.Total(): int64 {
+    t: int64 = 0
+    for it in Items {
+        t += int64(it.Quantity) * it.PriceCents
+    }
+    return t
+}
+
+// Decode parses and validates an order.
+func Decode(data: []byte): Order throws {
+    o := Order()
+    json.Unmarshal(data, &o)?
+    o.Validate()?
+    return o
+}
+
+// DecodeTotal decodes an order and returns its total.
+func DecodeTotal(data: []byte): int64 throws = Decode(data)?.Total()
+
+// RoundTrip decodes, validates, and re-encodes an order.
+func RoundTrip(data: []byte): []byte throws = json.Marshal(Decode(data)?)?

@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.astro/
+.netlify/
+.cache/
+
+# generated from the repository's Markdown by scripts/sync-docs.mjs
+src/content/docs/**/*.md
+src/generated/

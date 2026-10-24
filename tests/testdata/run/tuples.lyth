@@ -1,0 +1,50 @@
+import "strconv"
+
+// Every right-hand value is evaluated before any assignment, so this swaps.
+func fib(n: int): int {
+    a, b := 0, 1
+    for _ in 0..<n {
+        a, b = b, a + b
+    }
+    return a
+}
+
+struct Pair {
+    Left: int
+    Right: int
+}
+
+func main() {
+    x := 1
+    y := 2
+    x, y = y, x
+    println(x, y)
+    println(fib(10))
+
+    xs := [10, 20, 30]
+    xs[0], xs[2] = xs[2], xs[0]
+    println(xs)
+
+    p := Pair(1, 2)
+    p.Left, p.Right = p.Right, p.Left
+    println(p.Left, p.Right)
+
+    n := 0
+    err: error? = null
+    n, err = strconv.Atoi("42")
+    println(n, err == null)
+    n, _ = strconv.Atoi("7")
+    println(n)
+
+    word, count := "ok", 3
+    println(word, count)
+}
+
+// Output:
+// 2 1
+// 55
+// [30 20 10]
+// 2 1
+// 42 true
+// 7
+// ok 3

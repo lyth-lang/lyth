@@ -1,0 +1,111 @@
+import "io/fs"
+import "slices"
+import "sync"
+import "testing/fstest"
+
+func sum(xs: ...int): int {
+    total := 0
+    for x in xs {
+        total += x
+    }
+    return total
+}
+
+func retry(times: int, op: () -> unit throws): int throws {
+    attempts := 0
+    while true {
+        attempts++
+        failed := false
+        op() catch (err) {
+            if attempts >= times {
+                throw err.wrap("after ${attempts} attempts")
+            }
+            failed = true
+        }
+        if !failed {
+            return attempts
+        }
+    }
+}
+
+interface Reader {
+    Read(): string
+}
+
+interface ReadCloser {
+    Reader
+    Close()
+}
+
+struct File {
+    Name: string
+}
+
+func File.Read(): string = "contents of ${Name}"
+func File.Close() {
+    println("closed ${Name}")
+}
+
+func main() throws {
+    println(sum(), sum(1, 2, 3))
+    nums := [4, 5, 6]
+    println(sum(nums...))
+
+    mu: sync.Mutex
+    wg: sync.WaitGroup
+    results: []int = []
+    for i in 1..5 {
+        wg.Add(1)
+        go {
+            mu.Lock()
+            results = append(results, i * i)
+            mu.Unlock()
+            wg.Done()
+        }
+    }
+    wg.Wait()
+    slices.Sort(results)
+    println(results)
+
+    files := fstest.MapFS(["a.txt": &fstest.MapFile(Data = []byte("A")), "dir/b.txt": &fstest.MapFile(Data = []byte("B"))])
+    paths: []string = []
+    fs.WalkDir(files, ".") { path, d, err ->
+        err?
+        if !d.IsDir() {
+            paths = append(paths, path)
+        }
+    }?
+    println(paths)
+
+    calls := 0
+    n := retry(3) {
+        calls++
+        if calls < 2 {
+            throw fs.ErrNotExist
+        }
+    }?
+    println("succeeded after ${n}")
+    e := retry(2) { throw fs.ErrPermission } catch (err) {
+        println(err)
+        0
+    }
+    println(e)
+
+    rc: ReadCloser = File(Name = "notes.txt")
+    println(rc.Read())
+    rc.Close()
+
+    println("42".toInt64()?, "2.5".toFloat64()?, "true".toBool()?)
+}
+
+// Output:
+// 0 6
+// 15
+// [1 4 9 16 25]
+// [a.txt dir/b.txt]
+// succeeded after 2
+// after 2 attempts: permission denied
+// 0
+// contents of notes.txt
+// closed notes.txt
+// 42 2.5 true

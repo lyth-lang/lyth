@@ -1,0 +1,41 @@
+import "encoding/json"
+import "fmt"
+
+// Exported fields get json keys in lower camel case; unexported fields are
+// not serialized.
+struct Account {
+    ID: int64
+    UserID: int64
+    DisplayName: string
+    HTTPPort: int
+    secret: string
+}
+
+// A method named like the fmt.Stringer method implements it; a lower-case
+// one does not.
+struct Loud {
+    Word: string
+}
+
+func Loud.String(): string = "${Word}!"
+
+struct Quiet {
+    Word: string
+}
+
+func Quiet.string(): string = "${Word}..."
+
+func main() throws {
+    a := Account(ID = 1, UserID = 7, DisplayName = "Ada", HTTPPort = 8080, secret = "s")
+    data := json.Marshal(a)?
+    println(string(data))
+    bytes: []byte = []byte("raw")
+    xs := make([]int, 2, 4)
+    println(len(bytes), len(xs), cap(xs))
+    println(fmt.Sprint(Loud(Word = "hey")), fmt.Sprint(Quiet(Word = "hm")), Quiet(Word = "hm").string())
+}
+
+// Output:
+// {"id":1,"userID":7,"displayName":"Ada","httpPort":8080}
+// 3 2 4
+// hey! {hm} hm...

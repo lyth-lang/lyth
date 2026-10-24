@@ -1,0 +1,122 @@
+// generics checks generic functions, structs, methods, and interfaces, and
+// the type arguments inferred for them.
+import "cmp"
+import "fmt"
+
+func maxOf[T: cmp.Ordered](a: T, b: T): T = if a > b { a } else { b }
+
+func indexOf[T: comparable](xs: []T, x: T): int {
+    for i, v in xs {
+        if v == x {
+            return i
+        }
+    }
+    return -1
+}
+
+func mapAll[T, R](xs: []T, f: (T) -> R): []R {
+    out: []R = []
+    for x in xs {
+        out = append(out, f(x))
+    }
+    return out
+}
+
+func joined[T: fmt.Stringer](xs: []T): string {
+    s := ""
+    for x in xs {
+        s += x.String() + ";"
+    }
+    return s
+}
+
+func sum[T: cmp.Ordered](xs: []T): T {
+    total: T
+    for x in xs {
+        total += x
+    }
+    return total
+}
+
+// The zero value of a type parameter is Go's: returned beside a flag.
+func find[T](xs: []T, match: (T) -> bool): (T, bool) {
+    for x in xs {
+        if match(x) {
+            return x, true
+        }
+    }
+    zero: T
+    return zero, false
+}
+
+func zero[T](): T {
+    z: T
+    return z
+}
+
+struct Celsius {
+    Deg: float64
+}
+
+func Celsius.String(): string = "${Deg}C"
+
+struct Page[T] {
+    Items: []T
+    Total: int
+}
+
+func Page[T].Count(): int = len(Items)
+
+func Page[T].First(fallback: T): T = if len(Items) > 0 { Items[0] } else { fallback }
+
+struct Pair[K: comparable, V] {
+    Key: K
+    Value: V
+}
+
+func Pair[K, V].String(): string = "${Key}=${Value}"
+
+interface Container[T] {
+    Get(): T
+}
+
+struct Box[T] : fmt.Stringer, Container[T] {
+    Value: T
+}
+
+func Box[T].String(): string = "Box(${Value})"
+func Box[T].Get(): T = Value
+
+func unwrap[T](c: Container[T]): T = c.Get()
+
+struct User {
+    Name: string
+}
+
+func main() {
+    println(maxOf(3, 7), maxOf("a", "b"), maxOf(2.5, 1.5))
+    println(indexOf(["a", "b", "c"], "c"), indexOf([1, 2], 5))
+    println(mapAll([1, 2, 3]) { "#${it}" }, mapAll(["x", "yy"]) { len(it) })
+    println(joined([Celsius(Deg = 21.5), Celsius(Deg = 0)]), sum([1, 2, 3]), sum(["a", "b"]))
+    big, found := find([1, 5, 10]) { it > 4 }
+    _, none := find(["a"]) { it == "z" }
+    z: int = zero()
+    println(big, found, none, z, zero[string]() == "")
+
+    users := Page(Items = [User(Name = "Ada"), User(Name = "Linus")], Total = 2)
+    empty := Page[int](Items = [], Total = 0)
+    println(users.Count(), users.First(User(Name = "?")).Name, empty.Count(), empty.First(-1))
+    println(Pair(Key = "a", Value = 1), Pair[int, bool](Key = 1, Value = true))
+    b := Box(Value = 3.5)
+    println(b, unwrap[float64](b))
+}
+
+// Output:
+// 7 b 2.5
+// 2 -1
+// [#1 #2 #3] [1 2]
+// 21.5C;0C; 6 ab
+// 5 true false 0 true
+// 2 Ada 0 -1
+// a=1 1=true
+// Box(3.5) 3.5

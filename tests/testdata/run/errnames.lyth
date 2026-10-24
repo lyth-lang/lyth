@@ -1,0 +1,161 @@
+// errnames checks the Go names of error variables and catch binders: they
+// reuse err as hand-written Go does, and never let one error hide another.
+import "errors"
+import "strconv"
+
+struct NotFound {
+    Key: string
+}
+
+func *NotFound.Error(): string = "not found: ${Key}"
+
+struct Invalid {
+    Reason: string
+}
+
+func *Invalid.Error(): string = "invalid: ${Reason}"
+
+func fail(msg: string): int throws {
+    throw errors.New(msg)
+}
+
+func lookup(key: string): int throws {
+    when key {
+        "a" -> return 1
+        "" -> throw &Invalid(Reason = "empty key")
+        "io" -> throw errors.New("disk on fire")
+    }
+    throw &NotFound(Key = key)
+}
+
+// Expansions and binders in one block share err.
+func sequence() {
+    println(fail("one") catch { -1 })
+    n := fail("two") catch (err) {
+        println("caught", err)
+        0
+    }
+    fail("three") catch (err) { println("statement", err) }
+    println(n)
+}
+
+// A nested expansion in a handler does not hide the handler's binder.
+func nested() {
+    a := fail("outer") catch (err) {
+        k := strconv.Atoi("x") catch { -1 }
+        println("nested", k, err)
+        0
+    }
+    fail("outer2") catch (err) {
+        fail("inner") catch (err) { println("inner sees", err) }
+        println("outer sees", err)
+    }
+    println(a)
+}
+
+// A closure keeps the error its binder had, whatever runs later.
+func closures(): []() -> string {
+    out: []() -> string = []
+    a := fail("first") catch (err) {
+        out = append(out, { "closure saw ${err}" })
+        0
+    }
+    b := fail("second") catch { 0 }
+    println(a, b)
+    return out
+}
+
+func deferred() {
+    a := fail("deferred") catch (err) {
+        defer { println("defer saw", err) }
+        0
+    }
+    b := fail("later") catch { 0 }
+    println("deferred body", a, b)
+}
+
+// A catch whose value goes into an existing variable, after another catch
+// in the same block.
+func pick(c: bool): int {
+    x := if c {
+        a := strconv.Atoi("1") catch { 0 }
+        println("pick", a)
+        strconv.Atoi("y") catch { 2 }
+    } else { 0 }
+    return x
+}
+
+// A user variable named err keeps its value.
+func raw() {
+    n, err := strconv.Atoi("12")
+    m := strconv.Atoi("x") catch { -1 }
+    println(n, m, err == null)
+}
+
+// A typed binder does not hide a local of the same name from later clauses.
+func typed(key: string) {
+    e := "local"
+    n := lookup(key) catch (e: *NotFound) {
+        println("not found", e.Key)
+        1
+    } catch (x: *Invalid) {
+        println("invalid", x.Reason, e)
+        2
+    } catch (err) {
+        println("other", err, e)
+        3
+    }
+    println(n)
+}
+
+// A nested ? in the final handler of a chain.
+func chain(key: string): int throws {
+    n := lookup(key) catch (_: *NotFound) {
+        0
+    } catch (err) {
+        k := strconv.Atoi("5")?
+        println("chain", err, k)
+        -1
+    }
+    return n
+}
+
+func main() throws {
+    sequence()
+    nested()
+    for f in closures() {
+        println(f())
+    }
+    deferred()
+    println(pick(true), pick(false))
+    raw()
+    typed("zz")
+    typed("")
+    typed("io")
+    println(chain("zz")?, chain("io")?)
+}
+
+// Output:
+// -1
+// caught two
+// statement three
+// 0
+// nested -1 outer
+// inner sees inner
+// outer sees outer2
+// 0
+// 0 0
+// closure saw first
+// deferred body 0 0
+// defer saw deferred
+// pick 1
+// 2 0
+// 12 -1 true
+// not found zz
+// 1
+// invalid empty key local
+// 2
+// other disk on fire local
+// 3
+// chain disk on fire 5
+// 0 -1

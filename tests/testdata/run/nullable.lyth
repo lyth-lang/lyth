@@ -1,0 +1,76 @@
+struct Node {
+    Value: int
+    Next: *Node?
+}
+
+struct Profile {
+    Nickname: string?
+    Age: int?
+}
+
+func length(head: *Node?): int {
+    n := 0
+    cur := head
+    while cur != null {
+        n++
+        cur = cur!!.Next
+    }
+    return n
+}
+
+func describe(p: Profile): string {
+    nick := p.Nickname ?: "anonymous"
+    age := p.Age
+    if age == null {
+        return "${nick} (age unknown)"
+    }
+    return "${nick} (${age})"
+}
+
+func firstLong(words: []string): string? {
+    for w in words {
+        if len(w) > 4 {
+            return w
+        }
+    }
+    return null
+}
+
+func main() {
+    list := &Node(Value = 1, Next = &Node(Value = 2, Next = &Node(Value = 3, Next = null)))
+    println(length(list), length(null))
+
+    second := list.Next
+    if second != null {
+        println("second = ${second.Value}")
+    }
+    println(list.Next?.Next?.Value)
+    println(list.Next?.Next?.Next?.Value)
+
+    println(describe(Profile(Nickname = "lyth", Age = 3)))
+    println(describe(Profile(Nickname = null, Age = null)))
+
+    w := firstLong(["go", "lyth", "kotlin"])
+    println(w ?: "none", firstLong(["a"]) ?: "none")
+    println("found: ${w}")
+
+    a: int? = 5
+    b: int? = 5
+    c: int? = null
+    println(a == b, a == c, c == null, a == 5)
+
+    forced := w!!
+    println(len(forced))
+}
+
+// Output:
+// 3 0
+// second = 2
+// 3
+// null
+// lyth (3)
+// anonymous (age unknown)
+// kotlin none
+// found: kotlin
+// true false true true
+// 6

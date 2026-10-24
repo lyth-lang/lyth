@@ -1,0 +1,16 @@
+import "errors"
+
+func use(f: (string) -> error?) {}
+
+func noResult(f: () -> unit) {}
+
+func main() {
+    // A function type written in Lyth with an Error result returns the error
+    // as a value; only throws makes a lambda fallible.
+    use({ s ->
+        n := s.toInt()? // ERROR E0301 "this lambda returns error? as a value"
+        null
+    })
+    use({ throw errors.New("x") }) // ERROR E0304 "declare the type with throws"
+    noResult({ throw errors.New("x") }) // ERROR E0304 "does not return an error"
+}

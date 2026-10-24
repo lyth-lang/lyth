@@ -1,0 +1,33 @@
+struct User {
+    Name: string
+}
+
+// ? after a slice's element type belongs to the element.
+func firstNamed(users: []*User?): string {
+    for u in users {
+        if u != null {
+            return u.Name
+        }
+    }
+    return "nobody"
+}
+
+func main() {
+    ages: []int? = [30, null, 41]
+    known := 0
+    for a in ages {
+        if a != null {
+            known += a
+        }
+    }
+    grid: [][]int = [[1, 2], [3]]
+    words := make([]string, 0, 2)
+    more := append(words, "a", "b")
+    bytes := []byte("hi")
+    println(known, len(grid[0]) + len(grid[1]), len(more), bytes[0])
+    println(firstNamed([null, &User(Name = "Ada")]), firstNamed([]))
+}
+
+// Output:
+// 71 3 2 104
+// Ada nobody

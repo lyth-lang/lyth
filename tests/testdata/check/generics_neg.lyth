@@ -1,0 +1,43 @@
+func notAnInterface[T: int](x: T) {} // ERROR E0201 "the constraint of T must be an interface"
+
+func unordered[T](a: T, b: T): bool = a < b // ERROR E0209 "operator < is not defined for T"
+
+func nullable[T](x: T?) {} // ERROR E0407 "nullable type parameters"
+
+func withDefault[T](x: T, n: int = 1) {} // ERROR E0601 "generic functions cannot have default values"
+
+func indexOf[T: comparable](xs: []T, x: T): int = 0
+
+func zero[T](): T {
+    z: T
+    return z
+}
+
+struct Page[T] {
+    Items: []T
+}
+
+func Page.Size(): int = 0 // ERROR E0213 "Page is generic: declare the method as func Page[T].Size"
+
+func Page[T].Twice[T](): int = 0 // ERROR E0216 "already names the type parameters of Page"
+
+struct User {
+    Name: string
+}
+
+func User.Convert[U](): int = 0 // ERROR E0601 "a method cannot declare its own type parameters"
+
+struct Pair[K: comparable, V] {
+    Key: K
+    Value: V
+}
+
+func use() {
+    c: comparable = 1 // ERROR E0216 "comparable can only be used as the constraint of a type parameter"
+    println(indexOf([[1]], [1])) // ERROR E0213 "invalid type arguments for indexOf"
+    println(zero()) // ERROR E0208 "cannot infer type argument T of zero"
+    p: Page = Page[int](Items = []) // ERROR E0213 "Page takes 1 type argument (T), got 0"
+    q := Page() // ERROR E0208 "cannot infer type argument T of Page from its fields"
+    bad := Pair[[]int, int](Key = [1], Value = 1) // ERROR E0213 "invalid type arguments for Pair"
+    println(c, p, q, bad)
+}

@@ -1,0 +1,142 @@
+import "encoding/json"
+import "errors"
+import "fmt"
+import "net/http"
+import "net/http/httptest"
+
+struct Counter {
+    Count: int
+}
+
+// A value receiver: self is a copy of the caller's Counter.
+func Counter.Next(): int = self.Count + 1
+
+// A pointer receiver: self points at the caller's Counter.
+func *Counter.Inc() {
+    self.Count++
+}
+
+// Fields are also in scope by name; self.Count and Count are the same field.
+func *Counter.Add(n: int) {
+    Count += n
+}
+
+func Counter.String(): string = "Counter(${self.Count})"
+
+interface Incrementer {
+    Inc()
+}
+
+// A generic type's methods name its type parameters.
+struct Stack[T] {
+    items: []T
+}
+
+func *Stack[T].Push(x: T) {
+    self.items = append(self.items, x)
+}
+
+func Stack[T].Len(): int = len(self.items)
+
+// An extension function: self is the extended value.
+func string.Twice(): string = self + self
+
+// The handler from ADR 0031.
+struct Profile {
+    Name: string
+}
+
+struct APIResponse[T] {
+    Data: T
+}
+
+interface ProfileRepo {
+    List(): []Profile throws
+}
+
+struct memRepo {
+    profiles: []Profile
+    fail: bool
+}
+
+func memRepo.List(): []Profile throws {
+    if self.fail {
+        throw errors.New("database down")
+    }
+    return self.profiles
+}
+
+struct Server {
+    repo: ProfileRepo
+}
+
+func Server.WriteJSON(w: http.ResponseWriter, status: int, v: any) {
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(status)
+    json.NewEncoder(w).Encode(v) catch {}
+}
+
+func Server.WriteError(w: http.ResponseWriter, status: int, code: string) {
+    self.WriteJSON(w, status, ["error": code])
+}
+
+func Server.ListProfiles(
+    w: http.ResponseWriter,
+    r: *http.Request,
+) {
+    profiles := self.repo.List() catch (err) {
+        self.WriteError(w, 500, "internal_error")
+        return
+    }
+
+    self.WriteJSON(
+        w,
+        200,
+        APIResponse[[]Profile](Data = profiles),
+    )
+}
+
+func main() {
+    c := Counter(Count = 1)
+    println(c.Next(), c.Count)
+    c.Inc() // Go takes &c: the method changes c
+    c.Add(10)
+    println(c.Count)
+
+    // A copy has its own fields.
+    d := c
+    d.Inc()
+    println(c.Count, d.Count)
+
+    // Only *Counter has Inc in its method set.
+    p: Incrementer = &c
+    p.Inc()
+    fmt.Println(c)
+
+    // A method value binds its receiver: a pointer for pointer methods.
+    inc := c.Inc
+    inc()
+    println(c.Count)
+
+    s := Stack[string]()
+    s.Push("a")
+    s.Push("b")
+    println(s.Len(), "go".Twice())
+
+    for _, repo in [memRepo(profiles = [Profile(Name = "ada")], fail = false), memRepo(profiles = [], fail = true)] {
+        srv := Server(repo = repo)
+        rec := httptest.NewRecorder()
+        srv.ListProfiles(rec, httptest.NewRequest("GET", "/profiles", null))
+        print(rec.Code, " ", rec.Body.String())
+    }
+}
+
+// Output:
+// 2 1
+// 12
+// 12 13
+// Counter(13)
+// 14
+// 2 gogo
+// 200 {"data":[{"name":"ada"}]}
+// 500 {"error":"internal_error"}

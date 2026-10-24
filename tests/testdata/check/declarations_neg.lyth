@@ -1,0 +1,52 @@
+import "strconv"
+
+const Max = 3
+
+struct Box {
+    Size: int
+}
+
+func Box.grow(): int {
+    Size := 2 // WARN W0006 "Size hides the field Size of self"
+    return Size
+}
+
+func *Box.reset() {
+    self = &Box(Size = 0) // ERROR E0501 "the receiver is read-only"
+}
+
+func noSelf(): int = self.Size // ERROR E0216 "self is only available inside methods"
+
+func redeclare(n: int) {
+    x := 1
+    x := 2 // ERROR E0005 "x is already declared in this scope"
+    a, b := 1, 2
+    a, b := 3, 4 // ERROR E0005 "no new variables on the left of :="
+    n, m := 5, 6 // ERROR E0501 ":= may reuse only local variables of this scope"
+    s: string = 1 // ERROR E0201 "expected string, found int"
+    p: *Box // ERROR E0405 "p of type *Box needs an initializer"
+    k, err := strconv.Atoi("1")
+    k2, err := strconv.Atoi("2")
+    Max = 4 // ERROR E0501 "Max"
+    if x > 0 {
+        err := 7 // WARN W0006 "err hides the variable declared in an enclosing scope"
+        println(err)
+    }
+    println(x, a, b, m, s, p, k, k2, err)
+}
+
+func smart(id: int): int {
+    found: Box? = null
+    if id > 0 {
+        found = Box(Size = id)
+    }
+    if found != null {
+        return found.Size // ERROR E0401 "smart casts apply only to variables that are never reassigned"
+    }
+    return 0
+}
+
+func main() {
+    redeclare(1)
+    println(smart(1))
+}

@@ -1,0 +1,62 @@
+import "slices"
+import "sort"
+import "strings"
+
+func main() {
+    xs: []int = [5, 3, 8]
+    xs = append(xs, 1, 9)
+    println(len(xs), xs[0], xs[len(xs) - 1])
+    println(slices.Contains(xs, 8), slices.Index(xs, 3), slices.Max(xs))
+
+    sorted := slices.Clone(xs)
+    slices.Sort(sorted)
+    println(sorted, xs)
+
+    words := strings.Fields("the quick brown fox")
+    sort.Strings(words)
+    println(strings.Join(words, ","))
+
+    ages: map[string]int = ["ada": 36, "linus": 28]
+    keys: []string = []
+    for k, _ in ages {
+        keys = append(keys, k)
+    }
+    slices.Sort(keys)
+    println(keys)
+
+    age, ok := ages["grace"]
+    println(age, ok)
+
+    counts: map[rune]int = [:]
+    for r in "hello" {
+        counts[r] = counts[r] + 1
+    }
+    println(counts['l'], counts['h'], len(counts))
+
+    matrix: [][]int = [[1, 2], [3, 4]]
+    total := 0
+    for row in matrix {
+        for v in row {
+            total += v
+        }
+    }
+    println(total)
+
+    part := xs[1:3]
+    println(part, len(part))
+
+    buf := make([]byte, 0, 16)
+    println(len(buf), cap(buf))
+}
+
+// Output:
+// 5 5 9
+// true 1 9
+// [1 3 5 8 9] [5 3 8 1 9]
+// brown,fox,quick,the
+// [ada linus]
+// 0 false
+// 2 1 4
+// 10
+// [3 8] 2
+// 0 16

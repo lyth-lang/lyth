@@ -1,0 +1,83 @@
+import "errors"
+import "strconv"
+
+var ErrNotFound = errors.New("not found")
+
+struct Store {
+    Items: map[string]int
+}
+
+func Store.get(key: string): int throws {
+    v, ok := Items[key]
+    if !ok {
+        throw ErrNotFound
+    }
+    return v
+}
+
+func parseAll(xs: []string): []int throws {
+    out: []int = []
+    for x in xs {
+        out = append(out, strconv.Atoi(x)?)
+    }
+    return out
+}
+
+func sum(store: Store, a: string, b: string): int throws {
+    return store.get(a)? + store.get(b)?
+}
+
+func withContext(store: Store, key: string): int throws {
+    return store.get(key) catch (err) { throw err.wrap("lookup ${key}") }
+}
+
+func safeGet(store: Store, key: string): int = store.get(key) catch { -1 }
+
+func maybe(flag: bool): error? = if flag { errors.New("boom") } else { null }
+
+func main() throws {
+    store := Store(Items = ["a": 1, "b": 2])
+    println(sum(store, "a", "b")?)
+    println(parseAll(["1", "2", "3"])?)
+
+    r := parseAll(["1", "x"]) catch (err) {
+        println("parse failed: ${err}")
+        []
+    }
+    println(len(r))
+
+    println(safeGet(store, "zzz"))
+
+    err := withContext(store, "missing") catch (e) {
+        println("is not found: ${errors.Is(e, ErrNotFound)}")
+        println(e)
+        0
+    }
+    println(err)
+
+    n, perr := strconv.Atoi("42")
+    println(n, perr == null)
+
+    e1 := maybe(true)
+    if e1 != null {
+        println("got: ${e1.Error()}")
+    }
+    _ = maybe(false)
+
+    store.get("nope")?
+    println("not printed")
+}
+
+// Output:
+// 3
+// [1 2 3]
+// parse failed: strconv.Atoi: parsing "x": invalid syntax
+// 0
+// -1
+// is not found: true
+// lookup missing: not found
+// 0
+// 42 true
+// got: boom
+// Exit: 1
+// Stderr: error: not found

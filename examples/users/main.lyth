@@ -1,0 +1,31 @@
+import "errors"
+
+struct User {
+    ID: int64
+    Name: string
+    Email: string?                     // nullable: *string in Go, null in JSON
+}
+
+var ErrNotFound = errors.New("not found")
+
+func find(id: int64): User? throws {        // Go: func find(id int64) (*User, error)
+    if id < 0 {
+        throw errors.New("negative id ${id}")
+    }
+    if id == 0 {
+        return null                        // absent is a value, not an error
+    }
+    return User(ID = id, Name = "Ada", Email = null)
+}
+
+func describe(raw: string): string throws {
+    id := raw.toInt64()?                // ? propagates the parse error
+    user := find(id)? ?: return "nobody"
+    email := user.Email ?: "no email"
+    return "${user.Name} <${email}>"
+}
+
+func main() throws {
+    println(describe("1")?)
+    println(describe("x") catch (err) { "error: ${err}" })
+}

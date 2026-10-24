@@ -1,0 +1,47 @@
+enum Color { Red, Green, Blue }
+enum Dup { A, A } // ERROR E0102 "enum Dup already has an entry A"
+enum Empty {} // ERROR E0216 "enum Empty has no entries"
+enum Valued { One(1) } // ERROR E0601 "enum entries cannot have values"
+sealed struct Nope {} // ERROR E0008 "only interfaces can be sealed"
+
+sealed interface Shape {
+    Area(): float64
+}
+
+struct Circle : Shape {
+    R: float64
+}
+
+func Circle.Area(): float64 = R
+
+struct Rect : Shape {
+    W: float64
+}
+
+func Rect.Area(): float64 = W
+
+struct Square {
+    S: float64
+}
+
+func Square.Area(): float64 = S * S
+
+func Color.String(): string = "x" // ERROR E0102 "enum Color already has a String method"
+
+func use(c: Color, s: Shape) {
+    when c { // ERROR E0216 "when over Color must cover every entry: missing Green, Blue"
+        Red -> println("r")
+    }
+    n := when c { // ERROR E0216 "missing Blue"
+        Red, Green -> 1
+    }
+    k := when s { // ERROR E0216 "when over Shape must cover every member type: missing Rect"
+        is Circle -> 1
+    }
+    sq: Shape = Square(S = 1) // ERROR E0201 "Shape is sealed: only types that declare it implement it (struct Square : Shape)"
+    println(Color.Purple) // ERROR E0205 "enum Color has no entry Purple"
+    println(c < Color.Red) // ERROR E0209 "operator < is not defined for Color"
+    println(n, k, sq)
+}
+
+func main() {}

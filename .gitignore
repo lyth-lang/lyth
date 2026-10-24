@@ -1,0 +1,7 @@
+# lyth build output: generated Go, overlays, and the Go type cache
+.lyth/
+
+# compiled benchmark binaries (the reports beside them are kept)
+bench/results/bin/
+
+.DS_Store

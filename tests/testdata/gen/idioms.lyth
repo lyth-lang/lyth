@@ -1,0 +1,64 @@
+import "strconv"
+import "time"
+
+struct NotFound {
+    ID: int
+}
+
+func *NotFound.Error(): string = "user ${ID} not found"
+
+interface Store {
+    Name(id: int): string throws
+}
+
+// A declared conformance is a compile-time assertion.
+struct memStore : Store {
+    Names: map[int]string
+}
+
+func memStore.Name(id: int): string throws {
+    if id !in Names {
+        throw &NotFound(ID = id)
+    }
+    return Names[id]
+}
+
+// A typed catch handles one error type and propagates the rest.
+func NameOr(s: Store, id: int, fallback: string = "guest"): string throws {
+    n := s.Name(id) catch (_: *NotFound) { fallback }?
+    return n
+}
+
+// A pass-through return keeps the Go results as they are.
+func Port(s: string): int throws = strconv.Atoi(s)
+
+func isSuccess(code: int) = code in 200..299
+
+func Connect(host: string, port: int = 5432, timeout: time.Duration = 30 * time.Second): string =
+    "${host}:${port} ${timeout}"
+
+func Find(grid: [][]int, want: int): (int, int) {
+    row, col := -1, -1
+    outer@ for i, r in grid {
+        for j, v in r {
+            if v == want {
+                row, col = i, j
+                break@outer
+            }
+        }
+    }
+    return row, col
+}
+
+func Fib(n: int): int {
+    a, b := 0, 1
+    for _ in 0..<n {
+        a, b = b, a + b
+    }
+    return a
+}
+
+func Demo(s: Store): string throws {
+    name := NameOr(s, 7)?
+    return "${Connect("db", timeout = time.Second)} ${name} ${isSuccess(204)}"
+}

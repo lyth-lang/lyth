@@ -1,0 +1,56 @@
+// Spellings from before ADR 0031 (Kotlin's) are errors that name the
+// replacement.
+
+fun old() {} // ERROR E0008 "functions are declared with func"
+
+val Limit = 3 // ERROR E0008 "package-level variables are declared with var"
+
+func count(n: Int): String = "" // ERROR E0101 "Lyth uses Go's type names: int" // ERROR E0101 "string"
+
+func table(m: Map<String, Int>) {} // ERROR E0008 "write map[String]Int" // ERROR E0101 "string" // ERROR E0101 "int"
+
+func <T> first(xs: []T): T = xs[0] // ERROR E0008 "type parameters are written in brackets"
+
+func pick[T cmp.Ordered](a: T): T = a // ERROR E0008 "write T: cmp.Ordered" // ERROR E0101 "undefined package cmp"
+
+interface Shape {
+    func Area(): float64 // ERROR E0008 "interface methods are written without 'func'"
+}
+
+struct Point {
+    X: int
+}
+
+func (p *Point) Move() {} // ERROR E0008 "methods are declared func *Point.Name(...); the receiver is self"
+
+func Point.show(): string = "${this.X}" // ERROR E0008 "the receiver is called self"
+
+func main() {
+    val a = 1 // ERROR E0008 "write a := 1"
+    var b: int = 2 // ERROR E0008 "write b: int = 2"
+    name := "lyth"
+    println("$name") // ERROR E0006 "string templates use ${...}"
+    for (i in 0..<2) { // ERROR E0008 "write for i in 0..<2"
+        println(i)
+    }
+    for i, x := range [1] { // ERROR E0008 "Lyth iterates with in, not := range"
+        println(i, x)
+    }
+    if a > b println(a) // ERROR E0008 "if bodies are blocks"
+    a := 3 // ERROR E0005 "a is already declared in this scope"
+    (a, b) = (b, a) // ERROR E0008 "assignment lists are written without parentheses"
+    when (val n = a) { // ERROR E0008 "a when subject is bound with :="
+        else -> println(n)
+    }
+    self := 1 // ERROR E0003 "self is the method receiver"
+}
+
+func localConst() {
+    const k = 1 // ERROR E0601 "constants are declared at package level"
+}
+
+func headerLambda(xs: []int) {
+    if xs.Any { it > 1 } { // ERROR E0205 "has no field or method Any" // ERROR E0008 "the if header cannot end in a trailing lambda"
+        println(xs)
+    }
+}

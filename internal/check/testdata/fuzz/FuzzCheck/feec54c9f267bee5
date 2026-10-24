@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("fun 00000{for")

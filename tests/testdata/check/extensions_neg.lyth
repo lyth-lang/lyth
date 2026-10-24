@@ -1,0 +1,23 @@
+import "time"
+
+func string.Size(): int = len(self)
+
+func []T.Size[T](): int = len(self) // ERROR E0102 "extension Size is already declared for string"
+
+func Helper(): int = 1
+
+func string.Helper(): int = 2 // ERROR E0102 "Helper would be named Helper in Go"
+
+func string?.OrEmpty(): string = "" // ERROR E0601 "an extension function cannot have a nullable receiver"
+
+func T.Also[T](): T = self // ERROR E0216 "an extension's receiver cannot be a bare type parameter"
+
+// An extension reaches its receiver through this.
+func time.Duration.Twice(): float64 = Hours() * 2 // ERROR E0101 "Hours"
+
+func use(s: string?) {
+    f := "x".Size // ERROR E0216 "extension function Size must be called"
+    println(s?.Size()) // ERROR E0601 "?. on an extension function call is not supported yet"
+    println("x".Nope()) // ERROR E0205 "has no field or method Nope"
+    println(f)
+}

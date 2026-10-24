@@ -1,0 +1,37 @@
+// coll checks the standard library's collection operations (lyth/coll).
+import "lyth/coll"
+
+struct Todo {
+    ID: int
+    Title: string
+    Done: bool
+    Tag: string
+}
+
+func main() {
+    todos := [
+        Todo(ID = 1, Title = "write spec", Done = true, Tag = "docs"),
+        Todo(ID = 2, Title = "fix bug", Done = false, Tag = "code"),
+        Todo(ID = 3, Title = "review", Done = false, Tag = "code"),
+    ]
+    println(todos.Filter { !it.Done }.Map { it.Title })
+    first, found := todos.Find { it.Tag == "code" }
+    _, missing := todos.Find { it.Tag == "ops" }
+    println(first.ID, found, missing, todos.Any { it.Done }, todos.All { it.ID > 0 }, todos.Count { it.Done })
+    println(todos.Fold(0) { sum, t -> sum + t.ID })
+    byTag := todos.GroupBy { it.Tag }
+    println(byTag.SortedKeys(), len(byTag["code"]), len(byTag.Keys()), len(byTag.Values()))
+    println(todos.SortedBy { it.Title }.Map { it.ID }, [3, 1, 3, 2, 1].Distinct())
+    done, open := todos.Partition { it.Done }
+    println(len(done), len(open), todos.AssociateBy { it.ID }[2].Title)
+    println([[1, 2], [3]].FlatMap { it })
+}
+
+// Output:
+// [fix bug review]
+// 2 true false true true 1
+// 6
+// [code docs] 2 2 2
+// [2 3 1] [3 1 2]
+// 1 2 fix bug
+// [1 2 3]

@@ -1,0 +1,73 @@
+import "strings"
+import "time"
+
+func connect(host: string, port: int = 5432, tls: bool = false, timeout: time.Duration = 30 * time.Second): string = "${host}:${port} tls=${tls} timeout=${timeout}"
+
+func greet(name: string, greeting: string? = null): string {
+    g := greeting ?: "hello"
+    return "${g}, ${name}"
+}
+
+func join(sep: string = ", ", parts: ...string): string = strings.Join(parts, sep)
+
+// A trailing lambda fills the last parameter, after defaulted ones.
+func retry(times: int = 3, action: (int) -> bool): int {
+    for i in 1..times {
+        if action(i) {
+            return i
+        }
+    }
+    return -1
+}
+
+struct Server {
+    Name: string
+}
+
+func Server.describe(verbose: bool = false, prefix: string = "server"): string = if verbose { "${prefix} ${Name} (verbose)" } else { "${prefix} ${Name}" }
+
+var trace: []string = []
+
+func note(s: string): string {
+    trace = append(trace, s)
+    return s
+}
+
+func pair(a: string, b: string): string = a + b
+
+const limit = 5
+
+func page(size: int = limit): int = size
+
+// A local named like a constant a default uses does not capture it.
+func shadow(): string {
+    limit := 99
+    return "${page()} ${limit}"
+}
+
+func main() {
+    println(connect("db"))
+    println(connect("db", 6543))
+    println(connect("db", tls = true))
+    println(connect(host = "db", timeout = time.Second, port = 1))
+    println(greet("Ada"), greet("Ada", greeting = "hi"))
+    println(join(" | ", "a", "b"), "[" + join() + "]")
+    println(retry { it == 2 }, retry(times = 1) { false })
+    s := Server(Name = "api")
+    println(s.describe(), s.describe(verbose = true), s.describe(prefix = "node"))
+    // Named arguments run in the order written.
+    println(pair(b = note("b"), a = note("a")), trace)
+    println(shadow())
+}
+
+// Output:
+// db:5432 tls=false timeout=30s
+// db:6543 tls=false timeout=30s
+// db:5432 tls=true timeout=30s
+// db:1 tls=false timeout=1s
+// hello, Ada hi, Ada
+// a | b []
+// 2 -1
+// server api server api (verbose) node api
+// ab [b a]
+// 5 99

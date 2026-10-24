@@ -1,0 +1,30 @@
+// Package lythimpl is the Lyth version of the httpapi workload.
+package lythimpl
+
+import "encoding/json"
+import "net/http"
+import "lythbench/jsoncodec/lythimpl" as orders
+
+struct orderResponse {
+    ID: int64
+    TotalCents: int64
+    Items: int
+}
+
+// HandleOrder accepts a JSON order and responds with its total.
+func HandleOrder(w: http.ResponseWriter, r: *http.Request) {
+    o := decodeBody(r) catch (err) {
+        http.Error(w, err.Error(), http.StatusBadRequest)
+        return
+    }
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(http.StatusCreated)
+    _ = json.NewEncoder(w).Encode(orderResponse(ID = o.ID, TotalCents = o.Total(), Items = len(o.Items)))
+}
+
+func decodeBody(r: *http.Request): orders.Order throws {
+    o := orders.Order()
+    json.NewDecoder(r.Body).Decode(&o)?
+    o.Validate()?
+    return o
+}

@@ -1,0 +1,33 @@
+import "strconv"
+
+// Config holds settings.
+struct Config {
+    // Name is shown in greetings.
+    Name: string
+    // Retries is how often to try.
+    //
+    //   0 means once
+    Retries: int
+}
+
+func parse(s: string): int throws {
+    n := strconv.Atoi(s)?
+    m := strconv.Atoi(s + "0")?
+    return n + m
+}
+
+// describe formats a config:
+//
+//   describe(Config(name = "a", retries = 1)) == "a/1"
+func describe(c: Config): string = "${c.Name}/${c.Retries}"
+
+func main() throws {
+    c := Config(
+        Name = "lyth",
+        Retries = parse("1")?,
+    )
+    println(describe(c))
+}
+
+// Output:
+// lyth/11

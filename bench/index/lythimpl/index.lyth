@@ -1,0 +1,32 @@
+// Package lythimpl is the Lyth version of the index (allocation) workload.
+package lythimpl
+
+import "strings"
+
+// Doc is a document to index.
+struct Doc {
+    ID: int
+    Text: string
+}
+
+// BuildIndex maps each lower-cased word to the documents containing it.
+func BuildIndex(docs: []Doc): map[string][]int {
+    index: map[string][]int = [:]
+    for d in docs {
+        for w in strings.Fields(d.Text) {
+            word := strings.ToLower(w)
+            index[word] = append(index[word], d.ID)
+        }
+    }
+    return index
+}
+
+// Summaries renders one line per document.
+func Summaries(docs: []Doc): []string {
+    out := make([]string, 0, len(docs))
+    for d in docs {
+        words := strings.Fields(d.Text)
+        out = append(out, "doc ${d.ID}: ${len(words)} words, first=${words[0]}")
+    }
+    return out
+}

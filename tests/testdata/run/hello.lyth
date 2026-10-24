@@ -1,0 +1,7 @@
+func main() {
+    message := "Hello, world!"
+    println(message)
+}
+
+// Output:
+// Hello, world!

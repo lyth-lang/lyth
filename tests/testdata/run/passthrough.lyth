@@ -1,0 +1,48 @@
+import "errors"
+import "io"
+import "os"
+import "strconv"
+
+// A writer that fails after a few bytes and reports how many it wrote, so
+// it declares Go's raw (Int, Error?) results.
+struct limited {
+    Left: int
+}
+
+func *limited.Write(b: []byte): (int, error?) {
+    if len(b) > Left {
+        n := Left
+        Left = 0
+        // Go's io.Writer contract: n bytes were written, then the error.
+        return n, io.ErrShortWrite
+    }
+    Left -= len(b)
+    return len(b), null
+}
+
+// A wrapper passes the inner call's results through, partial count included.
+struct counting {
+    W: io.Writer
+    Total: int
+}
+
+func *counting.Write(b: []byte): int throws = W.Write(b)
+
+func parse(s: string): int throws {
+    return strconv.Atoi(s)
+}
+
+func remove(path: string): unit throws = os.Remove(path)
+
+func main() {
+    c := &counting(W = &limited(Left = 5))
+    n, err := c.Write([]byte("hello, world"))
+    println(n, errors.Is(err, io.ErrShortWrite))
+    println(parse("42") catch { -1 }, parse("x") catch { -1 })
+    remove("/no/such/file") catch (e) { println("remove failed:", errors.Is(e, os.ErrNotExist)) }
+}
+
+// Output:
+// 5 true
+// 42 -1
+// remove failed: true

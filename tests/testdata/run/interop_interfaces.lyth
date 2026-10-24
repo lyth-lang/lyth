@@ -1,0 +1,94 @@
+import "errors"
+import "fmt"
+import "sort"
+import "strings"
+
+struct Temp {
+    Celsius: float64
+}
+
+// String makes Temp a fmt.Stringer.
+func Temp.String(): string = "${Celsius}C"
+
+struct NotFound {
+    Key: string
+}
+
+func *NotFound.Error(): string = "not found: ${Key}"
+
+func find(key: string): int throws {
+    if key == "answer" {
+        return 42
+    }
+    throw &NotFound(Key = key)
+}
+
+interface Shape {
+    Area(): float64
+    Name(): string
+}
+
+struct Square {
+    Side: float64
+}
+
+func Square.Area(): float64 = Side * Side
+func Square.Name(): string = "square"
+
+struct Rect {
+    W: float64
+    H: float64
+}
+
+func Rect.Area(): float64 = W * H
+func Rect.Name(): string = "rect"
+
+struct byArea {
+    Shapes: []Shape
+}
+
+func byArea.Len(): int = len(Shapes)
+func byArea.Less(i: int, j: int): bool = Shapes[i].Area() < Shapes[j].Area()
+func byArea.Swap(i: int, j: int) {
+    tmp := Shapes[i]
+    Shapes[i] = Shapes[j]
+    Shapes[j] = tmp
+}
+
+func main() {
+    println(Temp(Celsius = 21.5))
+    s: fmt.Stringer = Temp(Celsius = -3)
+    println(s.String())
+
+    println(find("answer") catch { 0 })
+    msg := find("question") catch (err) {
+        target: *NotFound? = null
+        if errors.As(err, &target) {
+            println("as NotFound:", target?.Key)
+        }
+        -1
+    }
+    println(msg)
+
+    shapes: []Shape = [Rect(W = 3, H = 4), Square(Side = 2), Rect(W = 1, H = 1)]
+    sort.Sort(byArea(shapes))
+    names: []string = []
+    for sh in shapes {
+        names = append(names, "${sh.Name()}=${sh.Area()}")
+    }
+    println(strings.Join(names, " "))
+
+    sb := strings.Builder()
+    sb.WriteString("built ")
+    sb.WriteString("in Lyth")
+    println(sb.String())
+}
+
+// Output:
+// 21.5C
+// -3C
+// 42
+// as NotFound: question
+// -1
+// rect=1 square=4 rect=12
+// built in Lyth

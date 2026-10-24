@@ -1,0 +1,61 @@
+import "encoding/json"
+import "fmt"
+
+struct Point {
+    X: int
+    Y: int
+}
+
+func Point.add(o: Point): Point = Point(X + o.X, Y + o.Y)
+
+func Point.show(): string = "(${X}, ${Y})"
+
+struct Account {
+    Owner: string
+    Balance: int64
+    pin: string
+}
+
+func *Account.deposit(amount: int64) {
+    Balance += amount
+}
+
+func Account.summary(): string = "${Owner}: ${Balance}"
+
+struct Tagged {
+    ID: int64
+    DisplayName: string `json:"display_name"`
+    Secret: string `json:"-"`
+}
+
+func main() throws {
+    p := Point(1, 2)
+    q := Point(X = 10, Y = 20)
+    println(p.add(q).show())
+
+    acct := Account(Owner = "ada", Balance = 100, pin = "1234")
+    acct.deposit(50)
+    println(acct.summary())
+
+    ptr := &Account(Owner = "bob", Balance = 1)
+    ptr.deposit(9)
+    println(ptr.summary())
+
+    data := json.Marshal(q)?
+    println(string(data))
+
+    t := Tagged(ID = 1, DisplayName = "Ada", Secret = "s")
+    println(string(json.Marshal(t)?))
+
+    back := Tagged(ID = 0, DisplayName = "", Secret = "")
+    json.Unmarshal([]byte(`{"id":7,"display_name":"Grace"}`), &back)?
+    println(fmt.Sprintf("%d %s", back.ID, back.DisplayName))
+}
+
+// Output:
+// (11, 22)
+// ada: 150
+// bob: 10
+// {"x":10,"y":20}
+// {"id":1,"display_name":"Ada"}
+// 7 Grace

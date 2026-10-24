@@ -1,0 +1,33 @@
+struct User {
+    Name: string
+    Email: string?
+    Manager: *User?
+}
+
+func Contact(u: User): string {
+    email := u.Email ?: return "no email for ${u.Name}"
+    return "${u.Name} <${email}>"
+}
+
+func ManagerName(u: *User?): string = u?.Manager?.Name ?: "none"
+
+func MustEmail(u: User): string = u.Email!!
+
+struct NotFound {
+    Key: string
+}
+
+func *NotFound.Error(): string = "not found: ${Key}"
+
+func find(key: string): *NotFound? = if key == "" { &NotFound(Key = key) } else { null }
+
+// A null pointer becomes a nil interface, not a non-nil one holding nil.
+func AsError(key: string): error? = find(key)
+
+func Found(key: string): bool {
+    err: error? = find(key)
+    return err != null
+}
+
+// catch { null } boxes the call's value.
+func Port(s: string): int? = s.toInt() catch { null }

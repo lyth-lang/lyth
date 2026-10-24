@@ -1,0 +1,12 @@
+pub func greet(): string = "hi" // ERROR E0008 "remove 'pub' and name it Greet"
+
+pub struct User { // ERROR E0008 "remove 'pub'"
+    Name: string
+    private Hash: string // ERROR E0008 "remove 'private' and name it hash"
+}
+
+func count(xs: List[int]): int = len(xs) // ERROR E0008 "write []int"
+
+func main() {
+    println(greet(), User(Name = "a", Hash = "h"), count([1]))
+}

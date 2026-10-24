@@ -1,0 +1,22 @@
+import "strings"
+
+const secret = 3
+
+func f(a: int, b: int = 2, c: string = "x"): int = a + b
+func g(a: int, b: int = a): int = b // ERROR E0216 "a default value cannot refer to parameter a"
+func h(n: int = if true { 1 } else { 2 }): int = n // ERROR E0216 "a default value must be a simple expression"
+func v(xs: ...int = 1): int = 0 // ERROR E0216 "a variadic parameter cannot have a default value"
+func Exposed(n: int = secret): int = n // ERROR E0105 "the default value of exported Exposed uses unexported secret"
+func typed(n: int = "three"): int = n // ERROR E0201 "default value of n"
+
+interface Store {
+    Get(id: int = 1): int // ERROR E0601 "interface methods cannot have default values"
+}
+
+func calls() {
+    f(1, c = "y", 3) // ERROR E0216 "positional arguments must come before named ones"
+    f(1, d = 4) // ERROR E0203 "f has no parameter named d"
+    f(1, a = 2) // ERROR E0102 "parameter a is given twice"
+    f(b = 2) // ERROR E0203 "missing 1 argument for a"
+    strings.Repeat(s = "x", count = 2) // ERROR E0216 "named arguments are only for functions declared in Lyth"
+}

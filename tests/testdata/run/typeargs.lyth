@@ -1,0 +1,69 @@
+import "cmp"
+import "errors"
+import "fmt"
+import "slices"
+
+// Type arguments are written in brackets, as in Go, and inferred where
+// the arguments determine them.
+
+struct Pair[K: comparable, V] {
+    Key: K
+    Value: V
+}
+
+func Max[T: cmp.Ordered](items: []T): T {
+    best := items[0]
+    for x in items {
+        if x > best {
+            best = x
+        }
+    }
+    return best
+}
+
+func Zero[T](): T {
+    z: T
+    return z
+}
+
+struct NotFound {
+    Key: string
+}
+
+func *NotFound.Error(): string = "no ${Key}"
+
+func main() {
+    numbers := [3, 8, 2]
+    println(Max(numbers), Max[int](numbers), Max(["b", "c", "a"]))
+
+    // Several type arguments, on a Lyth type and a Go function.
+    p := Pair[string, int](Key = "a", Value = 1)
+    q := Pair(Key = 1, Value = [true])
+    println(p.Key, p.Value, q.Key, q.Value)
+    println(slices.Index[[]string, string](["x", "y"], "y"))
+
+    // A type argument the call cannot infer.
+    println(Zero[string]() == "", Zero[int](), Zero[*NotFound]() == null)
+
+    // A slice, map, pointer, or nullable type as the argument.
+    m := Zero[map[string]int]()
+    println(len(m), Zero[[]int]() == null, Zero[int?]() == null)
+
+    err := fmt.Errorf("wrapped: %w", &NotFound(Key = "k"))
+    nf, ok := errors.AsType[*NotFound](err)
+    println(ok, nf.Key)
+
+    // Indexing is still indexing.
+    grid := [[1, 2], [3, 4]]
+    i := 1
+    println(grid[i][0], numbers[i])
+}
+
+// Output:
+// 8 8 c
+// a 1 1 [true]
+// 1
+// true 0 true
+// 0 true true
+// true k
+// 3 8

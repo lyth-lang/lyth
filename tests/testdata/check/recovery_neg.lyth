@@ -1,0 +1,12 @@
+// Code the parser recovered from gets no checker diagnostics, and a file
+// with syntax errors gets no warnings.
+
+// Warnings: none
+
+func main() {
+    for (i in 10 { downTo } 0 step 2) { // ERROR E0003 "expected ')' to close the for header"
+        println(i)
+    }
+    unused := 1
+    println(missing) // ERROR E0101 "undefined: missing"
+}

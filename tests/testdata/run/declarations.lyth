@@ -1,0 +1,138 @@
+import "errors"
+import "strconv"
+
+const MaxRetries = 5
+const AppName = "Lyth"
+
+var calls = 0
+
+struct User {
+    Name: string
+    Email: string?
+}
+
+func find(id: int): User? {
+    calls++
+    if id == 1 {
+        return User(Name = "Ada", Email = "ada@example.com")
+    }
+    return null
+}
+
+func parsePair(a: string, b: string): (int, int) throws {
+    x, err := strconv.Atoi(a)
+    if err != null {
+        throw err
+    }
+    // err is already declared in this scope: := declares y and assigns err.
+    y, err := strconv.Atoi(b)
+    if err != null {
+        throw err.wrap("second")
+    }
+    return x, y
+}
+
+func sum(a: string, b: string): int throws {
+    x, y := parsePair(a, b)?
+    return x + y
+}
+
+func main() {
+    // := declares a mutable variable and infers its type; = assigns.
+    name := "Ali"
+    age := 30
+    active := true
+    age = 31
+    age += 1
+    println(name, age, active)
+
+    // A type, where inference is not enough.
+    ratio: float64 = 2
+    var2: []string = []
+    var2 = append(var2, "x")
+    zeroLess := 0
+    total: int
+    total += 7
+    println(ratio, var2, zeroLess, total)
+
+    // Several at once, and Go's assignment lists.
+    a, b := 1, 2
+    a, b = b, a
+    println(a, b)
+    q, r := 17 / 5, 17 % 5
+    println(q, r)
+
+    // Comma-ok forms.
+    m := ["one": 1]
+    v, ok := m["one"]
+    _, missing := m["two"]
+    println(v, ok, missing)
+    v, ok = m["two"]
+    ch := make(chan int, 1)
+    ch.send(4)
+    w, open := ch.receive()
+    ch.close()
+    w, open = ch.receive()
+    println(v, ok, w, open)
+
+    // Mixed new and existing names, as in Go.
+    println(sum("4", "5") catch { -1 })
+    _, _, err := parsePair("4", "x")
+    println(err)
+
+    // A local that is never reassigned smart-casts like a parameter.
+    u := find(1)
+    if u != null {
+        println(u.Name)
+        email := u.Email
+        if email != null {
+            println(len(email))
+        }
+    }
+
+    // A reassigned local does not; copy it to check it.
+    cur := find(2)
+    cur = find(1)
+    now := cur
+    if now != null {
+        println("found", now.Name)
+    }
+
+    // Shadowing in an inner block declares a new variable.
+    count := 1
+    if count > 0 {
+        count := 10 // a new variable (warning W0006)
+        count++
+        println("inner", count)
+    }
+    println("outer", count)
+
+    // Closures capture variables, not values.
+    n := 0
+    inc := { -> n++ }
+    inc()
+    inc()
+    println(n)
+
+    println(MaxRetries, AppName, calls)
+    e := errors.New("x")
+    println(e.Error())
+}
+
+// Output:
+// Ali 32 true
+// 2 [x] 0 7
+// 2 1
+// 3 2
+// 1 true false
+// 0 false 0 false
+// 9
+// second: strconv.Atoi: parsing "x": invalid syntax
+// Ada
+// 15
+// found Ada
+// inner 11
+// outer 1
+// 2
+// 5 Lyth 3
+// x

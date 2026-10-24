@@ -1,0 +1,39 @@
+// Status is the state of a job.
+enum Status { Queued, Running, Done }
+
+func Status.active(): bool = when self {
+    Queued, Running -> true
+    Done -> false
+}
+
+sealed interface Event {
+    At(): int
+}
+
+struct Started : Event {
+    T: int
+}
+
+func Started.At(): int = T
+
+struct Failed : Event {
+    T: int
+    Reason: string
+}
+
+func Failed.At(): int = T
+
+func describe(e: Event): string = when e {
+    is Started -> "started at ${e.T}"
+    is Failed -> "failed: ${e.Reason}"
+}
+
+func label(s: Status?): string = when s {
+    Done -> "done"
+    null -> "unknown"
+    else -> "pending"
+}
+
+func main() {
+    println(Status.Running, Status.Running.active(), describe(Failed(T = 1, Reason = "disk")), label(null))
+}

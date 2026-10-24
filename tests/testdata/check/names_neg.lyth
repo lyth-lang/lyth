@@ -1,0 +1,24 @@
+import "strings"
+
+func dup() {}
+func dup() {} // ERROR E0102 "already declared"
+
+struct Thing {
+    ID: int
+}
+
+func Thing.ID(): int = 1 // ERROR E0102 "both a field and a method"
+
+func string(): int = 1
+func string_(): int = 2 // ERROR E0102 "would be named string_ in Go"
+
+func main() {
+    greeting := "hi"
+    println(greting) // ERROR E0101 "did you mean greeting?"
+    up := strings.toUpper(greeting) // ERROR E0106 "strings.ToUpper"
+    t := Thing(ID = 1)
+    println(t.idd) // ERROR E0205 "did you mean ID?"
+    unused := 3 // WARN W0001 "never used"
+    println(up)
+    println(nil) // ERROR E0101 "undefined: nil"
+}

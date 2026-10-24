@@ -1,0 +1,38 @@
+import "os"
+import "strconv"
+
+struct Config {
+    Port: int
+    Host: string
+}
+
+func ParsePort(s: string): int throws {
+    n := strconv.Atoi(s)?
+    if n <= 0 {
+        throw os.ErrInvalid
+    }
+    return n
+}
+
+func Load(path: string): Config throws {
+    data := os.ReadFile(path)?
+    port := ParsePort(string(data)) catch { 8080 }
+    return Config(Port = port, Host = "localhost")
+}
+
+// A binder named err shares the error variable; an expansion nested in its
+// handler gets another name.
+func PortOr(s: string, fallback: int): int {
+    base := strconv.Atoi(os.Getenv("BASE")) catch { 0 }
+    n := ParsePort(s) catch (err) {
+        alt := strconv.Atoi(os.Getenv("PORT")) catch { fallback }
+        println("bad port:", err, "using", alt)
+        alt
+    }
+    return base + n
+}
+
+func main() throws {
+    cfg := Load("app.conf")?
+    os.Setenv("PORT", "${cfg.Port}")?
+}

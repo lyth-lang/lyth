@@ -1,0 +1,112 @@
+/* Lyth blue: close to Go's cyan, darker for contrast. */
+:root {
+	--sl-font: 'Instrument Sans Variable', system-ui, sans-serif;
+	--sl-font-mono: 'Commit Mono', ui-monospace, monospace;
+	--sl-color-accent-low: #0c2a4d;
+	--sl-color-accent: #3d8bf0;
+	--sl-color-accent-high: #c5dcfb;
+}
+
+:root[data-theme='light'] {
+	--sl-color-accent-low: #d4e5fc;
+	--sl-color-accent: #1d5fc0;
+	--sl-color-accent-high: #0a2c5e;
+}
+
+/* The theme selector: Chrome treats a click on a <select> as keyboard focus and draws its blue
+   ring. Show focus with the selector's own rounded border instead. */
+starlight-theme-select select:focus-visible {
+	outline: none;
+}
+
+starlight-theme-select:has(select:focus-visible) {
+	border-color: var(--sl-color-gray-3);
+}
+
+/* Headings: tighter and heavier than the default, so the type carries the page */
+.sl-markdown-content :is(h1, h2, h3) {
+	letter-spacing: -0.015em;
+	font-weight: 650;
+}
+
+.hero h1 {
+	font-size: clamp(2.25rem, 5vw, 3.75rem);
+	line-height: 1.05;
+	letter-spacing: -0.03em;
+	font-weight: 700;
+	max-width: 20ch;
+}
+
+.hero .tagline {
+	max-width: 52ch;
+}
+
+/* the hero has no image: the comparison below it plays that part */
+.hero {
+	grid-template-columns: 1fr;
+	padding-bottom: 2rem;
+}
+
+/* the code font has no italics, and slanted types and parameters read as noise */
+.expressive-code .ec-line span {
+	font-style: normal !important;
+}
+
+/* Examples: Oxie, Rust and Output tabs (radio buttons, styled as tabs) */
+.lyth-example {
+	margin-top: 1.25rem;
+}
+
+.lyth-tabs {
+	display: flex;
+	gap: 0.25rem;
+	border-bottom: 1px solid var(--sl-color-hairline);
+	margin-bottom: 0.5rem;
+}
+
+.lyth-tabs input {
+	position: absolute;
+	opacity: 0;
+	pointer-events: none;
+}
+
+.lyth-tabs label {
+	padding: 0.25rem 0.75rem;
+	margin-bottom: -1px;
+	border-bottom: 2px solid transparent;
+	color: var(--sl-color-gray-3);
+	font-size: var(--sl-text-sm);
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.lyth-tabs label:hover {
+	color: var(--sl-color-white);
+}
+
+.lyth-tabs input:checked + label {
+	color: var(--sl-color-white);
+	border-bottom-color: var(--sl-color-accent);
+}
+
+.lyth-tabs input:focus-visible + label {
+	outline: 2px solid var(--sl-color-accent);
+	outline-offset: 2px;
+	border-radius: 0.25rem;
+}
+
+.sl-markdown-content .lyth-panel {
+	display: none;
+	margin-top: 0;
+}
+
+.lyth-example:has(input[value='lyth']:checked) .lyth-panel[data-panel='lyth'],
+.lyth-example:has(input[value='go']:checked) .lyth-panel[data-panel='go'],
+.lyth-example:has(input[value='output']:checked) .lyth-panel[data-panel='output'] {
+	display: block;
+}
+
+/* keep prose on the home page to a readable measure; tables and code use the full width */
+[data-has-hero] .sl-markdown-content > :is(p, ul, ol) {
+	max-width: 72ch;
+}

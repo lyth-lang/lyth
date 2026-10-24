@@ -1,0 +1,1299 @@
+package check
+
+import (
+	"go/constant"
+	gotypes "go/types"
+	"strings"
+
+	"github.com/lyth-lang/lyth/internal/diag"
+	"github.com/lyth-lang/lyth/internal/syntax"
+	"github.com/lyth-lang/lyth/internal/types"
+)
+
+// stmtList checks statements in the current scope and reports whether the
+// list always terminates (returns, throws, breaks, continues, or panics).
+func (c *Checker) stmtList(stmts []syntax.Stmt) bool {
+	terminated := false
+	for _, s := range stmts {
+		if terminated {
+			c.warnf(diag.WUnreachable, s.Span(), "unreachable code")
+			// Keep checking for errors, but report unreachable code once.
+			for _, rest := range stmts[indexOf(stmts, s):] {
+				c.stmt(rest)
+			}
+			return true
+		}
+		if c.stmt(s) {
+			terminated = true
+		}
+	}
+	return terminated
+}
+
+func indexOf(stmts []syntax.Stmt, s syntax.Stmt) int {
+	for i, x := range stmts {
+		if x == s {
+			return i
+		}
+	}
+	return len(stmts)
+}
+
+// block checks a block in a new scope.
+func (c *Checker) block(b *syntax.Block) bool {
+	var t bool
+	c.withScope(newScope(c.scope, BlockScope), func() { t = c.stmtList(b.Stmts) })
+	return t
+}
+
+// blockResult is the outcome of checking a block that may yield a value.
+type blockResult struct {
+	op         *operand
+	valueExpr  syntax.Expr
+	terminates bool
+}
+
+// blockValue checks a block whose last expression statement provides a value
+// (if/when branches, catch handlers, lambda bodies).
+func (c *Checker) blockValue(b *syntax.Block, want types.Type, needValue bool) blockResult {
+	var res blockResult
+	c.withScope(newScope(c.scope, BlockScope), func() {
+		n := len(b.Stmts)
+		last, isExpr := syntax.Stmt(nil), false
+		if n > 0 {
+			last = b.Stmts[n-1]
+			if es, ok := last.(*syntax.ExprStmt); ok {
+				if _, isJump := es.X.(*syntax.JumpExpr); !isJump {
+					isExpr = true
+				}
+			}
+		}
+		if !needValue || !isExpr {
+			res.terminates = c.stmtList(b.Stmts)
+			return
+		}
+		if c.stmtList(b.Stmts[:n-1]) {
+			res.terminates = true
+			c.expr(last.(*syntax.ExprStmt).X, want)
+			return
+		}
+		x := last.(*syntax.ExprStmt).X
+		op := c.expr(x, want)
+		if op.mode == ModeNoValue {
+			res.terminates = false
+			return
+		}
+		op = c.singleValue(op)
+		if isNothing(op.typ) {
+			res.terminates = true
+			return
+		}
+		res.op = op
+		res.valueExpr = x
+		c.info.BlockValues[b] = x
+	})
+	return res
+}
+
+func (c *Checker) stmt(s syntax.Stmt) bool {
+	switch s := s.(type) {
+	case *syntax.LocalDecl:
+		return c.localDecl(s)
+	case *syntax.AssignStmt:
+		c.assignStmt(s)
+	case *syntax.IncDecStmt:
+		x := c.lhs(s.X)
+		if x.mode != ModeInvalid {
+			if !types.IsNumeric(types.Base(x.typ)) || types.IsNullable(x.typ) {
+				c.errorf(diag.EInvalidOp, s.S, "%s requires a numeric variable, not %s", map[bool]string{true: "++", false: "--"}[s.Inc], x.typ)
+			} else {
+				c.mutablePath(s.X, "modify", diag.EReassignVal)
+			}
+		}
+	case *syntax.ExprStmt:
+		return c.exprStmt(s)
+	case *syntax.Block:
+		return c.block(s)
+	case *syntax.ForStmt:
+		c.forStmt(s)
+	case *syntax.WhileStmt:
+		return c.whileStmt(s)
+	case *syntax.SelectStmt:
+		return c.selectStmt(s)
+	case *syntax.DeferStmt:
+		c.deferGo(s.Call, s.Body, false)
+	case *syntax.GoStmt:
+		c.deferGo(s.Call, s.Body, true)
+	case *syntax.BadStmt:
+	}
+	return false
+}
+
+// lhs checks an assignment target without counting it as a use.
+func (c *Checker) lhs(e syntax.Expr) *operand {
+	if id, ok := syntax.Unparen(e).(*syntax.Ident); ok {
+		sym := c.lookup(id.Name)
+		if v, ok := sym.(*VarSym); ok {
+			c.info.Uses[id] = v
+			t := v.Type
+			if v.Kind == GlobalVar {
+				t = c.globalType(v)
+			}
+			return c.record(&operand{mode: ModeValue, typ: t, sym: v, expr: e})
+		}
+	}
+	return c.value(e, nil)
+}
+
+func (c *Checker) localDecl(s *syntax.LocalDecl) bool {
+	if s.Destructure {
+		return c.destructure(s)
+	}
+	name := s.Names[0]
+	var want types.Type
+	if s.Type != nil {
+		want = c.resolveType(s.Type)
+	}
+	redeclared := false
+	if s.Define && name.Name != "_" {
+		if old := c.scope.LookupLocal(name.Name); old != nil {
+			// Go's "no new variables on left side of :=".
+			c.errorf(diag.EColonEquals, name.S, "%s is already declared in this scope; := declares a new variable", name.Name).
+				WithRelated(old.DeclSpan(), "previous declaration").
+				WithHint("use = to assign to %s", name.Name)
+			redeclared = true
+		}
+	}
+	var t types.Type
+	terminates := false
+	switch {
+	case s.Value == nil:
+		if want != nil && want != types.Invalid && !types.Zeroable(want) {
+			c.errorf(diag.ENoZeroValue, s.S, "%s of type %s needs an initializer: %s has no zero value", name.Name, want, want).
+				WithHint("initialize it, or declare it nullable: %s: %s = null", name.Name, types.MakeNullable(want))
+		}
+		t = want
+	default:
+		x := c.expr(s.Value, want)
+		if x.mode == ModeNoValue {
+			c.errorf(diag.EInvalidUse, s.Value.Span(), "%s does not produce a value", s.Value.Span().Short())
+			x = invalid(s.Value)
+		} else {
+			x = c.singleValue(x)
+		}
+		if want != nil {
+			c.assign(x, want, "initializer of "+name.Name)
+			t = want
+		} else {
+			t = c.defaultValueType(x, "initializer of "+name.Name)
+		}
+		if x.mode != ModeInvalid && isNothing(x.typ) {
+			terminates = true
+			if want == nil {
+				c.warnf(diag.WUnreachable, s.S, "%s is never initialized: its initializer always exits", name.Name)
+			}
+		}
+	}
+	if t == nil {
+		t = types.Invalid
+	}
+	if t == types.Unit {
+		c.errorf(diag.EInvalidUse, s.S, "%s cannot have type unit", name.Name)
+		t = types.Invalid
+	}
+	v := c.newLocal(name, t)
+	if !redeclared {
+		c.declareLocal(v, name)
+	}
+	c.info.Locals[s] = []*VarSym{v}
+	return terminates
+}
+
+// newLocal returns a variable declared by := or name: Type. It is mutable;
+// it smart-casts when its function never reassigns it.
+func (c *Checker) newLocal(id *syntax.Ident, t types.Type) *VarSym {
+	v := &VarSym{name: id.Name, Type: t, Mutable: true, Kind: LocalVar, Span: id.S}
+	v.NotReassigned = c.fn != nil && c.fn.reassigned != nil && !c.fn.reassigned[id.Name]
+	c.warnShadow(id)
+	return v
+}
+
+// warnShadow reports a declaration that hides a local or parameter of an
+// enclosing scope in the same function, the shadowing that makes Go's
+// x, err := f() in an inner block leave the outer err unchanged.
+func (c *Checker) warnShadow(id *syntax.Ident) {
+	if id.Name == "_" || c.fn == nil || c.scope.LookupLocal(id.Name) != nil {
+		return
+	}
+	for s := c.scope.parent; s != nil && s.kind != PackageScope && s.kind != UniverseScope; s = s.parent {
+		if v, ok := s.syms[id.Name].(*VarSym); ok && (v.Kind == LocalVar || v.Kind == ParamVar) && !v.Implicit {
+			c.warnf(diag.WShadow, id.S, "%s hides the %s declared in an enclosing scope", id.Name, map[bool]string{true: "parameter", false: "variable"}[v.Kind == ParamVar]).
+				WithRelated(v.Span, "%s declared here", id.Name).
+				WithHint("choose another name; to change the outer %s, assign it with = instead of declaring it", id.Name)
+			return
+		}
+	}
+	// In a method, fields are in scope by name; a local of the same name
+	// hides the field, which stays reachable as self.name.
+	for s := c.scope; s != nil; s = s.parent {
+		if s.kind == FuncScope && s.fn != nil && s.fn.recvDecl != nil {
+			if f := s.fn.recvDecl.LookupField(id.Name); f != nil {
+				c.warnf(diag.WShadow, id.S, "%s hides the field %s of self", id.Name, id.Name).
+					WithHint("choose another name, or write self.%s for the field", id.Name)
+			}
+			return
+		}
+	}
+}
+
+func (c *Checker) declareLocal(v *VarSym, id *syntax.Ident) {
+	c.info.Defs[id] = v
+	if id.Name == "_" {
+		return
+	}
+	if old := c.scope.LookupLocal(id.Name); old != nil {
+		c.errorf(diag.EDuplicate, id.S, "%s is already declared in this scope", id.Name).
+			WithRelated(old.DeclSpan(), "previous declaration")
+		return
+	}
+	c.scope.Insert(v)
+	if c.fn != nil {
+		c.fn.locals = append(c.fn.locals, v)
+	}
+}
+
+func (c *Checker) destructure(s *syntax.LocalDecl) bool {
+	vars := make([]*VarSym, len(s.Names))
+	// As in Go, a, b := e declares the names not yet declared in this scope
+	// and assigns the others; at least one must be new.
+	declareAll := func(ts []types.Type) {
+		fresh := false
+		for i, id := range s.Names {
+			t := types.Type(types.Invalid)
+			if ts != nil && i < len(ts) {
+				t = ts[i]
+			}
+			if id.Name == "_" {
+				continue
+			}
+			if old := c.scope.LookupLocal(id.Name); old != nil {
+				ov, ok := old.(*VarSym)
+				switch {
+				case !ok || ov.Kind != LocalVar:
+					c.errorf(diag.EReassignVal, id.S, "%s cannot be assigned: := may reuse only local variables of this scope", id.Name).
+						WithRelated(old.DeclSpan(), "%s declared here", id.Name)
+				case ts != nil && t != types.Invalid && ov.Type != types.Invalid:
+					c.assign(&operand{mode: ModeValue, typ: t, expr: id}, ov.Type, "assignment to "+id.Name)
+				}
+				if ok {
+					c.info.Uses[id] = ov
+					vars[i] = ov
+				}
+				continue
+			}
+			fresh = true
+			v := c.newLocal(id, t)
+			c.declareLocal(v, id)
+			vars[i] = v
+		}
+		if !fresh && ts != nil {
+			c.errorf(diag.EColonEquals, s.S, "no new variables on the left of :=").
+				WithHint("use = to assign")
+		}
+		c.info.Locals[s] = vars
+	}
+	if s.Value == nil {
+		c.errorf(diag.EInvalidUse, s.S, "destructuring declaration needs an initializer")
+		declareAll(nil)
+		return false
+	}
+	var elems []types.Type
+	if tup, ok := syntax.Unparen(s.Value).(*syntax.TupleExpr); ok {
+		// val (a, b) = (x, y)
+		for _, el := range tup.Elems {
+			x := c.value(el, nil)
+			elems = append(elems, c.defaultValueType(x, "destructuring declaration"))
+		}
+		c.info.Types[s.Value] = TypeAndValue{Mode: ModeValue, Type: &types.Tuple{Elems: elems}}
+	} else if ix, ok := syntax.Unparen(s.Value).(*syntax.IndexExpr); ok {
+		// v, ok := m[k]: Go's comma-ok form.
+		x := c.expr(s.Value, nil)
+		if xt := c.info.TypeOf(ix.X); xt != nil {
+			if m, ok := types.Base(xt).(*types.Map); ok && x.mode != ModeInvalid {
+				vt := m.Elem
+				if !types.Zeroable(vt) {
+					vt = types.MakeNullable(vt)
+				}
+				c.info.Types[s.Value] = TypeAndValue{Mode: ModeValue, Type: &types.Tuple{Elems: []types.Type{vt, types.Bool}}}
+				elems = []types.Type{vt, types.Bool}
+			}
+		}
+		if elems == nil {
+			if x.mode != ModeInvalid {
+				c.errorf(diag.EMultiValue, s.Value.Span(), "only map lookups and calls returning several values can be destructured")
+			}
+			declareAll(nil)
+			return false
+		}
+	} else {
+		x := c.expr(s.Value, nil)
+		if x.mode == ModeInvalid {
+			declareAll(nil)
+			return false
+		}
+		if call, ok := syntax.Unparen(s.Value).(*syntax.CallExpr); ok {
+			if ci := c.info.Calls[call]; ci != nil && ci.Kind == CallPrelude && ci.Prelude == PreludeReceive {
+				// val (v, ok) = ch.receive(): Go's v, ok := <-ch.
+				x = &operand{mode: ModeValue, typ: &types.Tuple{Elems: []types.Type{x.typ, types.Bool}}}
+				c.info.Types[s.Value] = TypeAndValue{Mode: ModeValue, Type: x.typ}
+			}
+		}
+		switch t := x.typ.(type) {
+		case *types.Result:
+			elems = t.Raw
+		case *types.Tuple:
+			elems = t.Elems
+		default:
+			c.errorf(diag.EMultiValue, s.Value.Span(), "cannot destructure a single value of type %s", describeType(x)).
+				WithHint("declare it with name := ...")
+			declareAll(nil)
+			return false
+		}
+	}
+	if len(elems) != len(s.Names) {
+		c.errorf(diag.EMultiValue, s.S, "%s returns %s, but %s declared", callName(s.Value), plural(len(elems), "value"), plural(len(s.Names), "name")).
+			WithNote("the values are %s", (&types.Tuple{Elems: elems}).String())
+		declareAll(nil)
+		return false
+	}
+	declareAll(elems)
+	return false
+}
+
+func (c *Checker) assignStmt(s *syntax.AssignStmt) {
+	if tup, ok := syntax.Unparen(s.Lhs).(*syntax.TupleExpr); ok {
+		c.tupleAssign(s, tup)
+		return
+	}
+	if id, ok := syntax.Unparen(s.Lhs).(*syntax.Ident); ok && id.Name == "_" {
+		if s.Op != syntax.ASSIGN {
+			c.errorf(diag.EInvalidUse, s.OpSpan, "cannot use %s with _", s.Op)
+		}
+		x := c.expr(s.Rhs, nil)
+		if x.mode == ModeNoValue {
+			c.errorf(diag.EInvalidUse, s.Rhs.Span(), "%s does not produce a value to discard", s.Rhs.Span().Short())
+		} else if x.mode != ModeInvalid {
+			if _, isResult := x.typ.(*types.Result); !isResult {
+				c.singleValue(x)
+			}
+		}
+		return
+	}
+	l := c.lhs(s.Lhs)
+	if l.mode == ModeInvalid {
+		c.expr(s.Rhs, nil)
+		return
+	}
+	if !c.mutablePath(s.Lhs, "assign to", diag.EReassignVal) {
+		c.expr(s.Rhs, nil)
+		return
+	}
+	target := l.typ
+	if s.Op == syntax.ASSIGN {
+		r := c.value(s.Rhs, target)
+		c.assign(r, target, "assignment to "+s.Lhs.Span().Short())
+		return
+	}
+	// Compound assignment: lhs op= rhs.
+	op := compoundOp(s.Op)
+	bin := &syntax.BinaryExpr{Op: op, X: s.Lhs, Y: s.Rhs, OpSpan: s.OpSpan, S: s.S}
+	r := c.value(s.Rhs, types.Base(target))
+	if types.IsNullable(target) {
+		c.nullableUse(l, "use operator "+s.Op.String()+" on")
+		return
+	}
+	lop := &operand{mode: ModeValue, typ: types.Base(target), expr: s.Lhs}
+	if r.mode == ModeInvalid {
+		return
+	}
+	if op == syntax.SHL || op == syntax.SHR {
+		c.shift(bin, lop, r)
+		return
+	}
+	if !c.matchOperands(bin, lop, r) {
+		return
+	}
+	t := types.Base(target)
+	switch op {
+	case syntax.ADD:
+		if !types.TermsAll(t, func(t types.Type) bool { return types.IsNumeric(t) || types.IsString(t) }) {
+			c.errorf(diag.EInvalidOp, s.OpSpan, "operator += is not defined for %s", t)
+		}
+	case syntax.SUB, syntax.MUL, syntax.QUO:
+		if !types.IsNumeric(t) {
+			c.errorf(diag.EInvalidOp, s.OpSpan, "operator %s is not defined for %s", s.Op, t)
+		}
+	default:
+		if !types.IsInteger(t) {
+			c.errorf(diag.EInvalidOp, s.OpSpan, "operator %s requires integer operands, not %s", s.Op, t)
+		}
+	}
+}
+
+// tupleAssign checks (a, b) = (x, y) and (a, b) = f(): every right-hand
+// value is evaluated before any assignment, as in Go, so (a, b) = (b, a)
+// swaps.
+func (c *Checker) tupleAssign(s *syntax.AssignStmt, lhs *syntax.TupleExpr) {
+	if s.Op != syntax.ASSIGN {
+		c.errorf(diag.EInvalidUse, s.OpSpan, "%s cannot assign several values; use =", s.Op)
+		if rhs, ok := syntax.Unparen(s.Rhs).(*syntax.TupleExpr); ok {
+			for _, el := range rhs.Elems {
+				c.expr(el, nil)
+			}
+		} else {
+			c.expr(s.Rhs, nil)
+		}
+		return
+	}
+	targets := make([]types.Type, len(lhs.Elems)) // nil for _
+	ok := true
+	for i, el := range lhs.Elems {
+		if id, isIdent := syntax.Unparen(el).(*syntax.Ident); isIdent && id.Name == "_" {
+			continue
+		}
+		l := c.lhs(el)
+		if l.mode == ModeInvalid || !c.mutablePath(el, "assign to", diag.EReassignVal) {
+			ok = false
+			continue
+		}
+		targets[i] = l.typ
+	}
+	if rhs, isTuple := syntax.Unparen(s.Rhs).(*syntax.TupleExpr); isTuple {
+		if len(rhs.Elems) != len(lhs.Elems) {
+			c.errorf(diag.EMultiValue, s.Rhs.Span(), "%s assigned to %s", plural(len(rhs.Elems), "value"), plural(len(lhs.Elems), "target"))
+			for _, el := range rhs.Elems {
+				c.expr(el, nil)
+			}
+			return
+		}
+		for i, el := range rhs.Elems {
+			if targets[i] == nil {
+				x := c.value(el, nil)
+				if x.mode != ModeInvalid && ok {
+					c.defaultValueType(x, "")
+				}
+				continue
+			}
+			x := c.value(el, targets[i])
+			c.assign(x, targets[i], "assignment to "+lhs.Elems[i].Span().Short())
+		}
+		return
+	}
+	x := c.expr(s.Rhs, nil)
+	if x.mode == ModeInvalid {
+		return
+	}
+	if len(lhs.Elems) == 2 {
+		// Go's comma-ok forms: v, ok = m[k] and v, ok = ch.receive().
+		if t := c.commaOk(s.Rhs, x); t != nil {
+			c.info.Types[s.Rhs] = TypeAndValue{Mode: ModeValue, Type: t}
+			x = &operand{mode: ModeValue, typ: t, expr: s.Rhs}
+		}
+	}
+	var elems []types.Type
+	switch t := x.typ.(type) {
+	case *types.Result:
+		elems = t.Raw
+	case *types.Tuple:
+		elems = t.Elems
+	default:
+		c.errorf(diag.EMultiValue, s.Rhs.Span(), "cannot assign a single value of type %s to %s", describeType(x), plural(len(lhs.Elems), "target")).
+			WithHint("assign several values with a, b = x, y")
+		return
+	}
+	if len(elems) != len(lhs.Elems) {
+		c.errorf(diag.EMultiValue, s.S, "%s returns %s, but %s given", callName(s.Rhs), plural(len(elems), "value"), plural(len(lhs.Elems), "target"))
+		return
+	}
+	for i, et := range elems {
+		if targets[i] == nil {
+			continue
+		}
+		// The values come from one Go call: they must assign as they are.
+		if okA, conv, reason := c.assignable(et, targets[i]); !okA || conv != ConvNone {
+			d := c.errorf(diag.ETypeMismatch, lhs.Elems[i].Span(), "cannot assign value %d of %s (type %s) to %s (type %s)", i+1, callName(s.Rhs), et, lhs.Elems[i].Span().Short(), targets[i])
+			if conv == ConvNilIface {
+				reason = "a null value needs a check to become a nil interface; destructure into new variables (a, b := ...) and assign from them"
+			}
+			if reason != "" {
+				d.WithNote("%s", reason)
+			}
+		}
+	}
+}
+
+func compoundOp(k syntax.Kind) syntax.Kind {
+	switch k {
+	case syntax.ADD_ASSIGN:
+		return syntax.ADD
+	case syntax.SUB_ASSIGN:
+		return syntax.SUB
+	case syntax.MUL_ASSIGN:
+		return syntax.MUL
+	case syntax.QUO_ASSIGN:
+		return syntax.QUO
+	case syntax.REM_ASSIGN:
+		return syntax.REM
+	case syntax.AND_ASSIGN:
+		return syntax.AND
+	case syntax.OR_ASSIGN:
+		return syntax.OR
+	case syntax.XOR_ASSIGN:
+		return syntax.XOR
+	case syntax.SHL_ASSIGN:
+		return syntax.SHL
+	case syntax.SHR_ASSIGN:
+		return syntax.SHR
+	}
+	return k
+}
+
+func (c *Checker) exprStmt(s *syntax.ExprStmt) bool {
+	switch x := s.X.(type) {
+	case *syntax.JumpExpr:
+		c.jump(x)
+		c.record(&operand{mode: ModeValue, typ: types.Nothing, expr: x})
+		return true
+	case *syntax.IfExpr:
+		r := c.ifExpr(x, nil, false)
+		if x.Else == nil && r.thenTerminates {
+			for v, t := range r.falseNarrow {
+				c.scope.setNarrow(v, t)
+			}
+		}
+		return r.terminates
+	case *syntax.WhenExpr:
+		op := c.whenStmt(x)
+		return op
+	case *syntax.CatchExpr:
+		c.catchStmt(x)
+		return false
+	case *syntax.TryExpr:
+		op := c.tryMode(x, true)
+		op.expr = x
+		c.record(op)
+		return false
+	case *syntax.ElvisExpr:
+		op := c.expr(x, nil)
+		if id, ok := syntax.Unparen(x.X).(*syntax.Ident); ok && op.mode != ModeInvalid {
+			if v, ok := c.info.Uses[id].(*VarSym); ok && v.Settled() && types.MayBeNull(v.Type) {
+				if yt := c.info.TypeOf(x.Y); yt == types.Nothing {
+					c.scope.setNarrow(v, types.Base(v.Type))
+					return false
+				}
+			}
+		}
+		c.errorf(diag.EInvalidUse, x.S, "the value of this ?: expression is not used")
+		return false
+	}
+	x := c.expr(s.X, nil)
+	if x.mode == ModeInvalid {
+		return false
+	}
+	switch inner := syntax.Unparen(s.X).(type) {
+	case *syntax.CallExpr:
+		if r, ok := x.typ.(*types.Result); ok {
+			if !c.errorIgnorable(inner) {
+				c.unhandledError(inner, r)
+			}
+			return false
+		}
+		if ci := c.info.Calls[inner]; ci != nil && ci.Kind == CallBuiltin && ci.Builtin == BuiltinPanic {
+			return true
+		}
+		if ci := c.info.Calls[inner]; ci != nil && (ci.Kind == CallConstruct || ci.Kind == CallConvert) {
+			c.errorf(diag.EInvalidUse, s.X.Span(), "the result of %s is not used", s.X.Span().Short())
+		}
+		return isNothing(x.typ)
+	case *syntax.TryExpr, *syntax.CatchExpr:
+		return isNothing(x.typ)
+	case *syntax.NotNullExpr:
+		return false
+	}
+	if isNothing(x.typ) {
+		return true
+	}
+	c.errorf(diag.EInvalidUse, s.X.Span(), "expression %s is not used", s.X.Span().Short())
+	return false
+}
+
+// unhandledError reports E0303 for a fallible call used as a statement.
+func (c *Checker) unhandledError(call *syntax.CallExpr, r *types.Result) {
+	text := call.Span().Short()
+	d := c.errorf(diag.EUnhandledError, call.Span(), "the error returned by %s is not handled", call.Fun.Span().Short())
+	if c.fn != nil && c.fn.fallible {
+		d.WithEdit(call.Span().EndSpan(), "?", "propagate it: %s?", text)
+	} else {
+		d.WithHint("propagate it with %s? (inside a function that throws)", text)
+	}
+	d.WithHint("handle it: %s catch (err) { ... }", text)
+	if len(r.Success) == 0 {
+		d.WithHint("or discard it explicitly: _ = %s", text)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// if and when
+
+type ifResult struct {
+	op             *operand
+	terminates     bool
+	thenTerminates bool
+	falseNarrow    narrowing
+}
+
+func (c *Checker) ifExpr(e *syntax.IfExpr, want types.Type, needValue bool) ifResult {
+	_, nt, nf := c.cond(e.Cond)
+	var tr, er blockResult
+	c.withScope(c.narrowedScope(nt), func() { tr = c.blockValue(e.Then, want, needValue) })
+	if e.Else != nil {
+		c.withScope(c.narrowedScope(nf), func() { er = c.blockValue(e.Else, want, needValue) })
+	}
+	res := ifResult{
+		terminates:     e.Else != nil && tr.terminates && er.terminates,
+		thenTerminates: tr.terminates,
+		falseNarrow:    nf,
+	}
+	if !needValue {
+		res.op = &operand{mode: ModeNoValue, typ: types.Unit}
+		return res
+	}
+	c.info.UsedAsValue[e] = true
+	if e.Else == nil {
+		c.errorf(diag.EInvalidUse, e.S, "if used as a value needs an else branch")
+		res.op = invalid(e)
+		return res
+	}
+	res.op = c.joinBranches([]blockResult{tr, er}, []*syntax.Block{e.Then, e.Else}, want, e)
+	return res
+}
+
+// joinBranches computes the type of an if/when used as a value.
+func (c *Checker) joinBranches(results []blockResult, blocks []*syntax.Block, want types.Type, e syntax.Expr) *operand {
+	allTerminate := true
+	for i, r := range results {
+		if r.terminates {
+			continue
+		}
+		allTerminate = false
+		if r.op == nil {
+			c.errorf(diag.EInvalidUse, blocks[i].S, "this branch does not produce a value")
+			return invalid(e)
+		}
+	}
+	if allTerminate {
+		return &operand{mode: ModeValue, typ: types.Nothing}
+	}
+	if want != nil {
+		ok := true
+		for _, r := range results {
+			if r.op != nil && !c.assign(r.op, want, "branch value") {
+				ok = false
+			}
+		}
+		if !ok {
+			return invalid(e)
+		}
+		return &operand{mode: ModeValue, typ: want}
+	}
+	var t types.Type = types.Nothing
+	for _, r := range results {
+		if r.op == nil {
+			continue
+		}
+		if r.op.mode == ModeInvalid {
+			return invalid(e)
+		}
+		nt, ok := c.join(t, r.op, r.valueExpr)
+		if !ok {
+			c.errorf(diag.ETypeMismatch, r.valueExpr.Span(), "branch has type %s, which is incompatible with %s", r.op.typ, t).
+				WithHint("annotate the expected type, e.g. x: any = ...")
+			return invalid(e)
+		}
+		t = nt
+	}
+	return &operand{mode: ModeValue, typ: t}
+}
+
+// whenStmt checks a when used as a statement and reports termination.
+func (c *Checker) whenStmt(e *syntax.WhenExpr) bool {
+	_, terminates := c.when(e, nil, false)
+	return terminates
+}
+
+func (c *Checker) whenExpr(e *syntax.WhenExpr, want types.Type, needValue bool) *operand {
+	op, _ := c.when(e, want, needValue)
+	return op
+}
+
+func (c *Checker) when(e *syntax.WhenExpr, want types.Type, needValue bool) (*operand, bool) {
+	scope := newScope(c.scope, BlockScope)
+	var subject *operand
+	c.withScope(scope, func() {
+		if e.Subject != nil {
+			subject = c.value(e.Subject, nil)
+			if subject.mode != ModeInvalid {
+				st := c.defaultValueType(subject, "when subject")
+				subject.typ = st
+				if e.Bind != nil {
+					v := &VarSym{name: e.Bind.Name, Type: st, Kind: LocalVar, Span: e.Bind.S, Used: true}
+					c.declareLocal(v, e.Bind)
+				}
+			}
+		}
+	})
+	var results []blockResult
+	var blocks []*syntax.Block
+	hasElse := false
+	var prevFalse narrowing
+	// A when over an enum or sealed interface tracks what its branches cover.
+	// Only a non-null subject can be covered; entries resolve unqualified
+	// either way.
+	var enum, sealed, entries *types.TypeDecl
+	if subject != nil && subject.mode != ModeInvalid {
+		entries = types.EnumOf(subject.typ)
+		if !types.MayBeNull(subject.typ) {
+			enum, sealed = entries, types.SealedOf(subject.typ)
+		}
+	}
+	covered := map[string]bool{}
+	allTerminate := true
+	for i, br := range e.Branches {
+		if hasElse {
+			c.warnf(diag.WUnreachable, br.S, "branch after else is unreachable")
+		}
+		before := prevFalse
+		var nt, nf narrowing
+		c.withScope(scope, func() {
+			if br.Else {
+				hasElse = true
+				if i != len(e.Branches)-1 {
+					c.errorf(diag.EInvalidUse, br.S, "else must be the last branch of when")
+				}
+				return
+			}
+			for _, cond := range br.Conds {
+				switch cond.Kind {
+				case syntax.WhenExprCond:
+					if subject == nil {
+						c.withScope(c.narrowedScope(before), func() {
+							_, t, f := c.cond(cond.X)
+							if len(br.Conds) == 1 {
+								nt, nf = t, f
+							}
+						})
+					} else {
+						var x *operand
+						if id, ok := cond.X.(*syntax.Ident); ok && entries != nil && entries.LookupEntry(id.Name) != nil {
+							// Red in a when over a Color is Color.Red.
+							entry := entries.LookupEntry(id.Name)
+							et := types.Base(subject.typ)
+							c.info.Entries[cond.X] = entry
+							c.info.Types[cond.X] = TypeAndValue{Mode: ModeValue, Type: et}
+							x = &operand{mode: ModeValue, typ: et, expr: cond.X}
+						} else {
+							x = c.value(cond.X, subject.typ)
+						}
+						if entry := c.info.Entries[cond.X]; entry != nil && enum != nil && entry.Decl == enum {
+							covered[entry.Name] = true
+						}
+						if x.mode != ModeInvalid && subject.mode != ModeInvalid {
+							bin := &syntax.BinaryExpr{Op: syntax.EQL, X: e.Subject, Y: cond.X, OpSpan: cond.S, S: cond.S}
+							s2 := &operand{mode: ModeValue, typ: subject.typ, expr: e.Subject}
+							c.equality(bin, s2, x)
+						}
+					}
+				case syntax.WhenIs, syntax.WhenNotIs:
+					t := c.resolveType(cond.Type)
+					if subject == nil {
+						c.errorf(diag.EInvalidUse, cond.S, "is conditions need a when subject: when (x) { is T -> ... }")
+						continue
+					}
+					if subject.mode == ModeInvalid || t == types.Invalid {
+						continue
+					}
+					if !c.assertable(subject, t, cond.Type.Span()) {
+						continue
+					}
+					c.info.TypeTests[cond] = t
+					if cond.Kind == syntax.WhenIs && sealed != nil {
+						covered[t.String()] = true
+					}
+					if cond.Kind == syntax.WhenIs && len(br.Conds) == 1 {
+						if v := whenSubjectVar(c, e); v != nil {
+							nt = narrowing{v: t}
+						}
+					}
+				default: // in, !in
+					if subject == nil {
+						c.errorf(diag.EInvalidUse, cond.S, "in conditions need a when subject: when (x) { in 1..9 -> ... }")
+						c.value(cond.X, nil)
+						continue
+					}
+					if subject.mode == ModeInvalid {
+						c.value(cond.X, nil)
+						continue
+					}
+					c.membership(cond, subject, cond.X, false)
+				}
+			}
+		})
+		prevFalse = merge(before, nf)
+		var r blockResult
+		bodyScope := newScope(scope, BlockScope)
+		for v, t := range merge(before, nt) {
+			bodyScope.setNarrow(v, t)
+		}
+		c.withScope(bodyScope, func() { r = c.blockValue(br.Body, want, needValue) })
+		if !r.terminates {
+			allTerminate = false
+		}
+		results = append(results, r)
+		blocks = append(blocks, br.Body)
+	}
+	if (enum != nil || sealed != nil) && !hasElse {
+		var missing []string
+		if enum != nil {
+			for _, en := range enum.Entries {
+				if !covered[en.Name] {
+					missing = append(missing, en.Name)
+				}
+			}
+		} else {
+			for _, m := range sealed.Members {
+				if !covered[m.String()] {
+					missing = append(missing, m.String())
+				}
+			}
+		}
+		if len(missing) == 0 {
+			c.info.Exhaustive[e] = subject.typ
+			hasElse = true // every value has a branch
+		} else {
+			what := "is "
+			if enum != nil {
+				what = ""
+			}
+			c.errorf(diag.EInvalidUse, e.S.At().Join(e.Subject.Span()), "when over %s must cover every %s: missing %s", subject.typ, map[bool]string{true: "entry", false: "member type"}[enum != nil], strings.Join(missing, ", ")).
+				WithHint("add %s%s -> ... or an else branch", what, missing[0])
+			hasElse = true // reported; avoid a second error for a value use
+		}
+	}
+	terminates := hasElse && allTerminate && len(e.Branches) > 0
+	if !needValue {
+		return &operand{mode: ModeNoValue, typ: types.Unit}, terminates
+	}
+	c.info.UsedAsValue[e] = true
+	if !hasElse {
+		c.errorf(diag.EInvalidUse, e.S, "when used as a value needs an else branch")
+		return invalid(e), terminates
+	}
+	return c.joinBranches(results, blocks, want, e), terminates
+}
+
+// whenSubjectVar returns the immutable binding a when subject names, which
+// is smart-cast by `is` branches.
+func whenSubjectVar(c *Checker, e *syntax.WhenExpr) *VarSym {
+	if e.Bind != nil {
+		v, _ := c.info.Defs[e.Bind].(*VarSym)
+		return v
+	}
+	if id, ok := syntax.Unparen(e.Subject).(*syntax.Ident); ok {
+		if v, ok := c.info.Uses[id].(*VarSym); ok && v.Settled() {
+			return v
+		}
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Loops
+
+func (c *Checker) forStmt(s *syntax.ForStmt) {
+	scope := newScope(c.scope, BlockScope)
+	info := &ForInfo{}
+	var keyT, valT types.Type
+	twoAllowed := true
+	if r, ok := s.Iter.(*syntax.RangeExpr); ok {
+		info.Kind = ForRange
+		lo := c.value(r.Lo, nil)
+		hi := c.value(r.Hi, nil)
+		valT = c.rangeType(lo, hi, r)
+		twoAllowed = false
+		c.record(&operand{mode: ModeValue, typ: valT, expr: r})
+	} else {
+		x := c.value(s.Iter, nil)
+		if x.mode != ModeInvalid {
+			if types.IsNullable(x.typ) {
+				c.nullableUse(x, "iterate over")
+			}
+			switch t := types.Base(x.typ).(type) {
+			case *types.Slice:
+				info.Kind, keyT, valT = ForSlice, types.Int, t.Elem
+			case *types.Array:
+				info.Kind, keyT, valT = ForArray, types.Int, t.Elem
+			case *types.Map:
+				info.Kind, keyT, valT = ForMap, t.Key, t.Elem
+			case *types.Chan:
+				info.Kind, valT = ForChan, t.Elem
+				twoAllowed = false
+			default:
+				if types.IsString(t) {
+					info.Kind, keyT, valT = ForString, types.Int, types.Rune
+					if types.IsUntyped(x.typ) {
+						c.assign(x, types.String, "")
+					}
+				} else if _, isSig := types.Lower(t).Underlying().(*gotypes.Signature); isSig {
+					c.errorf(diag.EUnsupported, s.Iter.Span(), "iterating over Go iterator functions is not supported yet").
+						WithHint("collect it into a slice or map first: slices.Collect(...) or maps.Collect(...)")
+				} else {
+					c.errorf(diag.EInvalidOp, s.Iter.Span(), "cannot iterate over a value of type %s", x.typ).
+						WithHint("for loops iterate over slices, arrays, maps, strings, channels, and ranges like 0..<n")
+				}
+			}
+		}
+	}
+	if keyT == nil {
+		keyT = types.Invalid
+	}
+	if valT == nil {
+		valT = types.Invalid
+	}
+	var varTypes []types.Type
+	switch len(s.Names) {
+	case 1:
+		if info.Kind == ForMap {
+			varTypes = []types.Type{keyT}
+		} else {
+			varTypes = []types.Type{valT}
+		}
+	case 2:
+		if !twoAllowed {
+			c.errorf(diag.EInvalidUse, s.Names[0].S.Join(s.Names[1].S), "this loop has only one variable")
+		}
+		varTypes = []types.Type{keyT, valT}
+	default:
+		c.errorf(diag.EInvalidUse, s.S, "for loops declare one or two variables")
+	}
+	c.withScope(scope, func() {
+		for i, id := range s.Names {
+			t := types.Type(types.Invalid)
+			if i < len(varTypes) {
+				t = varTypes[i]
+			}
+			v := &VarSym{name: id.Name, Type: t, Kind: LoopVar, Span: id.S}
+			c.declareLocal(v, id)
+			if id.Name == "_" {
+				info.Vars = append(info.Vars, nil)
+			} else {
+				info.Vars = append(info.Vars, v)
+			}
+		}
+		c.loop(s.Label, func() { c.block(s.Body) })
+	})
+	c.info.Fors[s] = info
+}
+
+func (c *Checker) rangeType(lo, hi *operand, r *syntax.RangeExpr) types.Type {
+	if lo.mode == ModeInvalid || hi.mode == ModeInvalid {
+		return types.Invalid
+	}
+	bin := &syntax.BinaryExpr{Op: syntax.RANGE, X: r.Lo, Y: r.Hi, OpSpan: r.S, S: r.S}
+	if !c.matchOperands(bin, lo, hi) {
+		return types.Invalid
+	}
+	t := lo.typ
+	if types.IsUntyped(t) {
+		t = types.Int
+		c.assign(lo, t, "range bound")
+		c.assign(hi, t, "range bound")
+	}
+	if !types.IsInteger(types.Base(t)) {
+		c.errorf(diag.ETypeMismatch, r.S, "range bounds must be integers, not %s", t)
+		return types.Invalid
+	}
+	return types.Base(t)
+}
+
+// loop checks a loop body, with the loop's label (if any) available to
+// break@label and continue@label inside it.
+func (c *Checker) loop(label *syntax.Ident, body func()) {
+	if c.fn == nil {
+		body()
+		return
+	}
+	if label != nil {
+		for _, l := range c.fn.labels {
+			if l.Name == label.Name {
+				c.errorf(diag.EDuplicate, label.S, "label %s is already used by an enclosing loop", label.Name).
+					WithRelated(l.S, "the enclosing loop's label")
+				break
+			}
+		}
+		c.fn.labels = append(c.fn.labels, label)
+		defer func() { c.fn.labels = c.fn.labels[:len(c.fn.labels)-1] }()
+	}
+	c.fn.loopDepth++
+	body()
+	c.fn.loopDepth--
+}
+
+func (c *Checker) whileStmt(s *syntax.WhileStmt) bool {
+	cond, nt, _ := c.cond(s.Cond)
+	breaks := c.countBreaks(s.Body, s.Label)
+	c.withScope(c.narrowedScope(nt), func() { c.loop(s.Label, func() { c.block(s.Body) }) })
+	if cond.mode != ModeInvalid && cond.val != nil && constant.BoolVal(cond.val) && breaks == 0 {
+		return true
+	}
+	return false
+}
+
+// selectStmt checks select: every branch but else is a channel operation,
+// a receive may bind its value (and ok), and the bodies are checked in their
+// own scopes. It terminates when every branch body does, as in Go.
+func (c *Checker) selectStmt(s *syntax.SelectStmt) bool {
+	allTerminate := len(s.Cases) > 0
+	hasElse := false
+	for _, sc := range s.Cases {
+		scope := newScope(c.scope, BlockScope)
+		c.withScope(scope, func() {
+			if sc.Else {
+				if hasElse {
+					c.errorf(diag.EDuplicate, sc.S, "select has more than one else branch")
+				}
+				hasElse = true
+			} else {
+				c.selectOp(sc)
+			}
+			if !c.block(sc.Body) {
+				allTerminate = false
+			}
+		})
+	}
+	return allTerminate
+}
+
+// selectOp checks the channel operation of a select branch and declares its
+// bindings.
+func (c *Checker) selectOp(sc *syntax.SelectCase) {
+	x := c.expr(sc.Op, nil)
+	prelude := PreludeNone
+	if call, ok := syntax.Unparen(sc.Op).(*syntax.CallExpr); ok {
+		if ci := c.info.Calls[call]; ci != nil && ci.Kind == CallPrelude {
+			prelude = ci.Prelude
+		}
+	}
+	var elems []types.Type
+	switch {
+	case x.mode == ModeInvalid:
+	case prelude == PreludeReceive:
+		elems = []types.Type{x.typ, types.Bool}
+	case prelude == PreludeSend:
+		if sc.Names != nil {
+			c.errorf(diag.EInvalidUse, sc.Names[0].S.Join(sc.Names[len(sc.Names)-1].S), "a send has no value to bind")
+		}
+	default:
+		c.errorf(diag.EInvalidUse, sc.Op.Span(), "a select branch must be a channel operation: ch.receive() or ch.send(v)")
+	}
+	if len(sc.Names) > 2 {
+		c.errorf(diag.EMultiValue, sc.Names[2].S, "a receive gives at most two values: v, ok := ch.receive()")
+	}
+	vars := make([]*VarSym, len(sc.Names))
+	for i, id := range sc.Names {
+		t := types.Type(types.Invalid)
+		if i < len(elems) && (prelude == PreludeReceive) {
+			t = elems[i]
+		}
+		v := c.newLocal(id, t)
+		c.declareLocal(v, id)
+		if id.Name != "_" {
+			vars[i] = v
+		}
+	}
+	c.info.SelectVars[sc] = vars
+}
+
+// countBreaks counts break statements that target the loop with this body:
+// unlabeled breaks outside nested loops, and break@label anywhere inside.
+func (c *Checker) countBreaks(b *syntax.Block, label *syntax.Ident) int {
+	n := 0
+	var walk func(s syntax.Stmt)
+	targets := func(j *syntax.JumpExpr) bool {
+		if j.Kind != syntax.JumpBreak {
+			return false
+		}
+		return j.Label == nil || label != nil && j.Label.Name == label.Name
+	}
+	walkExpr := func(e syntax.Expr) {
+		switch x := e.(type) {
+		case *syntax.JumpExpr:
+			if targets(x) {
+				n++
+			}
+		case *syntax.IfExpr:
+			for _, s := range x.Then.Stmts {
+				walk(s)
+			}
+			if x.Else != nil {
+				for _, s := range x.Else.Stmts {
+					walk(s)
+				}
+			}
+		case *syntax.WhenExpr:
+			for _, br := range x.Branches {
+				for _, s := range br.Body.Stmts {
+					walk(s)
+				}
+			}
+		case *syntax.ElvisExpr:
+			if j, ok := x.Y.(*syntax.JumpExpr); ok && targets(j) {
+				n++
+			}
+		}
+	}
+	walk = func(s syntax.Stmt) {
+		switch s := s.(type) {
+		case *syntax.ExprStmt:
+			walkExpr(s.X)
+		case *syntax.Block:
+			for _, x := range s.Stmts {
+				walk(x)
+			}
+		case *syntax.SelectStmt:
+			// Lyth's break inside select exits the loop, as inside when.
+			for _, sc := range s.Cases {
+				walk(sc.Body)
+			}
+		case *syntax.LocalDecl:
+			if s.Value != nil {
+				walkExpr(s.Value)
+			}
+		case *syntax.ForStmt, *syntax.WhileStmt:
+			// Nested loops have their own unlabeled breaks; break@label
+			// still exits this loop.
+			if label != nil {
+				var body *syntax.Block
+				switch s := s.(type) {
+				case *syntax.ForStmt:
+					body = s.Body
+				case *syntax.WhileStmt:
+					body = s.Body
+				}
+				n += countLabeledBreaks(body, label.Name)
+			}
+		}
+	}
+	for _, s := range b.Stmts {
+		walk(s)
+	}
+	return n
+}
+
+// countLabeledBreaks counts break@name anywhere under n, lambdas excluded.
+func countLabeledBreaks(n syntax.Node, name string) int {
+	count := 0
+	var visit func(syntax.Node)
+	visit = func(n syntax.Node) {
+		switch x := n.(type) {
+		case *syntax.LambdaExpr:
+			return
+		case *syntax.JumpExpr:
+			if x.Kind == syntax.JumpBreak && x.Label != nil && x.Label.Name == name {
+				count++
+			}
+		}
+		syntax.Children(n, visit)
+	}
+	visit(n)
+	return count
+}
+
+// ---------------------------------------------------------------------------
+// defer and go
+
+func (c *Checker) deferGo(call syntax.Expr, body *syntax.Block, isGo bool) {
+	kw := "defer"
+	if isGo {
+		kw = "go"
+	}
+	if body != nil {
+		saveFn, saveScope := c.fn, c.scope
+		fn := &funcCtx{isLambda: true, sig: &types.Signature{}, name: kw + " block"}
+		if saveFn != nil {
+			fn.recv, fn.recvDecl = saveFn.recv, saveFn.recvDecl
+			fn.reassigned = saveFn.reassigned
+		}
+		c.fn = fn
+		c.scope = newScope(saveScope, FuncScope)
+		c.scope.fn = fn
+		c.stmtList(body.Stmts)
+		c.finishLocals(fn)
+		c.fn, c.scope = saveFn, saveScope
+		return
+	}
+	inner := syntax.Unparen(call)
+	switch x := inner.(type) {
+	case *syntax.CallExpr:
+		op := c.expr(call, nil)
+		if ci := c.info.Calls[x]; ci != nil && ci.Kind == CallPrelude && (ci.Prelude == PreludeSend || ci.Prelude == PreludeReceive) {
+			// Go's go and defer take a function call, and a channel
+			// operation is not one.
+			c.errorf(diag.EInvalidUse, call.Span(), "%s needs a function call; a channel operation is not one", kw).
+				WithHint("use a block: %s { %s }", kw, call.Span().Text())
+			return
+		}
+		if r, ok := op.typ.(*types.Result); ok && op.mode != ModeInvalid {
+			d := c.errorf(diag.EUnhandledError, call.Span(), "the error returned by deferred call %s would be discarded", x.Fun.Span().Short())
+			if isGo {
+				d = c.errorf(diag.EUnhandledError, call.Span(), "the error returned by %s would be lost in the goroutine", x.Fun.Span().Short())
+				d.WithHint("handle it inside: go { %s catch (err) { ... } }", call.Span().Short())
+				return
+			}
+			d.WithHint("handle it: defer %s catch (err) { log(err) }", call.Span().Short())
+			if len(r.Success) == 0 {
+				d.WithHint("or discard it explicitly: defer { _ = %s }", call.Span().Short())
+			}
+		}
+	case *syntax.CatchExpr:
+		c.catchStmt(x)
+	case *syntax.TryExpr:
+		c.errorf(diag.EUnsupported, x.OpSpan, "%s with ? is not supported yet", kw).
+			WithHint("use %s %s catch (err) { ... }", kw, x.X.Span().Short())
+		c.expr(x.X, nil)
+	default:
+		c.errorf(diag.EInvalidUse, call.Span(), "%s needs a function call or a block", kw)
+		c.expr(call, nil)
+	}
+}
+
+// commaOk returns the (value, bool) type of Go's comma-ok forms, a map
+// index or a channel receive, already checked as x; otherwise nil.
+func (c *Checker) commaOk(e syntax.Expr, x *operand) types.Type {
+	switch e := syntax.Unparen(e).(type) {
+	case *syntax.IndexExpr:
+		if xt := c.info.TypeOf(e.X); xt != nil {
+			if m, ok := types.Base(xt).(*types.Map); ok {
+				vt := m.Elem
+				if !types.Zeroable(vt) {
+					vt = types.MakeNullable(vt)
+				}
+				return &types.Tuple{Elems: []types.Type{vt, types.Bool}}
+			}
+		}
+	case *syntax.CallExpr:
+		if ci := c.info.Calls[e]; ci != nil && ci.Kind == CallPrelude && ci.Prelude == PreludeReceive {
+			return &types.Tuple{Elems: []types.Type{x.typ, types.Bool}}
+		}
+	}
+	return nil
+}

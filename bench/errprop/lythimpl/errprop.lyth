@@ -1,0 +1,36 @@
+// Package lythimpl is the Lyth version of the errprop workload.
+package lythimpl
+
+import "errors"
+
+// ErrBottom is returned by the deepest call when it fails.
+var ErrBottom = errors.New("bottom")
+
+func level(n: int, fail: bool): int throws {
+    if n == 0 {
+        if fail {
+            throw ErrBottom
+        }
+        return 1
+    }
+    return level(n - 1, fail)? + 1
+}
+
+// Chain propagates an error unchanged through depth calls.
+func Chain(depth: int, fail: bool): int throws = level(depth, fail)?
+
+func levelWrapped(n: int, fail: bool): int throws {
+    if n == 0 {
+        if fail {
+            throw ErrBottom
+        }
+        return 1
+    }
+    return levelWrapped(n - 1, fail) catch (err) { throw err.wrap("level ${n}") } + 1
+}
+
+// ChainWrapped adds context at every level.
+func ChainWrapped(depth: int, fail: bool): int throws = levelWrapped(depth, fail)?
+
+// Fallback handles the error locally with a default value.
+func Fallback(depth: int, fail: bool): int = level(depth, fail) catch { -1 }

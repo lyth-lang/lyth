@@ -1,0 +1,49 @@
+// Package lythimpl is the Lyth version of the logagg (CPU) workload.
+package lythimpl
+
+import "errors"
+import "slices"
+import "strings"
+
+// Stats summarizes requests to one endpoint.
+struct Stats {
+    Endpoint: string
+    Count: int
+    Errors: int
+    TotalMs: int64
+    MaxMs: int
+}
+
+// Aggregate parses access-log lines and summarizes them per endpoint.
+func Aggregate(lines: []string): []Stats throws {
+    byEndpoint: map[string]*Stats = [:]
+    for line in lines {
+        parts := strings.Split(line, ",")
+        if len(parts) != 5 {
+            throw errors.New("malformed line: ${line}")
+        }
+        status := parts[3].toInt()?
+        latency := parts[4].toInt()?
+        s := byEndpoint[parts[2]] ?: newStats(byEndpoint, parts[2])
+        s.Count++
+        if status >= 500 {
+            s.Errors++
+        }
+        s.TotalMs += int64(latency)
+        if latency > s.MaxMs {
+            s.MaxMs = latency
+        }
+    }
+    out := make([]Stats, 0, len(byEndpoint))
+    for _, s in byEndpoint {
+        out = append(out, *s)
+    }
+    slices.SortFunc(out) { a, b -> strings.Compare(a.Endpoint, b.Endpoint) }
+    return out
+}
+
+func newStats(m: map[string]*Stats, endpoint: string): *Stats {
+    s := &Stats(Endpoint = endpoint)
+    m[endpoint] = s
+    return s
+}

@@ -1,0 +1,31 @@
+import "strconv"
+
+struct User {
+    ID: int64
+    Name: string
+}
+
+func find(id: int64): User? = null
+
+func total(price: float64, quantity: int): float64 {
+    return price * quantity // ERROR E0202 "mismatched types float64 and int"
+}
+
+func lookup(id: string): User? {
+    return find(id) // ERROR E0201 "expected int64, found string"
+}
+
+func main() {
+    a: int = "x" // ERROR E0201 "expected int, found string"
+    b: int8 = 300 // ERROR E0215 "300"
+    c := undefinedThing // ERROR E0101 "undefined: undefinedThing"
+    u := User(ID = 1, nam = "x") // ERROR E0211 "has no field nam"
+    n := strconv.Atoi("1") // ERROR E0210 "returns 2 values"
+    s: string = 5 + 5 // ERROR E0201 "expected string"
+    total(1.0, 2, 3) // ERROR E0203 "expects 2 arguments"
+    m := strconv.itoa(5) // ERROR E0106 "Go names are used verbatim"
+    x := if true { 1 } // ERROR E0216 "needs an else"
+    println(a, b, c, u, n, s, m, x)
+}
+
+func Double(x: int) = x * 2 // ERROR E0208 "declare the result type"

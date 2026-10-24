@@ -1,0 +1,29 @@
+// Package lythimpl is the Lyth version of the pgapi (PostgreSQL) workload.
+package lythimpl
+
+import "context"
+import "encoding/json"
+import "errors"
+import "github.com/jackc/pgx/v5" as pgx
+import "github.com/jackc/pgx/v5/pgxpool"
+
+// ErrNotFound is returned when no user has the requested id.
+var ErrNotFound = errors.New("user not found")
+
+// User is a row of bench_users.
+struct User {
+    ID: int64
+    Name: string
+    Email: string?
+}
+
+// FetchJSON loads a user and encodes it as JSON.
+func FetchJSON(ctx: context.Context, pool: *pgxpool.Pool, id: int64): []byte throws {
+    u := User()
+    err := pool.QueryRow(ctx, "select id, name, email from bench_users where id = $1", id).Scan(&u.ID, &u.Name, &u.Email)
+    if errors.Is(err, pgx.ErrNoRows) {
+        throw ErrNotFound
+    }
+    err?
+    return json.Marshal(u)?
+}

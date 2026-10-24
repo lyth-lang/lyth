@@ -1,0 +1,40 @@
+import "log/slog"
+import "testing"
+import "time"
+
+func env(vars: map[string]string): (string) -> string = { k -> vars[k] }
+
+func TestLoad(t: *testing.T) throws {
+    cfg := Load(env([
+        "DATABASE_URL": "postgres:///todo",
+        "API_TOKENS": "alice:t1, bob:t2",
+        "LOG_LEVEL": "DEBUG",
+    ]))?
+    if cfg.Addr != ":8080" {
+        t.Errorf("addr = %q, want :8080", cfg.Addr)
+    }
+    if len(cfg.Tokens) != 2 || cfg.Tokens["t2"] != "bob" {
+        t.Errorf("tokens = %v", cfg.Tokens)
+    }
+    if cfg.LogLevel != slog.LevelDebug {
+        t.Errorf("logLevel = %v, want DEBUG", cfg.LogLevel)
+    }
+    if cfg.ShutdownTimeout != 10 * time.Second {
+        t.Errorf("shutdownTimeout = %v, want 10s", cfg.ShutdownTimeout)
+    }
+}
+
+func TestLoadRejectsBadInput(t: *testing.T) {
+    cases := [
+        ["API_TOKENS": "a:b"],
+        ["DATABASE_URL": "x", "API_TOKENS": ""],
+        ["DATABASE_URL": "x", "API_TOKENS": "no-colon"],
+        ["DATABASE_URL": "x", "API_TOKENS": "a:b", "LOG_LEVEL": "loud"],
+        ["DATABASE_URL": "x", "API_TOKENS": "a:b", "SHUTDOWN_TIMEOUT": "-1s"],
+        ["DATABASE_URL": "x", "API_TOKENS": "a:b", "SHUTDOWN_TIMEOUT": "soon"],
+    ]
+    for vars in cases {
+        cfg := Load(env(vars)) catch { continue }
+        t.Errorf("load(%v) = %+v, want an error", vars, cfg)
+    }
+}

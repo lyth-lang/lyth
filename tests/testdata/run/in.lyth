@@ -1,0 +1,61 @@
+// in tests membership in ranges, lists, maps, and strings.
+
+func httpClass(code: int): string = when code {
+    in 200..299 -> "success"
+    in 300..<400 -> "redirect"
+    in 400..499 -> "client error"
+    else -> "server error"
+}
+
+func describe(key: string, ports: map[string]int): string = when key {
+    "" -> "empty"
+    in ports -> "known port ${ports[key]}"
+    !in ["ftp", "gopher"] -> "unknown"
+    else -> "retired"
+}
+
+var calls = 0
+
+func next(): int {
+    calls++
+    return calls
+}
+
+func main() {
+    n := 42
+    println(n in 1..100, n in 1..<42, n !in 0..9)
+
+    roles := ["admin", "editor"]
+    println("admin" in roles, "guest" !in roles)
+
+    ports := ["http": 80, "https": 443]
+    if "https" in ports {
+        println("https on", ports["https"])
+    }
+    if "ftp" !in ports {
+        println("no ftp")
+    }
+
+    email := "ada@example.com"
+    println("@" in email, '@' in email, "#" in email)
+
+    c := 'q'
+    println(c in 'a'..'z', c in 'A'..'Z')
+
+    println(httpClass(204), httpClass(302), httpClass(404), httpClass(503))
+    println(describe("", ports), describe("http", ports), describe("ssh", ports), describe("ftp", ports))
+
+    // the element and each bound are evaluated once, in order
+    println(next() in 1..1, next() in 0..next(), calls)
+}
+
+// Output:
+// true false true
+// true true
+// https on 443
+// no ftp
+// true true false
+// true false
+// success redirect client error server error
+// empty known port 80 unknown retired
+// true true 3

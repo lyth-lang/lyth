@@ -1,0 +1,35 @@
+import "strconv"
+
+var calls = 0
+
+func parse(s: string): int throws {
+    calls++
+    return strconv.Atoi(s)?
+}
+
+func classify(s: string): string throws = when {
+    s == "" -> "empty"
+    s == "skip", parse(s)? > 10 -> "skip-or-big"
+    else -> "small"
+}
+
+func kind(x: any): string = when v := x {
+    "zero" -> "zero"
+    is string -> "string ${len(v)}"
+    else -> "other"
+}
+
+func main() {
+    println(classify("skip") catch { "error" }, calls)
+    println(classify("42") catch { "error" }, calls)
+    println(classify("3") catch { "error" }, calls)
+    println(classify("x") catch { "error" }, calls)
+    println(kind("zero"), kind("abc"), kind(1))
+}
+
+// Output:
+// skip-or-big 0
+// skip-or-big 1
+// small 2
+// error 3
+// zero string 3 other

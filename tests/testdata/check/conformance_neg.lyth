@@ -1,0 +1,52 @@
+import "fmt"
+import "io"
+
+interface Shape {
+    Area(): float64
+    Name(): string
+}
+
+struct Square : Shape { // ERROR E0212 "missing method Name: () -> string"
+    Side: float64
+}
+
+func Square.Area(): float64 = Side * Side
+
+struct Tri : Shape { // ERROR E0212 "method Area has type () -> int, but Shape needs () -> float64"
+    Base: int
+}
+
+func Tri.Area(): int = Base
+func Tri.Name(): string = "tri"
+
+struct Disc : fmt.Stringer { // ERROR E0212 "method string must be named String to implement fmt.Stringer"
+    R: float64
+}
+
+func Disc.string(): string = "disc"
+
+struct Sink : io.Writer { // ERROR E0212 "missing method Write: ([]byte) -> int throws"
+    N: int
+}
+
+struct Base {
+    ID: int
+}
+
+struct Derived : Base { // ERROR E0201 "Base is not an interface"
+    Name: string
+}
+
+struct Maybe : Shape? { // ERROR E0201 "Shape? is not an interface"
+    V: int
+}
+
+struct Twice : fmt.Stringer, fmt.Stringer { // ERROR E0102 "fmt.Stringer is already listed"
+    V: int
+}
+
+func Twice.String(): string = "twice"
+
+struct Unknown : Missing { // ERROR E0101 "Missing"
+    V: int
+}

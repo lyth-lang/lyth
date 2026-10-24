@@ -1,0 +1,92 @@
+import "encoding/json"
+import "math"
+
+enum Level { Debug, Info, Warn, Error }
+
+// An exhaustive when needs no else; Info -> unqualified inside a when over a Level.
+func Level.short(): string = when self {
+    Debug -> "DBG"
+    Info -> "INF"
+    Level.Warn -> "WRN"
+    Error -> "ERR"
+}
+
+func Level.atLeast(min: Level): bool = int(self) >= int(min)
+
+enum Kind { Round, Square }
+
+sealed interface Shape {
+    Kind(): Kind
+    Area(): float64
+}
+
+struct Circle : Shape {
+    R: float64
+}
+
+// Kind here is the enum, though the method has the same name.
+func Circle.Kind(): Kind = Kind.Round
+func Circle.Area(): float64 = math.Pi * R * R
+
+// Only *Square implements Shape (pointer receivers), so *Square is the member.
+struct Square : Shape {
+    S: float64
+}
+
+func *Square.Kind(): Kind = Kind.Square
+func *Square.Area(): float64 = S * S
+
+func describe(s: Shape): string = when s {
+    is Circle -> "circle r=${s.R}"
+    is *Square -> "square s=${s.S}"
+}
+
+func name(l: Level?): string = when l {
+    Debug, Info -> "quiet"
+    null -> "unset"
+    else -> "loud"
+}
+
+func count(n: int?): string = when n {
+    0 -> "zero"
+    1 -> "one"
+    null -> "none"
+    else -> "many"
+}
+
+struct Entry {
+    Msg: string
+    Level: Level
+}
+
+func main() throws {
+    l := Level.Warn
+    zero: Level
+    println(l, l.short(), zero, Level.Error.short(), l.atLeast(Level.Info), l == Level.Warn)
+    for lv in [Level.Debug, Level.Error] {
+        when lv {
+            Debug, Info -> println(lv, "is quiet")
+            Warn, Error -> println(lv, "is loud")
+        }
+    }
+    println(name(Level.Info), name(null), name(Level.Error), count(1), count(null), count(7))
+    println(Level(2), int(Level.Error))
+
+    shapes: []Shape = [Circle(R = 1), &Square(S = 2)]
+    for s in shapes {
+        println(describe(s), s.Kind(), int(s.Area()))
+    }
+
+    data := json.Marshal(Entry(Msg = "disk", Level = Level.Warn))?
+    println(string(data))
+}
+
+// Output:
+// Warn WRN Debug ERR true true
+// Debug is quiet
+// Error is loud
+// quiet unset loud one none many
+// Warn 3
+// circle r=1 Round 3
+// square s=2 Square 4
+// {"msg":"disk","level":2}

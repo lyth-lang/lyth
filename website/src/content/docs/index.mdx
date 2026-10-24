@@ -1,0 +1,28 @@
+---
+title: The Lyth programming language
+description: A statically typed language with Kotlin-inspired syntax that compiles to readable Go and builds with the official Go toolchain.
+template: splash
+hero:
+  title: Kotlin-inspired syntax, compiled to readable Go
+  tagline: Lyth keeps Go's runtime, performance, standard library and ecosystem, and removes the error plumbing and nil checks. Programs run as fast as hand-written Go, because they are Go.
+  actions:
+    - text: Take the tour
+      link: /guide/tour/
+      icon: right-arrow
+    - text: Lyth for Go programmers
+      link: /guide/lyth-for-go-programmers/
+      variant: minimal
+    - text: Benchmarks
+      link: /design/benchmarks/
+      variant: minimal
+---
+
+import LythToGo from '../../components/LythToGo.astro';
+import Changes from '../../generated/readme-changes.md';
+import QuickStart from '../../generated/readme-quickstart.md';
+
+<LythToGo />
+
+<Changes />
+
+<QuickStart />

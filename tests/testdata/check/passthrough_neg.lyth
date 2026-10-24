@@ -1,0 +1,23 @@
+import "io"
+import "net"
+import "os"
+import "strconv"
+
+// A concrete value converted to an interface does not pass through: a failing
+// os.Open would return a non-nil io.Reader holding a nil *os.File.
+func open(p: string): io.Reader throws = os.Open(p) // ERROR E0210 "os.Open(...) returns 2 values"
+
+func openBlock(p: string): io.Reader throws {
+    return os.Open(p) // ERROR E0210 "propagate the error with ?"
+}
+
+// Boxing into an optional needs the success value, so it needs ?.
+func maybe(s: string): int? throws = strconv.Atoi(s) // ERROR E0210 "strconv.Atoi(...) returns 2 values"
+
+// An interface value passes through unchanged, and so does an identical type.
+func dial(addr: string): io.ReadWriter throws = net.Dial("tcp", addr)
+func file(p: string): *os.File throws = os.Open(p)
+
+func use() {
+    println(open, openBlock, maybe, dial, file)
+}

@@ -1,0 +1,421 @@
+# Lyth Type System (v0.1 draft)
+
+Status tags as in [language.md](language.md): **[v0.1]** implemented and tested,
+**[planned]** designed only.
+
+## 1. Two layers: Lyth types and Go representation types
+
+Every Lyth type has a **Go representation type**, computed by a total function
+`lower: LythType → go/types.Type`. Lyth types carry extra static information that
+Go types cannot express:
+
+- nullability (`*User` vs `*User?`),
+- fallibility of function types (`(A) -> R throws`),
+- the difference between an optional value (`int?`) and a pointer (`*int`).
+
+Types that come from Go packages enter Lyth through `lift: go/types.Type →
+LythType`, which marks every nil-able position as a **platform type** (unknown
+nullability, §5.4). For any Go type `t`, `lower(lift(t))` is identical to `t`.
+Lifting never simplifies or reinterprets a Go type. This is the formal
+statement of the rule that Lyth never changes the meaning of imported APIs.
+
+Go-level relationships (method sets, interface satisfaction, comparability,
+conversion rules, generic constraint satisfaction) are decided by `go/types`
+on the lowered types, using a parallel *shadow* `go/types` package built for
+each Lyth package. Lyth's checker adds its own rules (nullability, mutability,
+fallibility) on top. Delegating this way keeps Lyth's model exactly Go's model
+wherever Go has an opinion.
+
+## 2. Type syntax
+
+```ebnf
+Type        = PrefixType [ "?" ] .
+PrefixType  = "*" PrefixType | "[" [ ConstExpr ] "]" Type
+            | "map" "[" Type "]" Type | ChanType | PrimaryType .
+ChanType    = "chan" Type | "chan" "<-" Type | "<-" "chan" Type .
+PrimaryType = TypeName [ TypeArgs ] | FuncType | "(" Type ")" .
+TypeName    = identifier [ "." identifier ] .
+TypeArgs    = "[" Type { "," Type } "]" .
+FuncType    = "(" [ Type { "," Type } ] ")" "->" ResultType [ "throws" ] .
+```
+
+Types are spelled as in Go: `int`, `string`, `[]T`, `map[K]V`, `chan T`,
+`chan<- T`, `<-chan T`, and type arguments in brackets directly after the
+name (`Page[int]`, `atomic.Pointer[Config]`). `map` and `chan` are keywords.
+The old spellings (`Int`, `Map<K, V>`, `Chan<T>`, `List<T>`, `<T>` type
+arguments) are errors (E0101, E0008) whose message names the Go spelling.
+
+The postfix `?` applies to the whole type it follows, so `*User?` is a nullable
+pointer `(*User)?`, the overwhelmingly common case in Go interop. Inside type
+arguments the scope is explicit. After the element type of a slice, array,
+map, or channel, `?` belongs to the element: `[]User?` is a slice of nullable
+users and `map[string]*User?` a map of nullable pointers, because slices and
+maps are never nullable (a nullable slice would be written `([]User)?`, which
+is rejected, §5.1). A nullable channel is `(chan T)?`. A pointer to a
+nullable value needs parentheses: `*(User?)`. A nullable function type is
+`((A) -> R)?`.
+
+## 3. Basic types and constants **[v0.1]**
+
+Basic types use Go's names and are listed in
+[language.md §8.1](language.md#81-types). `byte` is
+identical to `uint8` and `rune` to `int32`, as in Go.
+
+Literals and constant expressions are **untyped constants** with Go semantics:
+arbitrary precision, implicit conversion to the target type if representable,
+default types `int`, `float64`, `rune`, `string`, `bool`. `x := 1 << 40` has
+type `int`. `y: int8 = 300` is E0215 ("constant 300 cannot be represented as
+int8").
+
+There are **no implicit conversions between numeric types**: `price * quantity`
+with `float64` and `int` operands is E0202, and the hint suggests
+`price * float64(quantity)`. This keeps Go's guarantee that every numeric
+conversion is visible.
+
+`unit` names the empty result in function types (`(int) -> unit`). It has no
+values. `nothing` is the type of diverging expressions (`return`, `throw`,
+`break`, `continue`, `panic(...)`, `!!` on `null`). It is a subtype of every type
+and appears only in diagnostics; it is not writable in v0.1.
+
+## 4. Composite types **[v0.1]**
+
+| Lyth | Meaning |
+|---|---|
+| `[]T` | Go slice. Indexing, slicing `xs[a:b]`, `len`, `append` as in Go; `[]byte(s)` and `make([]T, n, c)` take the type as an operand ([ADR 0023](../adr/0023-slice-types.md)). |
+| `map[K]V` | Go map. `m[k]` yields the zero value for absent keys if `V` has a zero value, otherwise `V?` (§6). `v, ok := m[k]` gives comma-ok. |
+| `[N]T` | Go array (value type). |
+| `chan T`, `chan<- T`, `<-chan T` | Go channels, made with `make(chan T, n)`. Operations are the methods `send`, `receive`, and `close`; `receive()` is `T?` when `T` has no zero value ([language.md §5.9](language.md#59-pointers-and-channels-v01)). |
+| `*T` | Go pointer. |
+| `(A, B) -> R` | Go `func(A, B) R`. |
+| `(A) -> R throws` | Go `func(A) (R, error)`. |
+| tuple `(A, B)` | multiple results only; not a first-class type. |
+| named types | structs, interfaces, and Go defined types such as `time.Duration`, with type arguments for generics. |
+
+## 5. Nullability
+
+### 5.1 Which types can be null **[v0.1]**
+
+A type is **nil-able** if Go allows `nil` for it: pointers, interfaces,
+functions, channels, slices, and maps. Lyth applies nullability to the first four:
+
+- `*T`, interfaces (`error`, `any`, `io.Reader`, ...), function types, and
+  channels are **non-null by default**. `T?` is their nullable form. Both lower
+  to the same Go type.
+- `[]T` and `map[K]V` are never null in Lyth's type system. Go's nil slice
+  and nil map are simply their empty zero values: `len` is 0, iteration does
+  nothing, reads succeed. `([]T)?` is E0406 with a hint to use an empty slice.
+  (Writing to a nil map panics in Go and in Lyth. Map literals and `make` always
+  produce non-nil maps.)
+- Value types (numbers, `string`, `bool`, structs, arrays) have optional forms
+  `T?` represented as `*T`: see §5.6.
+
+### 5.2 `null` **[v0.1]**
+
+`null` has a special type of its own (printed `null` in diagnostics),
+assignable to any nullable or platform type and to slices and maps (as Go's
+nil). It lowers to `nil`.
+
+### 5.3 Using nullable values **[v0.1]**
+
+A value of type `T?` cannot be used where `T` is required (E0401). Not allowed
+on `T?`: member access with `.`, calls, dereference, indexing, and passing as a
+non-null argument. The ways to use it:
+
+| Form | Meaning | Lowers to |
+|---|---|---|
+| `if x != null { ...x... }` | smart cast to `T` in the guarded region | plain `if x != nil` |
+| `x ?: default` | `x` if non-null, else `default` (lazy) | `if`/`else` assignment |
+| `x?.member` | null if `x` is null, else the member (result nullable) | `if x != nil` |
+| `x!!` | assert non-null; panics with source position if null | explicit check + panic |
+| `x ?: return/throw/continue/break` | early exit, then `x` is smart cast | `if x == nil { return ... }` |
+
+**Smart casts.** After a condition establishes `x != null`, `x` has type `T`
+inside the region the condition dominates. The same holds after an early exit
+on `x == null` for the rest of the block. Conditions combine through `&&`, `||`,
+and `!`.
+
+A smart cast needs a value that cannot change between the check and the use.
+It applies to parameters, `self`, and locals the function never reassigns: a
+local whose name is never the target of `=`, a compound assignment, `++`/`--`,
+or `&`, and is never reused by a later `:=` list (language.md §4.2), anywhere
+in the function body, including its lambdas. The analysis is syntactic and by
+name, so it is conservative: reassigning one `x` unsettles every `x` in that
+function. Smart casts do not apply to a reassigned local, to package-level
+variables (any code in the package may assign them), to fields, or to calls.
+E0401 then says why and suggests a copy that can be checked
+(`curNow := cur; if curNow != null { ... }`); for a field, copy it into a local
+first. Type tests (`x is T`, language.md §5.10) smart-cast the same
+way, from an interface type to `T`.
+
+### 5.4 Platform types **[v0.1]**
+
+Values whose types come from Go have *platform nullability*, written `T!` in
+diagnostics (never in source). A platform value can be used as `T` (member
+access, passing it on) and as `T?` (compared with null, `?.`, `?:`). Lyth inserts
+no runtime checks for platform values: using a nil platform pointer panics
+exactly where the equivalent Go would. Kotlin made the same trade-off for Java
+interop. Without it every Go call would need `!!`, and the alternative of
+treating every Go pointer as nullable is unusable in practice.
+
+Platform-ness is deep: a Go `[]*User` lifts to `[]*User!`. Declaring a
+variable with an explicit type removes it: `u: *User = goFind()` commits to
+non-null, `u: *User? = goFind()` to nullable. An inferred one (`u := goFind()`)
+keeps the platform type.
+
+### 5.5 Nullability and errors are separate
+
+`?` handles errors only and `?.`, `?:`, `!!` handle null only. A missing value is
+not an error. A function that can both fail and find nothing returns `T? throws`
+(Go: `(*T, error)`), and callers write `find(id)? ?: return notFound()`. See
+[errors.md §3.4](errors.md#34-errors-versus-null).
+
+### 5.6 Optional values (`int?`, `string?`, `User?`) **[v0.1]**
+
+For a value type `T`, `T?` is an *immutable optional value* represented as `*T`.
+This is the idiomatic Go representation for optional JSON fields (`*int` with
+`null`), nullable SQL columns (`database/sql` and pgx scan NULL into `*T`), and
+"maybe a struct" results (`(*User, error)`). It is also how Kotlin boxes `Int?`.
+
+- Boxing `T → T?` lowers to Go 1.26 `new(expr)`, which allocates unless escape
+  analysis proves otherwise. Unboxing (a smart cast or `!!`) copies the value out
+  (`*p`). Optional values are never mutated through the pointer, so sharing the
+  box is unobservable from Lyth.
+- `*T?` (nullable pointer) and `T?` (optional value) are different Lyth types
+  with the same Go type. `*T`/`*T?` converts implicitly to `T?`, which is a
+  read-only view and safe. The reverse is rejected (E0201): it would allow writes
+  into a shared box. Write `new(x!!)` for an explicit copy.
+- Equality `a == b` on two `T?` values compares contents with null handling, not
+  pointer identity.
+- Converting a nullable value to a nullable interface type (`error?`, `any?`,
+  `Shape?`) maps null to a nil interface, not to a non-nil interface holding a
+  nil pointer (Go's typed-nil trap), and puts an optional value in unboxed: an
+  `int?` converted to `any?` holds an `int`. This covers optional values,
+  nullable pointers, functions, and channels, and Go values of unknown
+  nullability (`*T!`). The conversion costs one nil check
+  (`var e error; if p != nil { e = p }`; a returned value becomes
+  `if p == nil { return nil }`), see
+  [ADR 0026](../adr/0026-null-is-a-nil-interface.md). Go parameters are the
+  exception: they receive the Go representation, as
+  [ADR 0017](../adr/0017-nullable-values-into-go.md) specifies, so drivers
+  still read a nil `*T` as NULL. An assignment list from one call cannot check
+  its values, so it rejects such a conversion (E0201).
+- `T?` where `T` is a type parameter is **[planned]**. It needs a uniform
+  representation that does not depend on the instantiation.
+
+Performance note: optional values cost a pointer indirection and possibly an
+allocation, like `*T` in hand-written Go. Hot paths can use `(T, bool)` results
+or plain zero values instead.
+
+## 6. Zero values **[v0.1]**
+
+Go gives every type a zero value. In Lyth a type is **zeroable** when its Go zero
+value is a valid Lyth value: numbers, `string`, `bool`, nullable and platform
+types, slices, maps, arrays of zeroable types, and structs whose fields are all
+zeroable. Non-null pointers, interfaces, functions, and channels are not
+zeroable.
+
+Rules that follow:
+
+- A local `x: T` without initializer requires zeroable `T` (E0405).
+- Struct construction may omit only zeroable fields.
+- `make([]T, n)` with `n != 0` requires zeroable `T`.
+- `m[k]` on `map[K]V` has type `V` if `V` is zeroable, else `V?`.
+- Destructuring a fallible call yields the non-error values with their zero
+  value on error, so non-zeroable value types become nullable there
+  ([errors.md §5](errors.md#5-raw-access-destructuring)).
+
+## 7. Mutability
+
+### 7.1 Bindings **[v0.1]**
+
+Local variables (declared with `:=` or `name: Type`) and package-level `var`s
+are mutable, as in Go. Parameters, `for` loop variables, `catch` bindings, and
+`self` are **read-only bindings**: assigning one is E0501, and a `:=` list
+cannot reuse a parameter. A value receiver's `self` is a copy of the caller's
+value and is read-only in the same way. Constants are not variables;
+assigning one is E0501 too.
+
+Read-only means *the value stored in the binding never changes*. For value
+types this includes every field and array element reachable without going
+through a pointer, the semantics of Swift's `let`. It stops at references:
+the target of a pointer, the backing array of a slice, the contents of a map, and
+the state behind an interface or channel all belong to other storage. To
+change a parameter's value, copy it into a local.
+
+```kotlin
+func update(u: User, p: *User, xs: []int) {
+    u.Name = "b"            // E0502: cannot assign to u.Name: u is an immutable parameter
+    p.Name = "b"            // ok: mutation through a pointer
+    p = &User()             // E0501: cannot assign to parameter p: parameters are read-only
+    xs[0] = 9               // ok: the backing array is not part of the binding
+    xs = append(xs, 4)      // E0501
+    v := u                  // a local copy is mutable
+    v.Name = "b"            // ok
+}
+```
+
+### 7.2 Mutable paths **[v0.1]**
+
+An expression is a **mutable path** if it is a variable (a local or a
+package-level `var`), `*p` for any
+pointer `p`, a field selection `x.f` where `x` is a mutable path or a pointer, an
+index `a[i]` where `a` is a slice, a map (assignment only), or an array that is a
+mutable path. Assignments, `++`/`--`, and compound assignments require a mutable
+path.
+
+### 7.3 Addresses and pointer receivers **[v0.1]**
+
+- `&x` requires `x` to be a mutable path (E0503), or a construction `&T(...)`.
+  `json.Unmarshal(data, &v)` works on a local `v: T`; the address of a
+  parameter is E0503, with a hint to copy it into a local.
+- Calling a pointer-receiver method on an addressable value implicitly takes its
+  address (Go). Lyth allows it only on mutable paths (E0504): `mu.Lock()` on a
+  local `mu: sync.Mutex` works, and on a `sync.Mutex` parameter it is an
+  error. Pass a `*sync.Mutex` instead.
+- Inside a method with a value receiver, `self` is read-only, so the classic Go
+  bug of assigning to a copy's field is caught at compile time (E0502).
+
+Mutability is a compile-time property of Lyth bindings only. It adds no runtime
+cost and changes nothing in generated code. Go code receiving a pointer can of
+course mutate through it.
+
+## 8. Assignability and conversions **[v0.1]**
+
+A value of Lyth type `S` is assignable to Lyth type `D` if one of these holds:
+
+1. `S` and `D` are identical.
+2. `S` is an untyped constant representable in `D` (Go rules).
+3. `S` is the type of `null` and `D` is nullable, platform, a slice, or a map.
+4. `S` is `nothing`.
+5. `D` is `T?` and `S` is assignable to `T` (implicit boxing for value types,
+   no-op for nil-able types).
+6. `S` or `D` is a platform type and the types are assignable once nullability
+   is ignored on the platform side. In particular, a nullable `T?` may be passed
+   where a platform `U!` is expected (a Go parameter) when `T` is assignable to
+   `U`; it goes in its Go representation, `*T` for an optional value type
+   ([ADR 0017](../adr/0017-nullable-values-into-go.md)).
+7. `S` is `*T` or `*T?` and `D` is `T?` for a value type `T` (read-only view).
+8. Nullability is compatible (non-null → anything, nullable → nullable only) and
+   `lower(S)` is assignable to `lower(D)` under Go's rules, for example
+   interface satisfaction or channel direction. Go's assignability is decided by
+   `go/types` on the shadow types.
+
+Function types are assignable when their lowered Go signatures are identical and
+nullability is compatible position by position. A Lyth `(A) -> R throws` is
+assignable to and from a Go `func(A) (R, error)`.
+
+Explicit conversions `T(x)` follow Go's conversion rules on the lowered types.
+Lyth additionally rejects conversions that would discard a nullability guarantee
+without a check.
+
+**Comparison.** `==` and `!=` require operands of identical type (ignoring
+nullability), with one Go exception: a value may be compared with an interface
+value whose type it implements (`x == "zero"` for `x: any` is true when `x`
+holds the string `"zero"`). An untyped constant compared with an interface takes
+its default type. Both operands must be comparable.
+
+## 9. Type inference **[v0.1]**
+
+Lyth uses local, bidirectional inference. There is no global inference across
+function boundaries: an exported function's signature is always written out, so a
+package's API is explicit and stable.
+
+- **Declarations**: `x := e` gives `x` the type of `e` (untyped constants take
+  their default type, platform types stay platform).
+- **Expected types flow inward**: into initializers with annotations, arguments,
+  return values, collection-literal elements, struct-construction fields, `if`/
+  `when` branches, `?:` operands, and lambda bodies. This is how `[]`, `null`,
+  untyped constants, and lambda parameter types get their types.
+- **Lambdas**: parameter types come from the expected function type. Without one,
+  annotations are required (E0208). The result type is the expected result, or
+  inferred from the body's last expression.
+- **Branches**: the type of `if`/`when`/`?:` is the expected type if there is one,
+  otherwise the common type of the branches: identical types, `T` and `null` →
+  `T?`, `T` and `nothing` → `T`, untyped constants unified first. If none exists,
+  E0208.
+- **Expression-bodied functions**: an unexported function `func f(...) = e` without
+  a result type gets the type of `e` (untyped constants take their default
+  type, as for `:=`). It is inferred on demand, when a call or another body
+  first needs it, so declaration order does not matter. A result that depends
+  on itself (`func f(n: int) = if n == 0 { 0 } else { f(n - 1) }`), a fallible body,
+  and a body yielding several values must declare the result (E0208), and so
+  must every exported function ([language.md §3.2](language.md#32-functions-v01)).
+- **Generic calls**: type arguments of generic Go functions are inferred by
+  unification of parameter types with argument types, then with the expected
+  result type. Explicit type arguments are given in full
+  (`errors.AsType[*NotFound](err)`, `pgx.RowToStructByName[User]`, §10).
+
+## 10. Generics
+
+**[v0.1]** Calling generic Go functions and using instantiated generic Go types
+(`slices.Contains(xs, x)`, `atomic.Pointer[Config]`). Instantiation and
+constraint satisfaction are delegated to `go/types` (`types.Instantiate` with
+validation). Type arguments are inferred from the arguments (and through a
+defined function type's underlying signature, as Go does), or given explicitly
+and in full: `errors.AsType[*NotFound](err)` calls, and
+`pgx.RowToStructByName[User]` is a function value; both lower to `f[T]`. A
+result whose type is a bare type parameter bound to a nil-able type is a
+platform type (`errors.AsType[*E]` returns nil when it fails).
+
+The parser reads `x[A]` as an index expression; the checker decides, as
+`go/types` does, that it is an instantiation when `x` names a generic function
+or type (Lyth or Go), and then reads `A` as a type (`*E`, `pkg.T`, `T?`,
+`Page[int]`). `x[A, B]` is always an instantiation.
+
+**[v0.1]** Declaring generic functions, structs, and interfaces:
+`func maxOf[T: cmp.Ordered](a: T, b: T): T`, `struct Page[T] { Items: []T }`,
+`interface Container[T] { Get(): T }`. The constraint follows a colon, as in
+every Lyth name-and-type pair; Go's `[T cmp.Ordered]` is E0008 with the edit
+that inserts it. Generic declarations lower 1:1 to
+Go generics, so Lyth inherits Go's implementation model (GC-shape stenciling)
+and its limits. See [ADR 0028](../adr/0028-generic-declarations.md).
+
+- **Constraints** are interfaces: `any` (the default: `[T]` means
+  `[T: any]`), `comparable`, Go constraints such as `cmp.Ordered`, and Lyth or
+  Go method interfaces (`T: fmt.Stringer`). `comparable` and type-set
+  interfaces can only constrain (E0216). Satisfaction is Go's, checked by `go/types` at each
+  instantiation (E0213).
+- **Operations** on a value of type `T` are the ones its constraint allows:
+  `==` with `comparable`, `<` and `+` when every type of the constraint's
+  type set supports them (`cmp.Ordered`), and the constraint's methods.
+- **Inference**: type arguments come from the arguments, the expected result
+  type (`z: int = zero()`), and lambda results (`mapAll(xs) { "#${it}" }`
+  binds `R` to `string`); the receiver comes first for extension functions.
+  A struct's come from its fields at construction. When inference cannot
+  bind a type parameter, give all type arguments: `zero[string]()`. The
+  generated call names them only where Go cannot infer them.
+- **Zero values**: `z: T` is Go's zero value of the type argument, also
+  for type arguments without a Lyth zero value (a nil `*User`). Generic code
+  returns it only beside a flag or an error, as Go code does:
+  `func []T.Find[T](match: (T) -> bool): (T, bool)`.
+- **Methods** of a generic struct name its type parameters in the receiver
+  (`func Page[T].First(): T`); they cannot add their own (Go has no generic
+  methods), which generic extension functions replace. An instance's members
+  have the type arguments substituted (`Page[User].Items` is `[]User`).
+- **Not yet**: `T?` for a type parameter (E0407), named arguments and default
+  values on generic functions (E0601), generic type aliases, and declaring
+  type-set constraints.
+
+## 11. Interfaces and method sets **[v0.1]**
+
+Method sets follow Go: the method set of `T` contains value-receiver methods,
+and `*T` contains both. A Lyth type satisfies an interface when its lowered Go
+type does (decided by `go/types.Implements`) *and* the Lyth signatures agree on
+nullability and fallibility. A value used as an interface it does not satisfy
+is a type mismatch (E0201) whose note names the missing method and the reason:
+missing, wrong signature, pointer receiver, or a name that differs only in case. A struct can declare
+the interfaces it implements (`struct Circle : Shape`,
+[language.md §3.3](language.md#33-structs-v01)); a declaration that does not
+hold is E0212 at the declaration, naming the method and the signature the
+interface needs.
+
+## 12. Display of types in diagnostics **[v0.1]**
+
+Diagnostics always print Lyth types, which use Go's spelling wherever Go has
+the type: `int64`, `map[string]int`, `chan int`, `[]User`. Lyth's own forms
+print in Lyth: `(string) -> int throws`, not `func(string) (int, error)`;
+nullable types as `*User?`; untyped constants as `untyped int`; the types of
+`null` and of diverging expressions as `null` and `nothing`. Platform
+types print as `*User!` (`error!`) with a one-time explanatory note. Go-package types are
+qualified by their package name (`http.Request`). Verbose mode adds the Go
+spelling for interop debugging.

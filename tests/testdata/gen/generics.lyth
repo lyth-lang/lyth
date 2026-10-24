@@ -1,0 +1,28 @@
+import "cmp"
+import "lyth/coll"
+
+// A generic function: Go infers T at each call.
+func MaxOf[T: cmp.Ordered](a: T, b: T): T = if a > b { a } else { b }
+
+// A generic struct and its methods.
+struct Page[T] {
+    Items: []T
+    Total: int
+}
+
+func Page[T].Empty(): bool = len(Items) == 0
+
+// An extension function is a Go function taking the receiver first.
+func []T.Second[T](): T = self[1]
+
+struct Todo {
+    Title: string
+    Done: bool
+}
+
+func OpenTitles(todos: []Todo): Page[string] {
+    open := todos.Filter { !it.Done }.Map { it.Title }
+    return Page(Items = open, Total = len(open))
+}
+
+func Highest(xs: []int): int = MaxOf(xs[0], xs.Second())

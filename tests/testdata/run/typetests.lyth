@@ -1,0 +1,173 @@
+import "errors"
+import "fmt"
+import "strconv"
+import "time"
+
+interface Shape {
+    Area(): float64
+}
+
+struct Circle {
+    R: float64
+}
+
+func Circle.Area(): float64 = 3 * R * R
+
+struct Square {
+    Side: float64
+}
+
+func Square.Area(): float64 = Side * Side
+
+struct NotFound {
+    Key: string
+}
+
+func *NotFound.Error(): string = "not found: ${Key}"
+
+// Type aliases name existing types; they do not create new ones.
+typealias Transform = (int) -> int
+typealias Millis = time.Duration
+
+func twice(f: Transform, x: int): int = f(f(x))
+
+var fallback: Shape = Square(Side = 1)
+
+func describe(s: Shape): string {
+    if s is Circle {
+        return "circle r=${s.R}"
+    }
+    if s is Square {
+        return "square"
+    }
+    return "other"
+}
+
+func explain(err: error): string {
+    if err !is *NotFound {
+        return "other: ${err.Error()}"
+    }
+    return "missing ${err.Key}"
+}
+
+func onlyCheck(err: error): bool {
+    if err !is *NotFound {
+        return false
+    }
+    return true
+}
+
+func classify(x: any): string = when x {
+    is int -> "int ${x + 1}"
+    is string -> "string of ${len(x)}"
+    is Circle, is Square -> "shape"
+    else -> "unknown"
+}
+
+func kind(x: any): string = when x {
+    is int -> "number"
+    else -> "other"
+}
+
+func mixed(x: any): string = when x {
+    "zero" -> "the word zero"
+    is string -> "a string: ${x}"
+    !is int -> "not an int"
+    else -> "an int"
+}
+
+var calls = 0
+
+func parse(s: string): int throws {
+    calls++
+    return strconv.Atoi(s)?
+}
+
+func pick(s: string): string throws {
+    return when {
+        s == "" -> "empty"
+        parse(s)? > 10 -> "big"
+        else -> "small"
+    }
+}
+
+func main() {
+    println(describe(Circle(R = 2)), describe(Square(Side = 3)))
+    println(explain(&NotFound(Key = "k")), explain(errors.New("boom")))
+    println(onlyCheck(&NotFound(Key = "k")), onlyCheck(errors.New("x")))
+
+    // is as a value, !is in a condition.
+    sh: Shape = Circle(R = 1)
+    isCircle := sh is Circle
+    println(isCircle, sh !is Square)
+
+    // as succeeds or panics; as? yields null.
+    c := sh as Circle
+    println(c.R)
+    sq := sh as? Square
+    println(sq == null, sq?.Side ?: -1.0)
+    asCircle := sh as? Circle
+    println(asCircle?.R)
+    err: error = &NotFound(Key = "x")
+    nf := err as? *NotFound
+    println(nf?.Key)
+
+    // when with is: a type switch.
+    println(classify(41), classify("abc"), classify(Square(Side = 1)), classify(1.5))
+    println(kind(1), kind("x"))
+    println(mixed("zero"), mixed("hi"), mixed(2.5), mixed(7))
+
+    // when with a binding.
+    label := when s := fallback {
+        is Circle -> "circle ${s.R}"
+        is Square -> "square ${s.Side}"
+        else -> "?"
+    }
+    println(label)
+
+    // A local copy of a package-level variable as the subject: package
+    // variables can change, so only the copy smart-casts.
+    fb := fallback
+    when fb {
+        is Square -> println("fallback side", fb.Side)
+        else -> println("fallback other")
+    }
+
+    // A narrowed value captured by a lambda.
+    if sh is Circle {
+        area := { -> sh.Area() + sh.R }
+        println(area())
+    } else {
+        println("no circle", sh.Area())
+    }
+
+    // A condition needing statements runs only when reached.
+    println(pick("") catch { "error" }, calls)
+    println(pick("42") catch { "error" }, calls)
+    println(pick("x") catch { "error" }, calls)
+
+    println(twice({ x -> x * 3 }, 2))
+    d: Millis = 1500 * time.Millisecond
+    println(d, fmt.Sprintf("%T", d))
+}
+
+// Output:
+// circle r=2 square
+// missing k other: boom
+// true false
+// true true
+// 1
+// true -1
+// 1
+// x
+// int 42 string of 3 shape unknown
+// number other
+// the word zero a string: hi not an int an int
+// square 1
+// fallback side 1
+// 4
+// empty 0
+// big 1
+// error 2
+// 18
+// 1.5s time.Duration

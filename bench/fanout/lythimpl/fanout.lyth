@@ -1,0 +1,40 @@
+// Package lythimpl is the Lyth version of the fanout (concurrency) workload.
+package lythimpl
+
+import "context"
+import "crypto/sha256"
+import "errors"
+import "sync/atomic"
+import "golang.org/x/sync/errgroup"
+
+// ErrItem is returned for the item at index failAt.
+var ErrItem = errors.New("item failed")
+
+func work(s: string): byte {
+    b := []byte(s)
+    sum: [32]byte
+    for _ in 0..<10 {
+        sum = sha256.Sum256(b)
+        b = sum[:]
+    }
+    return sum[0]
+}
+
+// ProcessAll hashes every item with at most limit goroutines. The first
+// failure cancels the remaining work.
+func ProcessAll(ctx: context.Context, items: []string, limit: int, failAt: int): int64 throws {
+    g, gctx := errgroup.WithContext(ctx)
+    g.SetLimit(limit)
+    total: atomic.Int64
+    for i, item in items {
+        g.Go {
+            gctx.Err()?
+            if i == failAt {
+                throw ErrItem
+            }
+            total.Add(int64(work(item)))
+        }
+    }
+    g.Wait()?
+    return total.Load()
+}

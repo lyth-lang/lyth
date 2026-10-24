@@ -1,0 +1,43 @@
+import "log/slog"
+import "net/http"
+import "runtime/debug"
+import "time"
+
+// statusRecorder remembers the status code a handler writes.
+struct statusRecorder {
+    w: http.ResponseWriter
+    status: int
+}
+
+func *statusRecorder.Header(): http.Header = w.Header()
+
+func *statusRecorder.Write(b: []byte): int throws = w.Write(b)?
+
+func *statusRecorder.WriteHeader(code: int) {
+    status = code
+    w.WriteHeader(code)
+}
+
+// Unwrap gives http.ResponseController access to the underlying writer.
+func *statusRecorder.Unwrap(): http.ResponseWriter = w
+
+// logRequests logs one line per request.
+func logRequests(log: *slog.Logger, next: http.Handler): http.Handler = http.HandlerFunc({ w, r ->
+    start := time.Now()
+    rec := &statusRecorder(w = w, status = http.StatusOK)
+    next.ServeHTTP(rec, r)
+    log.InfoContext(r.Context(), "request", "method", r.Method, "path", r.URL.Path,
+        "status", rec.status, "duration", time.Since(start))
+})
+
+// recoverer turns a panicking handler into a logged 500 response.
+func recoverer(log: *slog.Logger, next: http.Handler): http.Handler = http.HandlerFunc({ w, r ->
+    defer {
+        v := recover()
+        if v != null && v != http.ErrAbortHandler {
+            log.ErrorContext(r.Context(), "panic", "value", v, "stack", string(debug.Stack()))
+            writeJSON(w, http.StatusInternalServerError, internalError())
+        }
+    }
+    next.ServeHTTP(w, r)
+})

@@ -1,0 +1,97 @@
+// nilinterface checks that a null pointer or optional value converted to a
+// nullable interface is a nil interface, not Go's non-nil interface holding
+// a nil pointer, and that optional values go in unboxed.
+import "flag"
+import "fmt"
+
+struct NotFound {
+    Key: string
+}
+
+func *NotFound.Error(): string = "not found: ${Key}"
+
+interface Shape {
+    Area(): float64
+}
+
+struct Square {
+    Side: float64
+}
+
+func *Square.Area(): float64 = Side * Side
+
+struct Result {
+    Err: error?
+    Shape: Shape?
+}
+
+func missing(key: string): *NotFound? = if key == "" { &NotFound(Key = "empty") } else { null }
+
+func square(side: float64): *Square? = if side > 0 { &Square(Side = side) } else { null }
+
+// Without the conversion, check(missing("x")) would call Error on a nil pointer.
+func check(err: error?): string = if err == null { "ok" } else { err.Error() }
+
+func asError(key: string): error? = missing(key)
+
+func asErrorThrows(key: string): error? throws {
+    if key == "fail" {
+        throw fmt.Errorf("failed")
+    }
+    return missing(key)
+}
+
+func report(err: error? = missing("x")): string = check(err)
+
+func describe(v: any?): string = when {
+    v == null -> "null"
+    v is int -> "Int ${v}"
+    v is string -> "String ${v}"
+    v is Square -> "Square ${v.Side}"
+    else -> "other"
+}
+
+func main() throws {
+    // Locals, struct fields, and list elements.
+    e: error? = missing("x")
+    r := Result(Err = missing("x"), Shape = square(0))
+    errs: []error? = [missing(""), missing("x")]
+    println(e == null, r.Err == null, r.Shape == null, errs[0] == null, errs[1] == null)
+
+    // Arguments, results, and default values.
+    println(check(missing("x")), check(missing("")))
+    println(asError("x") == null, asError("") == null, asErrorThrows("x")? == null, report())
+
+    // Optional values go in unboxed.
+    n: int? = 42
+    none: int? = null
+    name: string? = "lyth"
+    sq: Square? = Square(Side = 3)
+    println(describe(n), describe(none), describe(name), describe(sq))
+
+    // when values, lambdas, and channels.
+    pick: error? = when {
+        e == null -> missing("x")
+        else -> missing("")
+    }
+    f: (float64) -> Shape? = { square(it) }
+    ch := make(chan error?, 1)
+    ch.send(missing("x"))
+    println(pick == null, f(0) == null, f(2) == null, ch.receive() == null)
+
+    // A Go pointer of unknown nullability converts the same way.
+    unknown: any? = flag.Lookup("no-such-flag")
+    println(unknown == null)
+
+    // Go parameters take the value as Go code would pass it (ADR 0017).
+    println(fmt.Sprint(none))
+}
+
+// Output:
+// true true true false true
+// ok not found: empty
+// true false true ok
+// Int 42 null String lyth Square 3
+// true true false true
+// true
+// <nil>

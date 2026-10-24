@@ -1,0 +1,530 @@
+goos: darwin
+goarch: arm64
+pkg: lythbench/errprop
+cpu: Apple M1 Pro
+BenchmarkChain/depth=1/fail=false-10         	100000000	         5.145 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain/depth=1/fail=true-10          	135580491	         4.366 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain/depth=10/fail=false-10        	33949852	        18.18 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain/depth=10/fail=true-10         	45046028	        13.63 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChainWrapped/depth=10/fail=false-10 	36870796	        17.14 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChainWrapped/depth=10/fail=true-10  	  426766	      1281 ns/op	     952 B/op	      20 allocs/op
+BenchmarkFallback-10                         	47183872	        13.04 ns/op	       0 B/op	       0 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/fanout
+cpu: Apple M1 Pro
+BenchmarkProcessAll/ok-10 	     314	   1865790 ns/op	  177179 B/op	    4006 allocs/op
+BenchmarkProcessAll/fail-early-10         	     442	   1229310 ns/op	  176316 B/op	    4005 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/httpapi
+cpu: Apple M1 Pro
+BenchmarkHandler-10          	   32935	     22822 ns/op	   11587 B/op	      71 allocs/op
+BenchmarkServerLatency-10    	    7635	     78406 ns/op	        72.00 p50-µs	       101.0 p90-µs	       144.0 p99-µs	   13365 B/op	     137 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/index
+cpu: Apple M1 Pro
+BenchmarkBuildIndex-10    	     565	   1130584 ns/op	  694310 B/op	    3331 allocs/op
+BenchmarkSummaries-10     	    1489	    414345 ns/op	  366171 B/op	    2902 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/jsoncodec
+cpu: Apple M1 Pro
+BenchmarkDecodeTotal/items=5-10         	  107592	      6305 ns/op	  65.67 MB/s	    1192 B/op	      28 allocs/op
+BenchmarkDecodeTotal/items=50-10        	   18471	     44088 ns/op	  60.42 MB/s	    5880 B/op	      76 allocs/op
+BenchmarkRoundTrip-10                   	   10000	     73077 ns/op	  36.45 MB/s	    8702 B/op	      78 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/logagg
+cpu: Apple M1 Pro
+BenchmarkAggregate-10    	     430	   1176658 ns/op	  800786 B/op	   10009 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/pgapi
+cpu: Apple M1 Pro
+BenchmarkFetchJSON-10    	   10602	     47553 ns/op	     712 B/op	      13 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/errprop
+cpu: Apple M1 Pro
+BenchmarkChain/depth=1/fail=false-10         	134484332	         4.395 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain/depth=1/fail=true-10          	100000000	         7.304 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain/depth=10/fail=false-10        	19403137	        37.47 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain/depth=10/fail=true-10         	43339292	        15.58 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChainWrapped/depth=10/fail=false-10 	17308586	        32.26 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChainWrapped/depth=10/fail=true-10  	  235408	      3414 ns/op	     952 B/op	      20 allocs/op
+BenchmarkFallback-10                         	39458865	        26.03 ns/op	       0 B/op	       0 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/fanout
+cpu: Apple M1 Pro
+BenchmarkProcessAll/ok-10 	     214	   2815438 ns/op	  177648 B/op	    4007 allocs/op
+BenchmarkProcessAll/fail-early-10         	     295	   1721269 ns/op	  176314 B/op	    4005 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/httpapi
+cpu: Apple M1 Pro
+BenchmarkHandler-10          	   37308	     16034 ns/op	   11587 B/op	      71 allocs/op
+BenchmarkServerLatency-10    	    7171	     82841 ns/op	        77.00 p50-µs	       105.0 p90-µs	       188.0 p99-µs	   13301 B/op	     137 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/index
+cpu: Apple M1 Pro
+BenchmarkBuildIndex-10    	     637	    949934 ns/op	  694309 B/op	    3331 allocs/op
+BenchmarkSummaries-10     	    1453	    416948 ns/op	  366171 B/op	    2902 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/jsoncodec
+cpu: Apple M1 Pro
+BenchmarkDecodeTotal/items=5-10         	  120260	      4963 ns/op	  83.41 MB/s	    1192 B/op	      28 allocs/op
+BenchmarkDecodeTotal/items=50-10        	   20966	     28574 ns/op	  93.23 MB/s	    5880 B/op	      76 allocs/op
+BenchmarkRoundTrip-10                   	   17928	     33603 ns/op	  79.28 MB/s	    8701 B/op	      78 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/logagg
+cpu: Apple M1 Pro
+BenchmarkAggregate-10    	     580	   1034167 ns/op	  800788 B/op	   10009 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/pgapi
+cpu: Apple M1 Pro
+BenchmarkFetchJSON-10    	   24852	     25942 ns/op	     712 B/op	      13 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/errprop
+cpu: Apple M1 Pro
+BenchmarkChain/depth=1/fail=false-10         	142312514	         4.213 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain/depth=1/fail=true-10          	142934054	         4.197 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain/depth=10/fail=false-10        	38053861	        15.78 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain/depth=10/fail=true-10         	46412388	        12.88 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChainWrapped/depth=10/fail=false-10 	38114394	        15.78 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChainWrapped/depth=10/fail=true-10  	  474824	      1261 ns/op	     952 B/op	      20 allocs/op
+BenchmarkFallback-10                         	47434890	        12.65 ns/op	       0 B/op	       0 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/fanout
+cpu: Apple M1 Pro
+BenchmarkProcessAll/ok-10 	     367	   1657459 ns/op	  177028 B/op	    4006 allocs/op
+BenchmarkProcessAll/fail-early-10         	     524	   1104482 ns/op	  176342 B/op	    4005 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/httpapi
+cpu: Apple M1 Pro
+BenchmarkHandler-10          	   36547	     16472 ns/op	   11587 B/op	      71 allocs/op
+BenchmarkServerLatency-10    	    7453	     78667 ns/op	        71.00 p50-µs	       103.0 p90-µs	       171.0 p99-µs	   13250 B/op	     137 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/index
+cpu: Apple M1 Pro
+BenchmarkBuildIndex-10    	     655	    907336 ns/op	  694299 B/op	    3331 allocs/op
+BenchmarkSummaries-10     	    1492	    390517 ns/op	  366167 B/op	    2902 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/jsoncodec
+cpu: Apple M1 Pro
+BenchmarkDecodeTotal/items=5-10         	  120813	      4771 ns/op	  86.78 MB/s	    1192 B/op	      28 allocs/op
+BenchmarkDecodeTotal/items=50-10        	   21657	     27753 ns/op	  95.99 MB/s	    5880 B/op	      76 allocs/op
+BenchmarkRoundTrip-10                   	   18584	     32840 ns/op	  81.12 MB/s	    8699 B/op	      78 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/logagg
+cpu: Apple M1 Pro
+BenchmarkAggregate-10    	     615	    988948 ns/op	  800796 B/op	   10009 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/pgapi
+cpu: Apple M1 Pro
+BenchmarkFetchJSON-10    	   22435	     25126 ns/op	     712 B/op	      13 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/errprop
+cpu: Apple M1 Pro
+BenchmarkChain/depth=1/fail=false-10         	142975011	         4.209 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain/depth=1/fail=true-10          	135486030	         4.854 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain/depth=10/fail=false-10        	34681030	        17.18 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain/depth=10/fail=true-10         	46388762	        18.41 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChainWrapped/depth=10/fail=false-10 	35188275	        16.96 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChainWrapped/depth=10/fail=true-10  	  344023	      2450 ns/op	     952 B/op	      20 allocs/op
+BenchmarkFallback-10                         	45958962	        14.49 ns/op	       0 B/op	       0 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/fanout
+cpu: Apple M1 Pro
+BenchmarkProcessAll/ok-10 	     337	   1722451 ns/op	  177122 B/op	    4006 allocs/op
+BenchmarkProcessAll/fail-early-10         	     477	   1262681 ns/op	  176302 B/op	    4005 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/httpapi
+cpu: Apple M1 Pro
+BenchmarkHandler-10          	   29874	     19052 ns/op	   11587 B/op	      71 allocs/op
+BenchmarkServerLatency-10    	    7870	     73525 ns/op	        67.00 p50-µs	        92.00 p90-µs	       178.0 p99-µs	   13274 B/op	     137 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/index
+cpu: Apple M1 Pro
+BenchmarkBuildIndex-10    	     682	    876882 ns/op	  694308 B/op	    3331 allocs/op
+BenchmarkSummaries-10     	    1526	    388779 ns/op	  366168 B/op	    2902 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/jsoncodec
+cpu: Apple M1 Pro
+BenchmarkDecodeTotal/items=5-10         	  123948	      4861 ns/op	  85.16 MB/s	    1192 B/op	      28 allocs/op
+BenchmarkDecodeTotal/items=50-10        	   21428	     28028 ns/op	  95.05 MB/s	    5880 B/op	      76 allocs/op
+BenchmarkRoundTrip-10                   	   18250	     32830 ns/op	  81.14 MB/s	    8700 B/op	      78 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/logagg
+cpu: Apple M1 Pro
+BenchmarkAggregate-10    	     608	    975610 ns/op	  800788 B/op	   10009 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/pgapi
+cpu: Apple M1 Pro
+BenchmarkFetchJSON-10    	   24380	     24549 ns/op	     712 B/op	      13 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/errprop
+cpu: Apple M1 Pro
+BenchmarkChain/depth=1/fail=false-10         	143223300	         4.200 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain/depth=1/fail=true-10          	142352764	         4.213 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain/depth=10/fail=false-10        	37898725	        15.83 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain/depth=10/fail=true-10         	46237874	        13.03 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChainWrapped/depth=10/fail=false-10 	38347233	        15.88 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChainWrapped/depth=10/fail=true-10  	  486860	      1203 ns/op	     952 B/op	      20 allocs/op
+BenchmarkFallback-10                         	47639683	        12.65 ns/op	       0 B/op	       0 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/fanout
+cpu: Apple M1 Pro
+BenchmarkProcessAll/ok-10 	     417	   1421859 ns/op	  176974 B/op	    4006 allocs/op
+BenchmarkProcessAll/fail-early-10         	     657	    924692 ns/op	  176306 B/op	    4005 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/httpapi
+cpu: Apple M1 Pro
+BenchmarkHandler-10          	   40334	     14794 ns/op	   11587 B/op	      71 allocs/op
+BenchmarkServerLatency-10    	    8262	     71280 ns/op	        68.00 p50-µs	        82.00 p90-µs	       149.0 p99-µs	   13341 B/op	     137 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/index
+cpu: Apple M1 Pro
+BenchmarkBuildIndex-10    	     670	    875535 ns/op	  694310 B/op	    3331 allocs/op
+BenchmarkSummaries-10     	    1516	    390601 ns/op	  366171 B/op	    2902 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/jsoncodec
+cpu: Apple M1 Pro
+BenchmarkDecodeTotal/items=5-10         	  122421	      4789 ns/op	  86.45 MB/s	    1192 B/op	      28 allocs/op
+BenchmarkDecodeTotal/items=50-10        	   20628	     28574 ns/op	  93.23 MB/s	    5880 B/op	      76 allocs/op
+BenchmarkRoundTrip-10                   	   18756	     31997 ns/op	  83.26 MB/s	    8699 B/op	      78 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/logagg
+cpu: Apple M1 Pro
+BenchmarkAggregate-10    	     614	    965878 ns/op	  800789 B/op	   10009 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/pgapi
+cpu: Apple M1 Pro
+BenchmarkFetchJSON-10    	   23827	     23588 ns/op	     712 B/op	      13 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/errprop
+cpu: Apple M1 Pro
+BenchmarkChain/depth=1/fail=false-10         	145739827	         4.114 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain/depth=1/fail=true-10          	145140865	         4.127 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain/depth=10/fail=false-10        	39104294	        15.40 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain/depth=10/fail=true-10         	48307070	        12.53 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChainWrapped/depth=10/fail=false-10 	39450325	        15.39 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChainWrapped/depth=10/fail=true-10  	  492133	      1163 ns/op	     952 B/op	      20 allocs/op
+BenchmarkFallback-10                         	49096152	        12.31 ns/op	       0 B/op	       0 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/fanout
+cpu: Apple M1 Pro
+BenchmarkProcessAll/ok-10 	     429	   1408468 ns/op	  176934 B/op	    4006 allocs/op
+BenchmarkProcessAll/fail-early-10         	     622	    940086 ns/op	  176303 B/op	    4005 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/httpapi
+cpu: Apple M1 Pro
+BenchmarkHandler-10          	   40992	     14533 ns/op	   11586 B/op	      71 allocs/op
+BenchmarkServerLatency-10    	    8583	     68420 ns/op	        64.00 p50-µs	        79.00 p90-µs	       139.0 p99-µs	   13257 B/op	     137 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/index
+cpu: Apple M1 Pro
+BenchmarkBuildIndex-10    	     703	    843660 ns/op	  694299 B/op	    3331 allocs/op
+BenchmarkSummaries-10     	    1587	    377097 ns/op	  366168 B/op	    2902 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/jsoncodec
+cpu: Apple M1 Pro
+BenchmarkDecodeTotal/items=5-10         	  128312	      4619 ns/op	  89.63 MB/s	    1192 B/op	      28 allocs/op
+BenchmarkDecodeTotal/items=50-10        	   21993	     27167 ns/op	  98.06 MB/s	    5880 B/op	      76 allocs/op
+BenchmarkRoundTrip-10                   	   18986	     31711 ns/op	  84.01 MB/s	    8700 B/op	      78 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/logagg
+cpu: Apple M1 Pro
+BenchmarkAggregate-10    	     622	    969656 ns/op	  800797 B/op	   10009 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/pgapi
+cpu: Apple M1 Pro
+BenchmarkFetchJSON-10    	   25554	     22840 ns/op	     712 B/op	      13 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/errprop
+cpu: Apple M1 Pro
+BenchmarkChain/depth=1/fail=false-10         	148110220	         4.072 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain/depth=1/fail=true-10          	147982671	         4.052 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain/depth=10/fail=false-10        	39476281	        15.22 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain/depth=10/fail=true-10         	48185188	        12.45 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChainWrapped/depth=10/fail=false-10 	39441465	        15.26 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChainWrapped/depth=10/fail=true-10  	  475272	      1170 ns/op	     952 B/op	      20 allocs/op
+BenchmarkFallback-10                         	49568682	        12.14 ns/op	       0 B/op	       0 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/fanout
+cpu: Apple M1 Pro
+BenchmarkProcessAll/ok-10 	     429	   1407326 ns/op	  176941 B/op	    4006 allocs/op
+BenchmarkProcessAll/fail-early-10         	     652	    976395 ns/op	  176296 B/op	    4005 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/httpapi
+cpu: Apple M1 Pro
+BenchmarkHandler-10          	   41096	     14465 ns/op	   11586 B/op	      71 allocs/op
+BenchmarkServerLatency-10    	    8601	     68507 ns/op	        65.00 p50-µs	        77.00 p90-µs	       141.0 p99-µs	   13171 B/op	     137 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/index
+cpu: Apple M1 Pro
+BenchmarkBuildIndex-10    	     706	    841994 ns/op	  694300 B/op	    3331 allocs/op
+BenchmarkSummaries-10     	    1588	    377324 ns/op	  366168 B/op	    2902 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/jsoncodec
+cpu: Apple M1 Pro
+BenchmarkDecodeTotal/items=5-10         	  129046	      4599 ns/op	  90.03 MB/s	    1192 B/op	      28 allocs/op
+BenchmarkDecodeTotal/items=50-10        	   22171	     26982 ns/op	  98.73 MB/s	    5880 B/op	      76 allocs/op
+BenchmarkRoundTrip-10                   	   19038	     31626 ns/op	  84.23 MB/s	    8697 B/op	      78 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/logagg
+cpu: Apple M1 Pro
+BenchmarkAggregate-10    	     625	    955029 ns/op	  800796 B/op	   10009 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/pgapi
+cpu: Apple M1 Pro
+BenchmarkFetchJSON-10    	   24295	     21987 ns/op	     712 B/op	      13 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/errprop
+cpu: Apple M1 Pro
+BenchmarkChain/depth=1/fail=false-10         	147904864	         4.234 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain/depth=1/fail=true-10          	143391374	         4.187 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain/depth=10/fail=false-10        	37840662	        15.89 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain/depth=10/fail=true-10         	47027931	        15.99 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChainWrapped/depth=10/fail=false-10 	35191046	        16.67 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChainWrapped/depth=10/fail=true-10  	  460790	      1303 ns/op	     952 B/op	      20 allocs/op
+BenchmarkFallback-10                         	48352161	        12.42 ns/op	       0 B/op	       0 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/fanout
+cpu: Apple M1 Pro
+BenchmarkProcessAll/ok-10 	     382	   1543954 ns/op	  177032 B/op	    4006 allocs/op
+BenchmarkProcessAll/fail-early-10         	     561	   1092218 ns/op	  176308 B/op	    4005 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/httpapi
+cpu: Apple M1 Pro
+BenchmarkHandler-10          	   38570	     15597 ns/op	   11587 B/op	      71 allocs/op
+BenchmarkServerLatency-10    	    7380	     80127 ns/op	        73.00 p50-µs	       103.0 p90-µs	       159.0 p99-µs	   13266 B/op	     137 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/index
+cpu: Apple M1 Pro
+BenchmarkBuildIndex-10    	     658	    917577 ns/op	  694310 B/op	    3331 allocs/op
+BenchmarkSummaries-10     	    1417	    416599 ns/op	  366171 B/op	    2902 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/jsoncodec
+cpu: Apple M1 Pro
+BenchmarkDecodeTotal/items=5-10         	  120142	      4892 ns/op	  84.63 MB/s	    1192 B/op	      28 allocs/op
+BenchmarkDecodeTotal/items=50-10        	   21232	     28290 ns/op	  94.17 MB/s	    5880 B/op	      76 allocs/op
+BenchmarkRoundTrip-10                   	   17973	     33486 ns/op	  79.56 MB/s	    8700 B/op	      78 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/logagg
+cpu: Apple M1 Pro
+BenchmarkAggregate-10    	     592	   1009872 ns/op	  800788 B/op	   10009 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/pgapi
+cpu: Apple M1 Pro
+BenchmarkFetchJSON-10    	   24159	     24671 ns/op	     712 B/op	      13 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/errprop
+cpu: Apple M1 Pro
+BenchmarkChain/depth=1/fail=false-10         	127622746	         4.588 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain/depth=1/fail=true-10          	143913795	         4.167 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain/depth=10/fail=false-10        	38045216	        15.81 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain/depth=10/fail=true-10         	47126430	        12.87 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChainWrapped/depth=10/fail=false-10 	37535188	        15.61 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChainWrapped/depth=10/fail=true-10  	  452620	      1267 ns/op	     952 B/op	      20 allocs/op
+BenchmarkFallback-10                         	46107589	        12.55 ns/op	       0 B/op	       0 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/fanout
+cpu: Apple M1 Pro
+BenchmarkProcessAll/ok-10 	     373	   1641686 ns/op	  177072 B/op	    4006 allocs/op
+BenchmarkProcessAll/fail-early-10         	     507	   1181939 ns/op	  176286 B/op	    4005 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/httpapi
+cpu: Apple M1 Pro
+BenchmarkHandler-10          	   38064	     16116 ns/op	   11586 B/op	      71 allocs/op
+BenchmarkServerLatency-10    	    7021	     82564 ns/op	        75.00 p50-µs	       106.0 p90-µs	       179.0 p99-µs	   13338 B/op	     137 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/index
+cpu: Apple M1 Pro
+BenchmarkBuildIndex-10    	     646	    931274 ns/op	  694309 B/op	    3331 allocs/op
+BenchmarkSummaries-10     	    1455	    410575 ns/op	  366168 B/op	    2902 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/jsoncodec
+cpu: Apple M1 Pro
+BenchmarkDecodeTotal/items=5-10         	  117787	      5013 ns/op	  82.58 MB/s	    1192 B/op	      28 allocs/op
+BenchmarkDecodeTotal/items=50-10        	   21211	     28514 ns/op	  93.43 MB/s	    5880 B/op	      76 allocs/op
+BenchmarkRoundTrip-10                   	   16857	     34782 ns/op	  76.59 MB/s	    8702 B/op	      78 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/logagg
+cpu: Apple M1 Pro
+BenchmarkAggregate-10    	     585	   1029352 ns/op	  800796 B/op	   10009 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/pgapi
+cpu: Apple M1 Pro
+BenchmarkFetchJSON-10    	   21266	     27163 ns/op	     712 B/op	      13 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/errprop
+cpu: Apple M1 Pro
+BenchmarkChain/depth=1/fail=false-10         	143633791	         4.181 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain/depth=1/fail=true-10          	143549311	         4.184 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain/depth=10/fail=false-10        	37844643	        15.79 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChain/depth=10/fail=true-10         	47218224	        12.83 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChainWrapped/depth=10/fail=false-10 	38227008	        15.67 ns/op	       0 B/op	       0 allocs/op
+BenchmarkChainWrapped/depth=10/fail=true-10  	  490369	      1240 ns/op	     952 B/op	      20 allocs/op
+BenchmarkFallback-10                         	48921349	        12.49 ns/op	       0 B/op	       0 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/fanout
+cpu: Apple M1 Pro
+BenchmarkProcessAll/ok-10 	     410	   1500124 ns/op	  176988 B/op	    4006 allocs/op
+BenchmarkProcessAll/fail-early-10         	     588	   1045819 ns/op	  176296 B/op	    4005 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/httpapi
+cpu: Apple M1 Pro
+BenchmarkHandler-10          	   40569	     14796 ns/op	   11586 B/op	      71 allocs/op
+BenchmarkServerLatency-10    	    8384	     70179 ns/op	        66.00 p50-µs	        83.00 p90-µs	       144.0 p99-µs	   13277 B/op	     137 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/index
+cpu: Apple M1 Pro
+BenchmarkBuildIndex-10    	     672	    893484 ns/op	  694308 B/op	    3331 allocs/op
+BenchmarkSummaries-10     	    1544	    394950 ns/op	  366169 B/op	    2902 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/jsoncodec
+cpu: Apple M1 Pro
+BenchmarkDecodeTotal/items=5-10         	  115755	      5002 ns/op	  82.77 MB/s	    1192 B/op	      28 allocs/op
+BenchmarkDecodeTotal/items=50-10        	   21898	     27364 ns/op	  97.35 MB/s	    5880 B/op	      76 allocs/op
+BenchmarkRoundTrip-10                   	   18824	     31801 ns/op	  83.77 MB/s	    8699 B/op	      78 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/logagg
+cpu: Apple M1 Pro
+BenchmarkAggregate-10    	     616	    974782 ns/op	  800788 B/op	   10009 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: lythbench/pgapi
+cpu: Apple M1 Pro
+BenchmarkFetchJSON-10    	   23368	     24804 ns/op	     712 B/op	      13 allocs/op
+PASS

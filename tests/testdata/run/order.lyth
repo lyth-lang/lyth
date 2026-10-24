@@ -1,0 +1,31 @@
+import "fmt"
+
+var log: []string = []
+
+func note(s: string): int {
+    log = append(log, s)
+    return len(log)
+}
+
+func mayFail(s: string): int throws {
+    log = append(log, s)
+    return len(log)
+}
+
+func combine(a: int, b: int, c: int): string = fmt.Sprintf("%d-%d-%d", a, b, c)
+
+func run(): string throws {
+    r := combine(note("a"), mayFail("b")?, note("c"))
+    ok := note("d") > 100 && mayFail("never")? > 0
+    ok2 := note("e") > 0 || mayFail("never2")? > 0
+    return "${r} ${ok} ${ok2}"
+}
+
+func main() throws {
+    println(run()?)
+    println(log)
+}
+
+// Output:
+// 1-2-3 false true
+// [a b c d e]

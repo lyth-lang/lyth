@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("struct Node A An1t!\na 00000000000000000000000")

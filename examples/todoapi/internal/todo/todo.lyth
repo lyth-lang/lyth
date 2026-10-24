@@ -1,0 +1,101 @@
+import "errors"
+import "slices"
+import "strings"
+import "time"
+import "unicode/utf8"
+
+// Todo is a task owned by one user.
+struct Todo {
+    ID: int64
+    Owner: string          `json:"-"`
+    Title: string
+    Done: bool
+    Due: time.Time?        `json:"due,omitempty"`
+    CreatedAt: time.Time   `db:"created_at"`
+    UpdatedAt: time.Time   `db:"updated_at"`
+}
+
+// NewTodo is the input for creating a todo.
+struct NewTodo {
+    Title: string?
+    Due: time.Time?
+}
+
+// Patch is the input for changing a todo: null fields stay unchanged.
+struct Patch {
+    Title: string?
+    Done: bool?
+    Due: time.Time?
+}
+
+// Filter selects one page of a user's todos, ordered by id. after is the
+// last id of the previous page.
+struct Filter {
+    Done: bool?
+    After: int64
+    Limit: int
+}
+
+const MaxTitle = 200
+const DefaultLimit = 50
+const MaxLimit = 200
+
+// ErrNotFound reports a todo that does not exist or belongs to another user;
+// callers cannot tell which.
+var ErrNotFound = errors.New("todo not found")
+
+// ValidationError reports invalid input, one problem per field.
+struct ValidationError {
+    Fields: map[string]string
+}
+
+func *ValidationError.Error(): string {
+    problems: []string = []
+    for field, problem in Fields {
+        problems = append(problems, field + " " + problem)
+    }
+    slices.Sort(problems)
+    return "invalid input: " + strings.Join(problems, "; ")
+}
+
+// Normalize validates a new todo and trims its title.
+func NewTodo.Normalize(): NewTodo throws {
+    problems: map[string]string = [:]
+    title := self.Title
+    if title == null {
+        problems["title"] = "is required"
+        throw &ValidationError(Fields = problems)
+    }
+    trimmed := checkTitle(title, problems)
+    if len(problems) > 0 {
+        throw &ValidationError(Fields = problems)
+    }
+    return NewTodo(Title = trimmed, Due = Due)
+}
+
+// Normalize validates a patch and trims its title.
+func Patch.Normalize(): Patch throws {
+    problems: map[string]string = [:]
+    out := self
+    title := self.Title
+    if title != null {
+        out.Title = checkTitle(title, problems)
+    }
+    if title == null && Done == null && Due == null {
+        problems["body"] = "must set at least one of title, done, due"
+    }
+    if len(problems) > 0 {
+        throw &ValidationError(Fields = problems)
+    }
+    return out
+}
+
+// checkTitle trims a title and records a problem if it is invalid.
+func checkTitle(title: string, problems: map[string]string): string {
+    trimmed := strings.TrimSpace(title)
+    when {
+        trimmed == "" -> problems["title"] = "must not be empty"
+        utf8.RuneCountInString(trimmed) > MaxTitle -> problems["title"] = "must be at most ${MaxTitle} characters"
+    }
+    return trimmed
+}

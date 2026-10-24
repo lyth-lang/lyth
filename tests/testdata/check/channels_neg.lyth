@@ -1,0 +1,35 @@
+func drain(done: chan bool, out: chan int, n: int) {
+    out <- n // ERROR E0008 "write out.send(n)"
+    ok := <-done // ERROR E0008 "write done.receive()"
+    small := n<-1
+    println(ok, small)
+}
+
+func directions(src: <-chan int, out: chan<- int) {
+    src.send(1) // ERROR E0209 "cannot send on <-chan int: it is receive-only"
+    src.close() // ERROR E0209 "cannot close <-chan int: it is receive-only"
+    v := out.receive() // ERROR E0209 "cannot receive from chan<- int: it is send-only"
+    out.send("x") // ERROR E0201 "string"
+    nothing := out.send(1) // ERROR E0216 "does not produce a value"
+    println(v, nothing)
+}
+
+func goSend(ch: chan int) {
+    go ch.send(1) // ERROR E0216 "use a block: go { ch.send(1) }"
+    defer ch.receive() // ERROR E0216 "use a block"
+    defer ch.close()
+}
+
+func selects(ch: chan int, n: int) {
+    select {
+        x := ch.send(1) -> println(x) // ERROR E0216 "a send has no value to bind"
+        println(n) -> {} // ERROR E0216 "a select branch must be a channel operation"
+        a, b, c := ch.receive() -> println(a, b, c) // ERROR E0210 "at most two values"
+        else -> {}
+        else -> {} // ERROR E0102 "more than one else"
+    }
+}
+
+func main() {
+    drain(make(chan bool), make(chan int, 1), 2)
+}

@@ -1,0 +1,49 @@
+import "fmt"
+import "io"
+import "net/http"
+import "net/http/httptest"
+import "time"
+
+struct Greeter {
+    Greeting: string
+}
+
+// ServeHTTP makes *Greeter an http.Handler.
+func *Greeter.ServeHTTP(w: http.ResponseWriter, r: *http.Request) {
+    _ = fmt.Fprintf(w, "%s, %s!", Greeting, r.URL.Query().Get("name"))
+}
+
+func fetch(url: string): (int, string) throws {
+    resp := http.Get(url)?
+    defer resp.Body.Close() catch {}
+    body := io.ReadAll(resp.Body)?
+    return resp.StatusCode, string(body)
+}
+
+func main() throws {
+    srv := httptest.NewServer(&Greeter(Greeting = "Hello"))
+    defer srv.Close()
+    status, text := fetch(srv.URL + "/?name=Lyth")?
+    println(status, text)
+
+    mux := http.NewServeMux()
+    mux.HandleFunc("GET /users/{id}") { w, r ->
+        w.Header().Set("Content-Type", "text/plain")
+        _ = fmt.Fprintf(w, "user %s", r.PathValue("id"))
+    }
+    srv2 := httptest.NewServer(mux)
+    defer srv2.Close()
+    status2, text2 := fetch(srv2.URL + "/users/42")?
+    println(status2, text2)
+    status3, _ := fetch(srv2.URL + "/missing")?
+    println(status3)
+
+    server := &http.Server(Addr = ":0", Handler = mux, ReadTimeout = 5 * time.Second)
+    println(server.Addr, server.ReadTimeout)
+}
+
+// Output:
+// 200 Hello, Lyth!
+// 200 user 42
+// 404
+// :0 5s

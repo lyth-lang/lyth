@@ -1,0 +1,109 @@
+import "context"
+import "sync"
+import "time"
+
+struct Job {
+    ID: int
+}
+
+// produce sends n jobs and closes the channel; a SendChan can only send.
+func produce(out: chan<- *Job, n: int) {
+    defer out.close()
+    for i in 1..n {
+        out.send(&Job(ID = i))
+    }
+}
+
+// square is a worker: it receives until jobs is closed.
+func square(jobs: <-chan *Job, results: chan<- int, wg: *sync.WaitGroup) {
+    defer wg.Done()
+    for j in jobs {
+        results.send(j.ID * j.ID)
+    }
+}
+
+// sum drains results until it is closed or ctx is canceled.
+func sum(results: <-chan int, ctx: context.Context): int {
+    total := 0
+    while true {
+        select {
+            r, ok := results.receive() -> {
+                if !ok {
+                    break
+                }
+                total += r
+            }
+            ctx.Done().receive() -> return -1
+        }
+    }
+    return total
+}
+
+func poll(ch: chan string): string {
+    select {
+        s := ch.receive() -> return s
+        else -> return "empty"
+    }
+}
+
+func offer(ch: chan<- string, s: string): bool {
+    select {
+        ch.send(s) -> return true
+        else -> return false
+    }
+}
+
+func main() {
+    // A receive from a pointer channel is nullable: a closed channel yields nil.
+    queue := make(chan *Job, 2)
+    produce(queue, 2)
+    ids := 0
+    while true {
+        job := queue.receive() ?: break
+        ids += job.ID
+    }
+    println("ids", ids)
+
+    nums := make(chan int, 1)
+    nums.send(41)
+    n := nums.receive() + 1
+    nums.close()
+    zero, open := nums.receive()
+    println(n, zero, open)
+
+    jobs := make(chan *Job)
+    results := make(chan int, 10)
+    wg := sync.WaitGroup()
+    for _ in 0..<3 {
+        wg.Add(1)
+        go { square(jobs, results, &wg) }
+    }
+    go { produce(jobs, 4) }
+    go {
+        wg.Wait()
+        results.close()
+    }
+    println("sum of squares", sum(results, context.Background()))
+
+    ctx := context.Background()
+    canceled, cancel := context.WithCancel(ctx)
+    cancel()
+    println("canceled", sum(make(chan int), canceled))
+
+    box := make(chan string, 1)
+    println(poll(box), offer(box, "a"), offer(box, "b"), poll(box))
+
+    never := make(chan int)
+    select {
+        v := never.receive() -> println("got", v)
+        time.After(5 * time.Millisecond).receive() -> println("timeout")
+    }
+}
+
+// Output:
+// ids 3
+// 42 0 false
+// sum of squares 30
+// canceled -1
+// empty true false a
+// timeout

@@ -1,0 +1,58 @@
+// lambdaerrors checks lambdas whose function type has an Error result. A
+// type written in Lyth returns the error as a value, as a fun with that type
+// does; a Go callback type returning error makes the lambda fallible.
+import "errors"
+import "io/fs"
+import "testing/fstest"
+
+struct NotFound {
+    Key: string
+}
+
+func *NotFound.Error(): string = "not found: ${Key}"
+
+func missing(key: string): *NotFound? = if key == "" { &NotFound(Key = "empty") } else { null }
+
+func validate(n: int): error? = if n < 0 { errors.New("negative") } else { null }
+
+func firstError(xs: []int, check: (int) -> error?): error? {
+    for x in xs {
+        err := check(x)
+        if err != null {
+            return err
+        }
+    }
+    return null
+}
+
+func main() throws {
+    println(firstError([1, 2], { validate(it) }) == null, firstError([1, -2], { validate(it) }))
+    lookup: (string) -> error? = { missing(it) }
+    println(lookup("x") == null, lookup(""))
+
+    // A tuple ending in Error? follows the rules of a fun with that type.
+    parse: (string) -> (int, error?) = { s ->
+        n := s.toInt()?
+        return n * 2, null
+    }
+    n, err := parse("21")
+    _, bad := parse("x")
+    println(n, err == null, bad != null)
+
+    // fs.WalkDirFunc returns error: the lambda can use ? and finishes with nil.
+    files := fstest.MapFS(["a.txt": &fstest.MapFile(Data = []byte("A"))])
+    paths: []string = []
+    fs.WalkDir(files, ".") { path, d, err ->
+        err?
+        if !d.IsDir() {
+            paths = append(paths, path)
+        }
+    }?
+    println(paths)
+}
+
+// Output:
+// true negative
+// true not found: empty
+// 42 true true
+// [a.txt]

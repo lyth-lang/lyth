@@ -1,0 +1,41 @@
+import "maps"
+
+struct User {
+    Email: string?
+    UserID: int?
+    URLPath: string?
+}
+
+func find(): string? = "x"
+
+func fields(u: User) {
+    if u.Email != null {
+        println(u.Email + "!") // ERROR E0401 "smart casts do not apply to fields; u.Email is a field"
+    }
+    if u.UserID != null {
+        println(u.UserID + 1) // ERROR E0401 "userID := u.UserID; if userID != null"
+    }
+    println(u.URLPath + "/") // ERROR E0401 "urlPath := u.URLPath"
+}
+
+func loops() {
+    for c in 3.5 { // ERROR E0209 "for loops iterate over slices, arrays, maps, strings, channels"
+        println(c)
+    }
+    for k in maps.Keys(["a": 1]) { // ERROR E0601 "slices.Collect"
+        println(k)
+    }
+}
+
+// The lambda of a call that failed to check reports only its own errors.
+func lambdas() {
+    find()?.let { println(it) } // ERROR E0205 "has no field or method let"
+    [1, 2].map { x -> x * 2 } // ERROR E0205 "has no field or method map"
+    [1].each { println(it + missing) } // ERROR E0205 "has no field or method each" // ERROR E0101 "undefined: missing"
+}
+
+func main() {
+    fields(User())
+    loops()
+    lambdas()
+}

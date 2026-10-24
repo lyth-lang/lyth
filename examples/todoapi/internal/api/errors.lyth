@@ -1,0 +1,57 @@
+import "encoding/json"
+import "errors"
+import "net/http"
+
+import "todoapi/internal/todo"
+
+// apiError is an error with an HTTP status and a stable, machine-readable
+// code.
+struct apiError {
+    status: int
+    code: string
+    message: string
+}
+
+func *apiError.Error(): string = message
+
+func badRequest(message: string): error = &apiError(status = http.StatusBadRequest, code = "bad_request", message = message)
+
+// errorResponse is the body of every error response:
+//
+//   {"error": {"code": "invalid", "message": "...", "fields": {"title": "..."}}}
+struct errorResponse {
+    Error: errorDetail
+}
+
+struct errorDetail {
+    Code: string
+    Message: string
+    Fields: map[string]string    `json:"fields,omitempty"`
+}
+
+// writeError reports err to the client. Errors outside the API contract are
+// logged and answered with a generic 500, so internals never leak.
+func *Server.writeError(w: http.ResponseWriter, r: *http.Request, err: error) {
+    ae, isAPIError := errors.AsType[*apiError](err)
+    ve, invalid := errors.AsType[*todo.ValidationError](err)
+    when {
+        isAPIError -> writeJSON(w, ae.status, errorResponse(Error = errorDetail(Code = ae.code, Message = ae.message)))
+        invalid -> writeJSON(w, http.StatusUnprocessableEntity,
+            errorResponse(Error = errorDetail(Code = "invalid", Message = "invalid input", Fields = ve.Fields)))
+        errors.Is(err, todo.ErrNotFound) -> writeJSON(w, http.StatusNotFound,
+            errorResponse(Error = errorDetail(Code = "not_found", Message = "todo not found")))
+        else -> {
+            log.ErrorContext(r.Context(), "request failed", "method", r.Method, "path", r.URL.Path, "error", err)
+            writeJSON(w, http.StatusInternalServerError, internalError())
+        }
+    }
+}
+
+func internalError(): errorResponse = errorResponse(Error = errorDetail(Code = "internal", Message = "internal server error"))
+
+func writeJSON(w: http.ResponseWriter, status: int, v: any) {
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(status)
+    // An encoding error means the client went away; nobody is left to tell.
+    json.NewEncoder(w).Encode(v) catch {}
+}
