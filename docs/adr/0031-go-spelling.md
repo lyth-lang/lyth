@@ -82,10 +82,18 @@ func string.Twice(): string = self + self  // an extension function
   member of a value.
 - Go's receiver syntax `func (s *Server) Run()` is an error with the edit
   `func *Server.Run()`.
-- The design's example declares `func Server.ListProfiles(...)`: a value
-  receiver, which is correct for a `Server` that holds a repository
-  interface. A handler that changes the server is declared
-  `func *Server.ListProfiles(...)`.
+- The receiver kind follows Go's rules, not the kinds of the fields. A value
+  receiver gets a copy of the struct: assigning its fields is E0502, but
+  calls through an interface, pointer, slice, or map field reach the data
+  the caller shares, exactly as in Go. So `func Server.ListProfiles(...)`
+  works for a handler that only calls `self.repo`; a method that changes
+  the server's own fields (a counter, a cache, a configuration) needs
+  `func *Server.M()`, and so does a type that must not be copied (one
+  holding a `sync.Mutex`, whose `Lock` already requires a pointer receiver,
+  E0504). Go's advice applies: if some methods need a pointer receiver,
+  give all methods of the type one. Map elements are not addressable, so a
+  pointer method cannot be called on `m[k]`, nor can `m[k].f` be assigned
+  (E0504, E0502).
 
 ### Variables, assignment, and constants
 ```kotlin

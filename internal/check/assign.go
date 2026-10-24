@@ -251,6 +251,13 @@ func missingMethodReason(src, dst types.Type, m *gotypes.Func, wrong bool) strin
 		return dst.String() + " is sealed: only types that declare it implement it (struct " + name + " : " + types.Base(dst).String() + ")"
 	}
 	if wrong {
+		// go/types also reports a method with a pointer receiver as wrong.
+		gs := types.Lower(src)
+		if _, isPtr := gs.Underlying().(*gotypes.Pointer); !isPtr {
+			if iface, ok := types.Lower(dst).Underlying().(*gotypes.Interface); ok && gotypes.Implements(gotypes.NewPointer(gs), iface) {
+				return "method " + m.Name() + " has a pointer receiver, so only *" + src.String() + " implements " + dst.String() + "; use &value"
+			}
+		}
 		return src.String() + " has method " + m.Name() + " with the wrong signature for " + dst.String()
 	}
 	if p, ok := types.Base(src).(*types.Named); ok && p.Decl != nil {
@@ -487,7 +494,15 @@ func (c *Checker) mutablePath(e syntax.Expr, verb string, code diag.Code) bool {
 	case *syntax.IndexExpr:
 		t := types.Base(c.info.TypeOf(x.X))
 		switch t.(type) {
-		case *types.Slice, *types.Map:
+		case *types.Map:
+			if code == diag.EAddressOfVal || code == diag.EPtrMethodVal {
+				// Go's map elements are not addressable: a map may move them.
+				c.errorf(code, x.S, "cannot %s a map element: map elements are not addressable", verb).
+					WithHint("copy it into a variable, change that, and store it back: v := %s; ...; %s = v", x.S.Text(), x.S.Text())
+				return false
+			}
+			return true
+		case *types.Slice:
 			return true
 		case *types.Pointer:
 			return true
@@ -535,6 +550,12 @@ func (c *Checker) mutablePathFor(container syntax.Expr, member, verb string) boo
 	case *syntax.CallExpr:
 		c.errorf(diag.EMutateVal, container.Span(), "cannot %s a field of a call result; store it in a variable first", verb)
 		return false
+	case *syntax.IndexExpr:
+		if _, isMap := types.Base(c.info.TypeOf(x.X)).(*types.Map); isMap {
+			c.errorf(diag.EMutateVal, container.Span(), "cannot %s %s of a map element: map elements are not addressable", verb, member).
+				WithHint("copy it into a variable, change that, and store it back: v := %s; v.%s = ...; %s = v", x.S.Text(), member, x.S.Text())
+			return false
+		}
 	}
 	return c.mutablePath(container, verb, diag.EMutateVal)
 }

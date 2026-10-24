@@ -1,0 +1,171 @@
+import "bufio"
+import "bytes"
+import "fmt"
+import "strings"
+
+struct Inner {
+    N: int
+}
+
+struct Box {
+    n: int
+    ptr: *Inner
+    items: []int
+    tags: map[string]int
+    sb: *strings.Builder
+}
+
+// A value receiver cannot assign the fields of its copy, but it reaches the
+// data that pointer, slice, and map fields share with the caller, as in Go.
+func Box.touch() {
+    self.ptr.N++
+    self.items[0] = 99
+    self.tags["x"] = 1
+    self.sb.WriteString("w")
+}
+
+func Box.N(): int = self.n
+
+func *Box.SetN(v: int) {
+    self.n = v
+}
+
+// A pointer receiver's closures, go blocks, and defers see the caller's value.
+func *Box.bumpLater(): int {
+    inc := { -> self.n++ }
+    inc()
+    defer { self.n += 10 }
+    return self.n
+}
+
+interface Getter {
+    N(): int
+}
+
+interface Setter {
+    SetN(v: int)
+}
+
+// Declared conformance through a pointer receiver: *Counter implements Setter.
+struct Counter : Setter {
+    n: int
+}
+
+func *Counter.SetN(v: int) {
+    self.n = v
+}
+
+struct Wrap[T] {
+    v: T
+}
+
+func Wrap[T].Get(): T = self.v
+
+func *Wrap[T].Put(v: T) {
+    self.v = v
+}
+
+// A value receiver on a type holding an interface: calls through the
+// interface reach the same repository, but the server's own fields are a copy.
+interface Store {
+    Add(name: string)
+    Len(): int
+}
+
+struct memStore {
+    names: []string
+}
+
+func *memStore.Add(name: string) {
+    self.names = append(self.names, name)
+}
+
+func *memStore.Len(): int = len(self.names)
+
+struct Server {
+    store: Store
+    requests: int
+}
+
+func Server.handle(name: string) {
+    self.store.Add(name)
+}
+
+func *Server.count(name: string) {
+    self.requests++
+    self.store.Add(name)
+}
+
+func main() {
+    b := Box(n = 1, ptr = &Inner(N = 1), items = [1], tags = [:], sb = &strings.Builder())
+    b.touch()
+    println(b.ptr.N, b.items[0], b.tags["x"], b.sb.String())
+
+    // A value method through a pointer; a pointer method on an addressable value.
+    p := &b
+    println(p.N())
+    b.SetN(5)
+    println(b.n, p.N())
+
+    // Copies are independent.
+    c := b
+    c.SetN(7)
+    println(b.n, c.n)
+
+    // Method sets: Box has N; *Box has N and SetN. An interface holds a copy.
+    g1: Getter = b
+    g2: Getter = p
+    s: Setter = p
+    s.SetN(9)
+    println(g1.N(), g2.N(), b.n)
+
+    println(b.bumpLater(), b.n)
+
+    ctr := &Counter(n = 0)
+    s2: Setter = ctr
+    s2.SetN(4)
+    println(ctr.n)
+
+    w := Wrap[int](v = 1)
+    w.Put(2)
+    println(w.Get())
+
+    // Methods promoted from a Go type's embedded fields: bufio.ReadWriter
+    // embeds *bufio.Reader and *bufio.Writer.
+    out := bytes.Buffer()
+    rw := bufio.NewReadWriter(bufio.NewReader(strings.NewReader("in\n")), bufio.NewWriter(&out))
+    line := rw.ReadString('\n') catch { "" }
+    rw.WriteString("go") catch {}
+    rw.Flush() catch {}
+    fmt.Println(strings.TrimSpace(line), out.String())
+
+    // A method value binds its receiver: a copy for a value method, the
+    // address for a pointer method.
+    get := b.N
+    set := b.SetN
+    set(11)
+    println(get(), b.n)
+
+    // A nullable pointer is called through ?.
+    q: *Box? = null
+    println(q?.N())
+
+    srv := Server(store = &memStore(names = []), requests = 0)
+    srv.handle("a")
+    srv.count("b")
+    println(srv.store.Len(), srv.requests)
+}
+
+// Output:
+// 2 99 1 w
+// 1
+// 5 5
+// 5 7
+// 5 9 9
+// 10 20
+// 4
+// 2
+// in go
+// 20 11
+// null
+// 2 1

@@ -1,0 +1,47 @@
+struct Box {
+    n: int
+}
+
+func Box.N(): int = self.n
+
+func *Box.SetN(v: int) {
+    self.n = v
+}
+
+interface Setter {
+    SetN(v: int)
+}
+
+// A value receiver is a copy: assigning its fields would change only the copy.
+func Box.mutate() {
+    self.n = 3 // ERROR E0502 "the method has a value receiver, so this is a copy"
+    n = 4 // ERROR E0502 "func *Box.mutate(...)"
+    self.SetN(4) // ERROR E0504 "cannot call SetN on self"
+    f := { -> self.n = 5 } // ERROR E0502 "value receiver"
+    f()
+}
+
+func *Box.reassign() {
+    f := { -> self = &Box(n = 1) } // ERROR E0501 "cannot assign to self: the receiver is read-only"
+    f()
+}
+
+func helper(): int = self.n // ERROR E0216 "self is only available inside methods"
+
+func makeBox(): Box = Box(n = 0)
+
+func main() {
+    // Only *Box has SetN.
+    s: Setter = Box(n = 1) // ERROR E0201 "method SetN has a pointer receiver, so only *Box implements Setter"
+    // Map elements are not addressable, as in Go.
+    m := ["a": Box(n = 1)]
+    m["a"].SetN(2) // ERROR E0504 "map elements are not addressable"
+    m["a"].n = 3 // ERROR E0502 "cannot assign to n of a map element"
+    p := &m["a"] // ERROR E0503 "cannot take the address of a map element"
+    m["b"] = Box(n = 2)
+    makeBox().SetN(3) // ERROR E0504 "cannot call pointer method SetN on a call result"
+    xs := [Box(n = 1)]
+    xs[0].SetN(5)
+    xs[0].n = 6
+    println(s, p, xs)
+}
