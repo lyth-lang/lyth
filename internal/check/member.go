@@ -556,7 +556,9 @@ func (c *Checker) pkgMember(e *syntax.SelectorExpr, pkg *Package) *operand {
 	return invalid(e)
 }
 
-// instantiateExpr resolves Name<Args> used in expression position as a type.
+// instantiateExpr resolves Name[Args] used in expression position: a generic
+// function of this package or another (zero[int], lib.Zero[int],
+// errors.AsType[*E]), or else a type.
 func (c *Checker) instantiateExpr(e *syntax.InstantiateExpr) *operand {
 	nt := &syntax.NamedType{Args: e.Args, S: e.S}
 	switch x := e.X.(type) {
@@ -586,8 +588,12 @@ func (c *Checker) instantiateExpr(e *syntax.InstantiateExpr) *operand {
 			c.errorf(diag.ETypeArgs, e.S, "%s does not take type arguments", nt.Name.Name)
 			return invalid(e)
 		}
-	} else if ps, ok := c.lookup(nt.Pkg.Name).(*PkgSym); ok && ps.Pkg != nil && !ps.Pkg.Lyth {
-		if _, isFunc := ps.Pkg.Go.Scope().Lookup(nt.Name.Name).(*gotypes.Func); isFunc {
+	} else if ps, ok := c.lookup(nt.Pkg.Name).(*PkgSym); ok && ps.Pkg != nil {
+		if ps.Pkg.Lyth {
+			if _, isFunc := ps.Pkg.Scope.LookupLocal(nt.Name.Name).(*FuncSym); isFunc {
+				return c.instantiateFunc(e)
+			}
+		} else if _, isFunc := ps.Pkg.Go.Scope().Lookup(nt.Name.Name).(*gotypes.Func); isFunc {
 			return c.instantiateFunc(e)
 		}
 	}
@@ -598,9 +604,9 @@ func (c *Checker) instantiateExpr(e *syntax.InstantiateExpr) *operand {
 	return &operand{mode: ModeType, typ: t}
 }
 
-// instantiateFunc checks a generic Go function with explicit type
-// arguments, called (errors.AsType<*NotFound>(err)) or used as a value
-// (pgx.RowToStructByName<User>). All type arguments must be given.
+// instantiateFunc checks a generic function with explicit type arguments,
+// called (errors.AsType[*NotFound](err), lib.Zero[int]()) or used as a value
+// (pgx.RowToStructByName[User]). All type arguments must be given.
 func (c *Checker) instantiateFunc(e *syntax.InstantiateExpr) *operand {
 	f := c.expr(e.X, nil)
 	if f.mode == ModeInvalid {
@@ -616,7 +622,7 @@ func (c *Checker) instantiateFunc(e *syntax.InstantiateExpr) *operand {
 		for _, tp := range sig.TypeParams {
 			names = append(names, tp.Name)
 		}
-		c.errorf(diag.ETypeArgs, e.S, "%s takes %d type arguments (%s), got %d", e.X.Span().Short(), len(sig.TypeParams), strings.Join(names, ", "), len(e.Args)).
+		c.errorf(diag.ETypeArgs, e.S, "%s takes %s (%s), got %d", e.X.Span().Short(), plural(len(sig.TypeParams), "type argument"), strings.Join(names, ", "), len(e.Args)).
 			WithNote("give all type arguments, or none to infer them from the call's arguments")
 		return invalid(e)
 	}

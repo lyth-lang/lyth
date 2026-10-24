@@ -588,6 +588,170 @@ func main() {
 	}
 }
 
+// TestTypeArgsAcrossPackages calls the generic functions of another Lyth
+// package with explicit type arguments (one or several, called or as a
+// value) and with inferred ones, next to its generic types and other names.
+// Wrong type arguments are reported, not resolved as types.
+func TestTypeArgsAcrossPackages(t *testing.T) {
+	files := map[string]string{
+		"lib/lib.lyth": `import "cmp"
+import "errors"
+
+interface Store {
+    Get(k: int): int
+}
+
+func Zero[T](): T {
+    z: T
+    return z
+}
+
+func Lookup[S: Store](s: S, k: int): int = s.Get(k)
+
+func Max2[T: cmp.Ordered](a: T, b: T): T = if a > b { a } else { b }
+
+func Head[T](xs: []T): T throws {
+    if len(xs) == 0 {
+        throw errors.New("empty")
+    }
+    return xs[0]
+}
+
+struct Both[A, B] {
+    First: A
+    Second: B
+}
+
+func MakeBoth[A, B](a: A, b: B): Both[A, B] = Both(First = a, Second = b)
+
+func Map[T, R](xs: []T, f: (T) -> R): []R {
+    out := make([]R, 0, len(xs))
+    for x in xs {
+        out = append(out, f(x))
+    }
+    return out
+}
+
+struct Box[T] {
+    V: T
+}
+
+func Plain(n: int): int = n * 2
+
+var Values = [10, 20, 30]
+
+const Limit = 3
+
+func hidden[T](): T {
+    z: T
+    return z
+}
+`,
+		"main.lyth": `import "fmt"
+import "targs/lib"
+
+struct good {
+    n: int
+}
+
+func good.Get(k: int): int = self.n + k
+
+func main() throws {
+    // Explicit type arguments: one or several, called or as a value.
+    fmt.Println(lib.Zero[int](), lib.Zero[string]() == "", lib.Lookup[good](good(n = 1), 2), lib.Max2[float64](1, 2.5))
+    b := lib.MakeBoth[int, string](1, "x")
+    fmt.Println(b.First + 1, b.Second + "!", lib.Map[int, string]([1, 2]) { "<${it}>" })
+    f := lib.Zero[float64]
+    g: () -> int = lib.Zero[int]
+    fmt.Println(f(), g(), lib.Head[string](["a", "b"])?, lib.Head[int]([]) catch { -1 })
+    // The same functions with inferred type arguments.
+    fmt.Println(lib.Lookup(good(n = 5), 1), lib.MakeBoth(2, true).Second, lib.Map([1, 2]) { it * 10 }, lib.Max2(3, 4))
+    // Generic types and other names of the package.
+    bx := lib.Box[int](V = 4)
+    both: lib.Both[string, int] = lib.Both[string, int](First = "a", Second = 2)
+    fmt.Println(bx.V, both.First, lib.Values[1], lib.Limit, lib.Plain(3))
+}
+`,
+	}
+	root := writeModule(t, "targs", files)
+	s := compileModule(t, root, false)
+	bin := filepath.Join(root, "app.bin")
+	if ok, err := s.GoBuild(bin, []string{"targs"}, nil); err != nil || !ok {
+		t.Fatalf("build failed: %v\n%s", err, render(s.Sink.All()))
+	}
+	out, err := exec.Command(bin).Output()
+	want := "0 true 3 2.5\n2 x! [<1> <2>]\n0 0 a -1\n6 true [10 20] 4\n4 a 20 3 6"
+	if err != nil || strings.TrimSpace(string(out)) != want {
+		t.Fatalf("output %q, err %v", out, err)
+	}
+	for _, g := range s.Packages {
+		if g.Dir.ImportPath != "targs" {
+			continue
+		}
+		for _, f := range g.Generated {
+			for _, want := range []string{
+				"lib.Zero[int]()", "lib.Lookup[good](good{n: 1}, 2)", "lib.MakeBoth[int, string](1, \"x\")",
+				"f := lib.Zero[float64]", "lib.Head[int]([]int{})", "lib.Lookup(good{n: 5}, 1)", "lib.Box[int]{V: 4}",
+			} {
+				if !strings.Contains(string(f.Code), want) {
+					t.Errorf("expected %s in the generated Go:\n%s", want, f.Code)
+				}
+			}
+		}
+	}
+
+	files["main.lyth"] = `import "targs/lib"
+
+struct bad {
+    n: int
+}
+
+struct good {
+    n: int
+}
+
+func good.Get(k: int): int = self.n + k
+
+func main() {
+    println(lib.Lookup[bad](bad(), 1))
+    println(lib.Zero[int, string]())
+    println(lib.MakeBoth[int](1, "x"))
+    println(lib.Zero[Nope]())
+    println(lib.hidden[int]())
+    println(lib.Plain[int](1))
+    println(lib.Plain[int, string](1))
+    println(lib.Lookup[good](1, 1))
+    println(lib.Zero[int](5))
+}
+`
+	root = writeModule(t, "targs", files)
+	s, err = build.Compile(&build.Config{WorkDir: root, Stdout: io.Discard, Stderr: io.Discard}, build.Target{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const allArgs = "give all type arguments, or none to infer them from the call's arguments"
+	wantDiags := []string{
+		"14: invalid type arguments for lib.Lookup; bad does not satisfy lib.Store (missing method Get)",
+		"15: lib.Zero takes 1 type argument (T), got 2; " + allArgs,
+		"16: lib.MakeBoth takes 2 type arguments (A, B), got 1; " + allArgs,
+		"17: undefined type Nope",
+		"18: hidden is not exported by package lib",
+		"19: cannot index a value of type (int) -> int",
+		"20: lib.Plain is not a generic function",
+		"21: type mismatch in argument s of lib.Lookup[good]",
+		"22: lib.Zero[int] expects 0 arguments, but 1 argument given; signature: () -> int",
+	}
+	var got []string
+	for _, d := range s.Sink.All() {
+		got = append(got, strconv.Itoa(d.Span.StartPos().Line)+": "+strings.Join(append([]string{d.Message}, d.Notes...), "; "))
+	}
+	slices.Sort(got)
+	slices.Sort(wantDiags)
+	if !slices.Equal(got, wantDiags) {
+		t.Errorf("diagnostics:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(wantDiags, "\n"))
+	}
+}
+
 // TestEnumsAndSealedAcrossPackages uses an enum and a sealed interface from
 // another package: entries are qualified Go constants, an exhaustive when
 // sees the other package's members, and only that package can add members.
