@@ -1,0 +1,37 @@
+// Edge cases of result inference from fallible lambdas and of list literals
+// typed as arrays by context.
+import "errors"
+import "strconv"
+
+func retry[T](times: int, op: () -> T throws): T throws {
+    for _ in 0..<times {
+        v := op() catch { continue }
+        return v
+    }
+    throw errors.New("gave up")
+}
+
+func check(): unit throws {}
+
+func run(): string throws {
+    a := retry(1) { throw errors.New("x") } // ERROR E0208 "cannot infer type argument T of retry"
+    b := retry(1) { check()? } // ERROR E0208 "cannot infer type argument T"
+    c := retry(1) { // ERROR E0208 "lambda returns both int and string"
+        n := strconv.Atoi("1")?
+        if n > 0 {
+            return "big"
+        }
+        n
+    }?
+    d := retry[string](1) { throw errors.New("x") }?
+    e := retry(1) { strconv.Atoi("2")? }?
+    return "${a}${b}${c}${d}${e}"
+}
+
+func arrays() {
+    arr: [3]int = [1, 2, 3]
+    short: [3]int = [1, 2] // ERROR E0201 "[3]int needs 3 elements, got 2"
+    typedShort := [3]int{1, 2}
+    println(arr == [1, 2, 3]) // ERROR E0202 "write the array literal [3]int{...}"
+    println(arr == [3]int{1, 2, 3}, short, typedShort, 1 in [1, 2])
+}

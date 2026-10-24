@@ -16,3 +16,15 @@ func Box.each(xs: []int) {
         println(self)
     }
 }
+
+func *Box.bindings(xs: []int, ch: chan int) {
+    g := { self: int -> 1 } // ERROR E0003 "self is the method receiver"
+    h := { self -> 1 } // ERROR E0003 "self is the method receiver"
+    when self := xs { // ERROR E0003 "self is the method receiver"
+        else -> println(1)
+    }
+    select {
+        self := ch.receive() -> println(1) // ERROR E0003 "self is the method receiver"
+    }
+    println(g, h)
+}

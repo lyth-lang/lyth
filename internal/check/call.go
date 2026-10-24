@@ -195,7 +195,12 @@ func (c *Checker) boundCall(e *syntax.CallExpr, sig *types.Signature, args []*sy
 		switch {
 		case trailing:
 			p = np - 1
-			if np == 0 || filled[p] {
+			if np == 0 {
+				c.errorf(diag.EArgCount, a.S, "%s takes no parameters, so it cannot take a trailing lambda", e.Fun.Span().Short())
+				ok = false
+				continue
+			}
+			if filled[p] {
 				c.errorf(diag.EArgCount, a.S, "the trailing lambda would fill parameter %s, which is already given", paramName(sig, np-1))
 				ok = false
 				continue
@@ -999,7 +1004,10 @@ func (c *Checker) builtinCall(e *syntax.CallExpr, k BuiltinKind, args []*syntax.
 		if t == nil {
 			return invalid(e)
 		}
-		if !types.IsNumeric(t) && !types.IsString(t) {
+		ordered := types.TermsAll(t, func(term types.Type) bool { return types.IsNumeric(term) || types.IsString(term) })
+		if !ordered {
+			// A type parameter is ordered when every type its constraint
+			// allows is (T: cmp.Ordered).
 			c.errorf(diag.EInvalidOp, e.S, "%s requires ordered arguments, not %s", name, t)
 			return invalid(e)
 		}

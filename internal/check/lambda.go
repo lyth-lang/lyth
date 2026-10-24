@@ -97,7 +97,9 @@ func (c *Checker) lambda(e *syntax.LambdaExpr, want types.Type) *operand {
 			fn.fallible, fn.rawTuple = true, false
 			sig = &types.Signature{Params: exp.Params, Variadic: exp.Variadic, Results: exp.Results[:n-1], Throws: true}
 		}
-		if inferResult && !fn.fallible {
+		if inferResult {
+			// A fallible lambda's inferred result is its success value
+			// (T in () -> T throws); the error stays part of the signature.
 			sig.Results = nil
 			fn.infer = true
 		}

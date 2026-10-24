@@ -1,0 +1,44 @@
+// typedlit: Go's typed literals []T{...}, [N]T{...}, [...]T{...}, map[K]V{...}
+// beside Lyth's inferred [a, b] and [k: v].
+import "encoding/json"
+
+struct Point { X: int; Y: int }
+
+func respond(v: any): string {
+    b := json.Marshal(v) catch { return "?" }
+    return string(b)
+}
+
+struct Page[T] {
+    Items: []T
+}
+
+func Pairs[K: comparable, V](k: K, v: V): map[K][]V = map[K][]V{k: []V{v, v}}
+
+func main() {
+    ids := []int64{1, 2, 3}
+    args := []any?{1, "a", true, null}
+    status := map[string]any{"status": "ok", "count": 3}
+    grid := [][]int{[1, 2], []int{3}}
+    arr := [3]int{1, 2}
+    sized := [...]string{"a", "b", "c"}
+    pts := []Point{Point(1, 2), Point(X = 3, Y = 4)}
+    nested := map[string][]Point{"a": [Point(5, 6)]}
+    empty := []string{}
+    emptyMap := map[string]int{}
+    multi := map[string]int{
+        "one": 1,
+        "two": 2,
+    }
+    for x in ([]int{7, 8}) {
+        println(x)
+    }
+    println(ids, args, len(status), grid, arr, sized, len(sized), pts, nested)
+    println(respond(empty), respond(emptyMap), respond(status), multi["two"], Pairs("k", 1.5))
+    run { println("lambda still works") }
+    inferred := [1, 2]
+    typed := []int{1, 2}
+    println(inferred == null, len(typed), Page[int](Items = []int{1}).Items)
+}
+
+func run(f: () -> unit) { f() }

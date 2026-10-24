@@ -50,7 +50,16 @@ func localConst() {
 }
 
 func headerLambda(xs: []int) {
-    if xs.Any { it > 1 } { // ERROR E0205 "has no field or method Any" // ERROR E0008 "the if header cannot end in a trailing lambda"
+    if xs.Any { it > 1 } { // ERROR E0008 "the if header cannot end in a trailing lambda"
         println(xs)
     }
+}
+
+func goLiterals() {
+    xs := []int{1, 2}
+    m := map[string]int{"a": 1}
+    p := Point{X: 1} // ERROR E0008 "write Point(X = 1)"
+    q := &Point{X: 1} // ERROR E0008 "Lyth constructs a struct by calling its type"
+    a: [2]int = [1] // ERROR E0201 "[2]int needs 2 elements, got 1"
+    println(xs, m, p, q, a)
 }

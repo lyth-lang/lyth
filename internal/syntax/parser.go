@@ -597,6 +597,212 @@ func typeParamText(tps []*TypeParam) string {
 	return strings.Join(parts, ", ")
 }
 
+// goCompositeLit reports Go's struct literal Point{X: 1} with Lyth's
+// construction call, and returns a BadExpr covering it; it returns nil when
+// the braces are not one (a trailing lambda).
+func (p *parser) goCompositeLit(x Expr) Expr {
+	name := x
+	switch g := x.(type) {
+	case *IndexExpr: // Page[int]{Items: ...}
+		name = g.X
+	case *InstantiateExpr:
+		name = g.X
+	}
+	if !isTypeNameExpr(name) || p.tok().Span.Start != x.Span().End {
+		return nil // f { ... } is a trailing lambda; Point{ needs no space
+	}
+	if p.peek(1).Kind != IDENT || p.peek(2).Kind != COLON {
+		return nil
+	}
+	// Find the closing brace; an arrow at the top level makes it a lambda.
+	open := p.pos
+	depth, end := 0, -1
+	var keys []Token
+	for i := open; i < len(p.toks) && end < 0; i++ {
+		switch t := p.toks[i]; t.Kind {
+		case LBRACE, LPAREN, LBRACK:
+			depth++
+		case RBRACE, RPAREN, RBRACK:
+			depth--
+			if depth == 0 {
+				end = i
+			}
+		case ARROW:
+			if depth == 1 {
+				return nil
+			}
+		case COLON:
+			if depth == 1 && p.toks[i-1].Kind == IDENT {
+				keys = append(keys, t)
+			}
+		case EOF:
+			return nil
+		}
+	}
+	if end < 0 {
+		return nil
+	}
+	span := x.Span().Join(p.toks[end].Span)
+	body := p.toks[open].Span.Join(p.toks[end].Span)
+	// Point{X: 1, Y: 2} -> Point(X = 1, Y = 2)
+	args := body.Text()
+	args = args[1 : len(args)-1]
+	for i := len(keys) - 1; i >= 0; i-- {
+		off := keys[i].Span.Start - body.Start - 1
+		args = args[:off] + " =" + args[off+1:]
+	}
+	repl := x.Span().Text() + "(" + strings.TrimSpace(args) + ")"
+	p.errorf(diag.EUnsupportedSyntax, span, "Lyth constructs a struct by calling its type").
+		WithEdit(span, repl, "write %s", repl)
+	p.pos = end + 1
+	return &BadExpr{S: span}
+}
+
+// endsInTypeOperand returns the type operand that ends a header expression
+// (for x in []int, if xs == []int), or nil.
+func endsInTypeOperand(e Expr) *TypeOperand {
+	switch x := e.(type) {
+	case *TypeOperand:
+		return x
+	case *BinaryExpr:
+		return endsInTypeOperand(x.Y)
+	case *InExpr:
+		return endsInTypeOperand(x.Y)
+	case *UnaryExpr:
+		return endsInTypeOperand(x.X)
+	}
+	return nil
+}
+
+// parseTypedLit parses the braces of a typed literal after its type:
+// []T{a, b}, [N]T{a, b}, [...]T{a, b}, or map[K]V{k: v}. Elements are
+// ordinary expressions; an element literal gives its own type or takes the
+// element type from context ([][]int{[1, 2]}), since an elided {1, 2} would
+// read as a lambda.
+func (p *parser) parseTypedLit(t *TypeOperand) Expr {
+	saved := p.noLambda
+	p.noLambda = 0
+	defer func() { p.noLambda = saved }()
+	_, isMap := t.Type.(*MapType)
+	switch t.Type.(type) {
+	case *MapType, *SliceType, *ArrayType:
+	default:
+		return nil
+	}
+	open := p.next() // {
+	var keys, values []Expr
+	indexed := false
+	for {
+		p.skipNL()
+		if p.at(RBRACE) || p.at(EOF) {
+			break
+		}
+		if p.at(LBRACE) && p.elidedLit() {
+			start := p.tok().Span
+			p.skipBraces()
+			p.errorf(diag.EUnsupportedSyntax, p.spanFrom(start), "an element of a typed literal is written with its own literal").
+				WithHint("write [a, b] or [k: v] (typed by the element type), Type(...) for a struct, or the full type: []int{...}")
+			values = append(values, &BadExpr{S: p.spanFrom(start)})
+		} else {
+			x := p.parseExpr()
+			p.skipNL()
+			if p.at(COLON) {
+				colon := p.next()
+				p.skipNL()
+				v := p.parseExpr()
+				if !isMap {
+					if !indexed {
+						p.errorf(diag.EUnsupportedSyntax, x.Span().Join(colon.Span), "list and array literals give every element in order; indexed elements are not supported").
+							WithHint("list the elements: %s{a, b, c}", t.Type.Span().Text())
+					}
+					indexed = true
+					x = v
+				} else {
+					keys = append(keys, x)
+					x = v
+				}
+			} else if isMap {
+				p.errorf(diag.EUnexpectedToken, p.tok().Span, "expected ':' after a map key, found %s", describe(p.tok()))
+				// Skip the rest of the literal.
+				p.pos--
+				for p.pos > 0 && p.tok().Span.Start > open.Span.Start {
+					p.pos--
+				}
+				p.skipBraces()
+				return &BadExpr{S: t.S.Join(p.toks[p.pos-1].Span)}
+			}
+			values = append(values, x)
+		}
+		p.skipNL()
+		if !p.accept(COMMA) {
+			break
+		}
+	}
+	p.skipNL()
+	end := p.expect(RBRACE, "to close the literal")
+	span := t.S.Join(end.Span)
+	if isMap {
+		return &MapLit{Type: t.Type, Keys: keys, Values: values, S: span}
+	}
+	return &ListLit{Type: t.Type, Elems: values, S: span}
+}
+
+// elidedLit reports whether the braces at the current token hold an elided
+// Go literal ({1, 2}, {X: 1}, {"a": 1}) rather than a lambda: a comma or a
+// key at the top level, and no arrow.
+func (p *parser) elidedLit() bool {
+	depth, arrow, list := 0, false, false
+	for i := p.pos; i < len(p.toks); i++ {
+		switch p.toks[i].Kind {
+		case LBRACE, LPAREN, LBRACK:
+			depth++
+		case RBRACE, RPAREN, RBRACK:
+			depth--
+			if depth == 0 {
+				return list && !arrow
+			}
+		case ARROW:
+			arrow = arrow || depth == 1
+		case COMMA, COLON:
+			list = list || depth == 1
+		case EOF:
+			return false
+		}
+	}
+	return false
+}
+
+// skipBraces skips a balanced {...}.
+func (p *parser) skipBraces() {
+	depth := 0
+	for !p.at(EOF) {
+		switch p.tok().Kind {
+		case LBRACE, LPAREN, LBRACK:
+			depth++
+		case RBRACE, RPAREN, RBRACK:
+			depth--
+		}
+		p.next()
+		if depth == 0 {
+			return
+		}
+	}
+}
+
+// selfAsName reports self where a name is being declared (a lambda
+// parameter, a when binding) and reads it as _, so parsing continues.
+func (p *parser) selfAsName() {
+	if !p.at(THIS) {
+		return
+	}
+	switch p.peek(1).Kind {
+	case ARROW, COLON, COMMA, DEFINE:
+		p.errorf(diag.EUnexpectedToken, p.tok().Span, "self is the method receiver; it cannot be declared or redeclared").
+			WithHint("choose another name")
+		p.toks[p.pos].Kind, p.toks[p.pos].Text = IDENT, "_"
+	}
+}
+
 // oldFun turns the Kotlin keyword fun, at the start of a declaration, into
 // func after reporting it.
 func (p *parser) oldFun() {
@@ -1063,7 +1269,10 @@ func (p *parser) parsePrefixType() TypeExpr {
 			elem := p.parseType()
 			return &SliceType{Elem: elem, S: p.spanFrom(start)}
 		}
-		n := p.parseExpr()
+		var n Expr
+		if !p.accept(ELLIPSIS) {
+			n = p.parseExpr()
+		}
 		p.expect(RBRACK, "after array length")
 		elem := p.parseType()
 		return &ArrayType{Len: n, Elem: elem, S: p.spanFrom(start)}
@@ -1538,7 +1747,7 @@ func (p *parser) parseFor() Stmt {
 			s.Iter = p.parseExpr()
 			p.noLambda--
 		}
-		s.Body = p.parseHeaderBody("for")
+		s.Body = p.parseHeaderBody("for", s.Iter)
 		s.S = p.spanFrom(start)
 		if s.Iter == nil {
 			s.Iter = &BadExpr{S: s.S}
@@ -1597,12 +1806,14 @@ func (p *parser) parseFor() Stmt {
 		d := p.errorf(diag.EUnexpectedToken, p.tok().Span, "expected 'in' in for loop, found %s", describe(p.tok()))
 		if p.at(DEFINE) || p.at(ASSIGN) || p.at(SEMI) {
 			d.WithHint("counting loops are written for i in 0..<n { ... }")
+		} else {
+			d.WithHint("for iterates (for x in xs { ... }); a loop on a condition is while cond { ... }")
 		}
 		for !p.at(EOF) && !p.at(LBRACE) && !p.at(NEWLINE) {
 			p.next()
 		}
 	}
-	s.Body = p.parseHeaderBody("for")
+	s.Body = p.parseHeaderBody("for", s.Iter)
 	s.S = p.spanFrom(start)
 	if s.Iter == nil {
 		s.Iter = &BadExpr{S: s.S}
@@ -1661,7 +1872,7 @@ func (p *parser) parseWhile() Stmt {
 	start := p.next().Span
 	s := &WhileStmt{}
 	s.Cond = p.parseCondition()
-	s.Body = p.parseHeaderBody("while")
+	s.Body = p.parseHeaderBody("while", s.Cond)
 	s.S = p.spanFrom(start)
 	return s
 }
@@ -1678,13 +1889,34 @@ func (p *parser) parseCondition() Expr {
 
 // parseHeaderBody parses the block after an if, while, or for header,
 // reporting a body that is not a block.
-func (p *parser) parseHeaderBody(keyword string) *Block {
+func (p *parser) parseHeaderBody(keyword string, header Expr) *Block {
+	if t := endsInTypeOperand(header); t != nil && p.at(LBRACE) {
+		// for x in []int{1, 2} { ... }: a type is never a header's value,
+		// so these braces are the literal's; the body follows them.
+		p.skipBraces()
+		lit := t.S.Join(p.toks[p.pos-1].Span)
+		p.errorf(diag.EUnsupportedSyntax, lit, "a typed literal in a %s header must be parenthesized: its { would start the body", keyword).
+			WithEdit(lit, "("+lit.Text()+")", "write (%s)", lit.Text())
+		if header != nil {
+			p.damaged = append(p.damaged, header.Span().Join(p.toks[p.pos-1].Span))
+		}
+	}
 	if p.at(LBRACE) {
 		b := p.parseBlock()
 		if p.at(LBRACE) {
 			// if xs.Any { it > 0 } { ... }: the lambda ended the header.
-			p.errorf(diag.EUnsupportedSyntax, b.S, "the %s header cannot end in a trailing lambda: its { starts the body", keyword).
-				WithHint("parenthesize the header expression: %s (xs.Any { ... }) { ... }", keyword)
+			if t := endsInTypeOperand(header); t != nil {
+				p.errorf(diag.EUnsupportedSyntax, b.S, "a typed literal in a %s header must be parenthesized: its { starts the body", keyword).
+					WithHint("parenthesize it: (%s{...})", t.Span().Text())
+			} else {
+				p.errorf(diag.EUnsupportedSyntax, b.S, "the %s header cannot end in a trailing lambda: its { starts the body", keyword).
+					WithHint("parenthesize the header expression: %s (xs.Any { ... }) { ... }", keyword)
+			}
+			if header != nil {
+				// The header was read without its lambda; checking it would
+				// only report the same mistake again.
+				p.damaged = append(p.damaged, header.Span().Join(b.S))
+			}
 			return p.parseBlock()
 		}
 		return b
@@ -1887,6 +2119,24 @@ func (p *parser) parsePostfix(x Expr) Expr {
 		case CATCH:
 			x = p.parseCatch(x)
 		case LBRACE:
+			if t, ok := x.(*TypeOperand); ok {
+				// []T{...}, [N]T{...}, map[K]V{...}: Go's typed literals. In a
+				// header the { starts the body, as in Go.
+				if p.noLambda > 0 || p.tok().Span.StartPos().Line != x.Span().EndPos().Line {
+					return x
+				}
+				if lit := p.parseTypedLit(t); lit != nil {
+					x = lit
+					continue
+				}
+				return x
+			}
+			if p.noLambda == 0 {
+				if bad := p.goCompositeLit(x); bad != nil {
+					x = bad
+					continue
+				}
+			}
 			if p.noLambda > 0 || !canTakeTrailingLambda(x) {
 				return x
 			}
@@ -2204,7 +2454,22 @@ func (p *parser) parseCollectionLit() Expr {
 		end := p.next()
 		return &MapLit{S: start.Join(end.Span)}
 	}
+	if p.at(ELLIPSIS) && p.peek(1).Kind == RBRACK {
+		// [...]T{a, b}: an array type whose length the literal gives.
+		p.pos-- // back to [
+		t := p.parsePrefixType()
+		return &TypeOperand{Type: t, S: t.Span()}
+	}
 	first := p.parseExpr()
+	if p.at(RBRACK) {
+		if k := p.peek(1); k.Span.Start == p.tok().Span.End && (startsSliceElem(k.Kind) || k.Kind == MAP || k.Kind == CHAN) {
+			// [3]int{1, 2, 3}, [4]byte(b): an array type used as an operand.
+			end := p.next()
+			elem := p.parseType()
+			t := &ArrayType{Len: first, Elem: elem, S: start.Join(end.Span).Join(elem.Span())}
+			return &TypeOperand{Type: t, S: t.S}
+		}
+	}
 	if p.at(COLON) {
 		m := &MapLit{}
 		p.next()
@@ -2239,6 +2504,7 @@ func (p *parser) parseLambda() *LambdaExpr {
 	lb := p.next() // {
 	lam := &LambdaExpr{}
 	p.skipNL()
+	p.selfAsName()
 	if p.at(ARROW) {
 		p.next()
 		lam.HasArrow = true
@@ -2285,7 +2551,7 @@ func (p *parser) parseIf() Expr {
 	start := p.next().Span // if
 	e := &IfExpr{}
 	e.Cond = p.parseCondition()
-	e.Then = nested(p, func() *Block { return p.parseHeaderBody("if") })
+	e.Then = nested(p, func() *Block { return p.parseHeaderBody("if", e.Cond) })
 	if p.peekPastNL().Kind == ELSE {
 		p.skipNL()
 		p.next()
@@ -2295,7 +2561,7 @@ func (p *parser) parseIf() Expr {
 			x := p.parseIf()
 			e.Else = &Block{Stmts: []Stmt{&ExprStmt{X: x}}, S: x.Span()}
 		} else {
-			e.Else = nested(p, func() *Block { return p.parseHeaderBody("else") })
+			e.Else = nested(p, func() *Block { return p.parseHeaderBody("else", nil) })
 		}
 	}
 	e.S = p.spanFrom(start)
@@ -2317,6 +2583,9 @@ func (p *parser) parseWhen() Expr {
 		end := p.expect(RPAREN, "to close the when subject")
 		p.errorf(diag.EUnsupportedSyntax, open.Span.Join(end.Span), "a when subject is bound with :=").
 			WithEdit(open.Span.Join(end.Span), w.Bind.Name+" := "+w.Subject.Span().Text(), "write when %s := %s { ... }", w.Bind.Name, w.Subject.Span().Text())
+	case p.at(THIS) && p.peek(1).Kind == DEFINE:
+		p.selfAsName()
+		fallthrough
 	case p.at(IDENT) && p.peek(1).Kind == DEFINE:
 		w.Bind = p.parseIdent("")
 		p.next() // :=
@@ -2374,6 +2643,7 @@ func (p *parser) parseSelect() Stmt {
 		}
 		cstart := p.tok().Span
 		sc := &SelectCase{}
+		p.selfAsName()
 		switch {
 		case p.at(ELSE):
 			p.next()

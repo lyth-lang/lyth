@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("fun*!0{0<<1E100")

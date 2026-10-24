@@ -634,9 +634,23 @@ func (fl *fnLower) destructure(s *syntax.LocalDecl, vars []*check.VarSym) {
 		}
 		return
 	}
+	if c, ok := value.(*syntax.CatchExpr); ok && fl.simpleCatch(c) {
+		// a, b := call() catch { ... }
+		names := make([]string, len(vars))
+		for i, v := range vars {
+			names[i] = fl.declareLocal(v)
+		}
+		fl.catchIntoNames(c, names, true, s.S)
+		for i, v := range vars {
+			if v != nil {
+				fl.useIfUnused(v, names[i], s.S)
+			}
+		}
+		return
+	}
 	var rhs []ast.Expr
 	if tup, ok := value.(*syntax.TupleExpr); ok {
-		rhs = fl.exprList(tup.Elems, nil) // val (a, b) = (x, y)
+		rhs = fl.exprList(tup.Elems, nil) // a, b := x, y
 	} else {
 		rhs = []ast.Expr{fl.expr(s.Value)}
 	}
@@ -690,6 +704,22 @@ func (fl *fnLower) assignStmt(s *syntax.AssignStmt) {
 // tupleAssign lowers (a, b) = (x, y) to Go's a, b = x, y and (a, b) = f()
 // to a, b = f(); Go evaluates every operand before assigning, like Lyth.
 func (fl *fnLower) tupleAssign(s *syntax.AssignStmt, lhs *syntax.TupleExpr) {
+	if names := fl.multiFallible(s.Rhs, len(lhs.Elems)); names != nil {
+		// a, b = call()? or a, b = call() catch { ... }: bind the success
+		// values to fresh variables, then assign them as Go would.
+		xs := fl.exprList(lhs.Elems, trues(len(lhs.Elems)))
+		var dst, src []ast.Expr
+		for i, n := range names {
+			if id, ok := xs[i].(*ast.Ident); ok && id.Name == "_" {
+				continue
+			}
+			dst, src = append(dst, xs[i]), append(src, ast.NewIdent(n))
+		}
+		if len(dst) > 0 {
+			fl.emit(&ast.AssignStmt{Lhs: dst, Tok: token.ASSIGN, TokPos: fl.l.pos(s.S), Rhs: src}, s.S)
+		}
+		return
+	}
 	var ops []syntax.Expr
 	var lvalue []bool
 	for _, el := range lhs.Elems {
@@ -1473,4 +1503,39 @@ func setPos(n ast.Node, pos token.Pos) {
 			n.Lbrace = pos
 		}
 	}
+}
+
+// multiFallible lowers x? or x catch { ... } of a call with n success
+// values into fresh variables and returns their names; nil when e is not
+// such an expression.
+func (fl *fnLower) multiFallible(e syntax.Expr, n int) []string {
+	var info *check.TryInfo
+	switch x := syntax.Unparen(e).(type) {
+	case *syntax.TryExpr:
+		info = fl.info.Tries[x]
+	case *syntax.CatchExpr:
+		info = fl.info.Tries[x]
+	}
+	if info == nil || len(info.Success) != n || n < 2 {
+		return nil
+	}
+	names := make([]string, n)
+	for i := range names {
+		names[i] = fl.temp("v")
+	}
+	switch x := syntax.Unparen(e).(type) {
+	case *syntax.TryExpr:
+		fl.tryInto(x, names, true, x.S)
+	case *syntax.CatchExpr:
+		fl.catchIntoNames(x, names, true, x.S)
+	}
+	return names
+}
+
+func trues(n int) []bool {
+	out := make([]bool, n)
+	for i := range out {
+		out[i] = true
+	}
+	return out
 }

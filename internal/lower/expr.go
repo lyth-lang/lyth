@@ -921,6 +921,73 @@ func (fl *fnLower) catchInto(e *syntax.CatchExpr, name string, define bool, span
 	fl.emitSynthShallow(ifs, e.CatchSpan)
 }
 
+// catchIntoNames lowers a catch of a call with several results, binding
+// them to names (declared when define is set; "_" discards). The checker
+// requires the handler to exit, since it cannot supply several values:
+//
+//	a, b, err := call
+//	if err != nil {
+//		handler
+//	}
+func (fl *fnLower) catchIntoNames(e *syntax.CatchExpr, names []string, define bool, span source.Span) {
+	info := fl.info.Tries[e]
+	if info == nil {
+		return
+	}
+	if clauses := typedChain(e.X); clauses != nil && e.Type == nil {
+		fl.catchChain(clauses, e, e.CatchSpan, names, define, fl.info.TypeOf(e), span)
+		return
+	}
+	discard := true
+	for _, n := range names {
+		discard = discard && n == "_"
+	}
+	if !define && !discard {
+		// Existing targets: bind fresh variables, then assign them.
+		tmps := make([]string, len(names))
+		for i := range names {
+			tmps[i] = fl.temp("v")
+		}
+		fl.catchIntoNames(e, tmps, true, span)
+		var lhs, rhs []ast.Expr
+		for i, n := range names {
+			if n != "_" {
+				lhs, rhs = append(lhs, ast.NewIdent(n)), append(rhs, ast.NewIdent(tmps[i]))
+			}
+		}
+		fl.emitSynth(&ast.AssignStmt{Lhs: lhs, Tok: token.ASSIGN, Rhs: rhs}, span)
+		return
+	}
+	operand := fl.expr(e.X)
+	errName := ""
+	if info.Binder != nil {
+		errName = fl.catchBinder(info.Binder, e.Body, discard)
+	} else {
+		errName = fl.errVar()
+	}
+	if discard {
+		init := &ast.AssignStmt{Lhs: append(blanks(len(info.Success)), ast.NewIdent(errName)), Tok: token.DEFINE, Rhs: []ast.Expr{operand}}
+		cond := nilCmp(ast.NewIdent(errName), token.NEQ)
+		ifs := &ast.IfStmt{If: fl.l.pos(span), Init: init, Cond: cond, Body: fl.catchHandler(e, info, nil, nil)}
+		fl.l.markSynth(cond, e.CatchSpan)
+		fl.l.mark(init, e.X.Span())
+		fl.emit(ifs, span)
+		return
+	}
+	var lhs []ast.Expr
+	for i := range info.Success {
+		name := "_"
+		if i < len(names) {
+			name = names[i]
+		}
+		lhs = append(lhs, ast.NewIdent(name))
+	}
+	lhs = append(lhs, ast.NewIdent(errName))
+	fl.emit(&ast.AssignStmt{Lhs: lhs, Tok: token.DEFINE, TokPos: fl.l.pos(span), Rhs: []ast.Expr{operand}}, span)
+	ifs := &ast.IfStmt{If: fl.l.pos(e.CatchSpan), Cond: nilCmp(ast.NewIdent(errName), token.NEQ), Body: fl.catchHandler(e, info, nil, nil)}
+	fl.emitSynthShallow(ifs, e.CatchSpan)
+}
+
 // catchHandler lowers a catch block, assigning its value, of type want, to
 // target if given. While it does, the binder's Go name is in use: nested
 // expansions must not declare it.
@@ -1012,8 +1079,11 @@ func (fl *fnLower) listLit(e *syntax.ListLit) ast.Expr {
 	t := fl.info.TypeOf(e)
 	elts := fl.exprList(e.Elems, nil)
 	var elem types.Type
-	if s, ok := types.Base(t).(*types.Slice); ok {
-		elem = s.Elem
+	switch b := types.Base(t).(type) {
+	case *types.Slice:
+		elem = b.Elem
+	case *types.Array:
+		elem = b.Elem
 	}
 	for i, x := range e.Elems {
 		elts[i] = elideType(fl.adaptConst(x, elts[i], elem), fl.info.TypeOf(x), elem)

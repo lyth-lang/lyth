@@ -1,6 +1,7 @@
 package syntax
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -125,7 +126,15 @@ func sexpr(e Expr) string {
 	case *TypeOperand:
 		return "(type)"
 	case *ListLit:
+		if e.Type != nil {
+			return fmt.Sprintf("(list %s %d)", e.Type.Span().Text(), len(e.Elems))
+		}
 		return "(list)"
+	case *MapLit:
+		if e.Type != nil {
+			return fmt.Sprintf("(map %s %d)", e.Type.Span().Text(), len(e.Keys))
+		}
+		return "(map)"
 	case *LambdaExpr:
 		return "{lambda}"
 	case *IfExpr:
@@ -166,6 +175,16 @@ func TestPrecedence(t *testing.T) {
 		{"[]byte(s)", "(call (type) s)"},
 		{"f([], x)", "(call f (list) x)"},
 		{"Box[int](1)", "(call (index Box int) 1)"},
+		{"[]int{1, 2}", "(list []int 2)"},
+		{"[]int{}", "(list []int 0)"},
+		{"[3]int{1}", "(list [3]int 1)"},
+		{"[...]string{\"a\", \"b\"}", "(list [...]string 2)"},
+		{"map[string]int{\"a\": 1, \"b\": 2,}", "(map map[string]int 2)"},
+		{"[][]int{[1], []int{2}}", "(list [][]int 2)"},
+		{"f([]int{1}) { it }", "(call f (list []int 1) {lambda})"},
+		{"run { it }", "(call run {lambda})"},
+		{"[4]byte(b)", "(call (type) b)"},
+		{"[x] == xs", "(== (list) xs)"},
 		{"Pair[int, string](1)", "(call (inst Pair) 1)"},
 		{"f[[]int](x)", "(call (index f (type)) x)"},
 		{"x is string", "(is x)"},

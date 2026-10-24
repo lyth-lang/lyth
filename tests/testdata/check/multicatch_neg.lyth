@@ -1,0 +1,13 @@
+import "strconv"
+
+func pair(a: string, b: string): (int, int) throws {
+    return strconv.Atoi(a)?, strconv.Atoi(b)?
+}
+
+func main() {
+    x, y := pair("1", "2") catch {
+        println("no value")
+    } // ERROR E0307 "this catch handler must exit"
+    a, b := pair("1", "2") catch { 0 } // ERROR E0307 "the call returns several values"
+    println(x, y, a, b)
+}

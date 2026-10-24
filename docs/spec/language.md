@@ -638,7 +638,21 @@ Identifiers, literals, `self`, parenthesized expressions, list literals
 `[a, b]`, map literals `[k: v]` (empty map `[:]`), lambdas, `if`, and `when`.
 
 Collection literals take their type from the expected type, or else from their
-elements. `[]` and `[:]` require an expected type. A list literal lowers to a Go
+elements. `[]` and `[:]` require an expected type. Where an array is expected,
+a list literal is an array literal and gives every element:
+`a: [3]int = [1, 2, 3]` lowers to `[3]int{1, 2, 3}` (a different count is
+E0201). The expected type comes from a declaration, assignment, argument,
+return, field, or enclosing literal, never from the other operand of an
+operator: `arr == [1, 2, 3]` compares with a slice (E0202, whose fix is
+`arr == [3]int{1, 2, 3}`).
+
+Typed literals spell the type, as in Go: `[]int64{1, 2}`,
+`map[string]any{"status": "ok", "count": 3}`, `[3]int{1, 2}` (the rest is
+zero), and `[...]string{"a", "b"}`. Elements are expressions typed by the
+element type (`[][]int{[1, 2]}`); Go's elided `{1, 2}` and indexed `{0: a}`
+elements are E0008, and in a header the literal must be parenthesized.
+Go's struct literal `Point{X: 1}` is E0008 with the construction call
+`Point(X = 1)` (ADR 0032). A constant map key given twice is E0102. A list literal lowers to a Go
 slice literal `[]T{...}`, which is non-nil even when empty, so it serializes as
 `[]`, not `null`.
 

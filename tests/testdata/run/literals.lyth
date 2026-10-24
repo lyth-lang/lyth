@@ -1,0 +1,32 @@
+// literals: list literals initialize arrays where an array is expected, and
+// min and max accept ordered type parameters.
+import "cmp"
+
+struct Point {
+    X: int
+    Y: int
+}
+
+func sum(a: [3]int): int = a[0] + a[1] + a[2]
+
+func Largest[T: cmp.Ordered](xs: []T): T {
+    best := xs[0]
+    for x in xs {
+        best = max(best, x)
+    }
+    return best
+}
+
+func clamp[T: cmp.Ordered](x: T, lo: T, hi: T): T = min(max(x, lo), hi)
+
+func main() {
+    a: [3]int = [1, 2, 3]
+    a = [4, 5, 6]
+    corners: [2]Point = [Point(1, 2), Point(3, 4)]
+    println(a, sum([7, 8, 9]), corners, len(corners))
+    println(Largest([3, 9, 2]), Largest(["b", "c", "a"]), clamp(15, 0, 10), clamp(1.5, 2.0, 3.0))
+}
+
+// Output:
+// [4 5 6] 24 [{1 2} {3 4}] 2
+// 9 c 10 2

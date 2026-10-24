@@ -386,6 +386,11 @@ func tagLit(tag string) *ast.BasicLit {
 // zeroValue returns the Go zero value expression of a Lyth type.
 func (l *fileLowerer) zeroValue(t types.Type) ast.Expr {
 	gt := types.Lower(t)
+	if _, ok := gt.(*gotypes.TypeParam); ok {
+		// A type parameter's underlying type is its constraint, an
+		// interface, whose zero value nil is not a value of T.
+		return &ast.StarExpr{X: &ast.CallExpr{Fun: ast.NewIdent("new"), Args: []ast.Expr{l.goTypeExpr(gt)}}}
+	}
 	switch u := gt.Underlying().(type) {
 	case *gotypes.Basic:
 		switch {
@@ -399,8 +404,6 @@ func (l *fileLowerer) zeroValue(t types.Type) ast.Expr {
 		return ast.NewIdent("nil")
 	case *gotypes.Struct, *gotypes.Array:
 		return &ast.CompositeLit{Type: l.goTypeExpr(gt)}
-	case *gotypes.TypeParam:
-		return &ast.StarExpr{X: &ast.CallExpr{Fun: ast.NewIdent("new"), Args: []ast.Expr{l.goTypeExpr(gt)}}}
 	}
 	return ast.NewIdent("nil")
 }

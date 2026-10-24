@@ -1,0 +1,29 @@
+// genericerrors: a regression test for a case that reached the Go type checker (E0902).
+import "errors"
+import "strconv"
+
+func retry[T](times: int, op: () -> T throws): T throws {
+    for _ in 0..<times {
+        v := op() catch { continue }
+        return v
+    }
+    throw errors.New("gave up")
+}
+
+func parse[T](s: string, conv: (int) -> T): T throws {
+    n := strconv.Atoi(s)?
+    return conv(n)
+}
+
+func main() {
+    println(retry(3) { 42 } catch { -1 })
+    println(retry(2) { strconv.Atoi("5")? } catch { -1 })
+    println(retry[int](2) { strconv.Atoi("x")? } catch { -1 })
+    println(parse("7") { it * 2 } catch { 0 })
+}
+
+// Output:
+// 42
+// 5
+// -1
+// 14

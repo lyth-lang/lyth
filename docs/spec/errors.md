@@ -203,6 +203,12 @@ user := repo.Find(ctx, id) catch (err) { throw err.wrap("find user ${id}") }  //
 The handler block is a plain block, not a lambda: `return` inside it returns from
 the enclosing function. The binder is optional and `_` is allowed.
 
+A call with several success values is caught when it is destructured or
+assigned: `a, b := pair() catch { return }`, `a, b = pair() catch { continue }`,
+and likewise `a, b = pair()?`. The handler cannot supply several values, so it
+must exit (E0307). It lowers to `a, b, err := pair()` and
+`if err != nil { ... }`.
+
 **Typed handlers [v0.1].** `catch (e: T)` handles only errors of type `T`, a
 non-null type that implements `error`: usually a pointer to an error struct
 (`*NotFound`) or a Go error type (`*pgconn.PgError`). It matches like
@@ -338,11 +344,13 @@ g.Wait()?
   operational one.
 - A panic inside a `catch` handler or a deferred call behaves as in Go.
 
-## 8. Errors and generics **[planned with generic declarations]**
+## 8. Errors and generics **[v0.1]**
 
 `func retry[T](n: int, op: () -> T throws): T throws` lowers to
-`func retry[T any](n int, op func() (T, error)) (T, error)`. On `throw`, the
-zero value of a type parameter is emitted as `*new(T)`. Fallibility is not a
+`func retry[T any](n int, op func() (T, error)) (T, error)`. On `throw` and
+`?`, the zero value of a type parameter is emitted as `*new(T)`. A call
+infers `T` from a fallible lambda's result as from any other lambda's:
+`retry(3) { load()? }`. Fallibility is not a
 type parameter: there is no `throws(E)` and no generic "maybe-throwing"
 abstraction. Every error is a Go `error`.
 
@@ -350,8 +358,9 @@ abstraction. Every error is a Go `error`.
 
 - `func main() throws` lowers to a Go `main` that calls the body and on error
   prints `error: <message>` to stderr and exits with status 1.
-- Test functions **[planned]** may be `throws`. A propagated error fails the test
-  with `t.Fatal(err)` and the position of the failing `?`.
+- Test functions **[v0.1]** may be `throws`. A thrown or propagated error
+  fails the test with its message, reported at the test's declaration line
+  (language.md §9).
 
 ## 10. Generated code (normative examples)
 

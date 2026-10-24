@@ -1,0 +1,32 @@
+// Go's typed literals: []T{...}, [N]T{...}, [...]T{...}, map[K]V{...}.
+
+struct Point {
+    X: int
+    Y: int
+}
+
+func main() {
+    a := []int{1, "two"} // ERROR E0201 "expected int, found string"
+    b := map[string]int{"a": "x"} // ERROR E0201 "map value"
+    c := [2]int{1, 2, 3} // ERROR E0201 "[2]int holds 2 elements; this literal gives 3"
+    d := []int{0: 1, 1: 2} // ERROR E0008 "indexed elements are not supported"
+    e := [][]int{{1, 2}} // ERROR E0008 "an element of a typed literal is written with its own literal"
+    f := []Point{{X: 1, Y: 2}} // ERROR E0008 "written with its own literal"
+    g := map[string]int{"k": 1, "k": 2} // ERROR E0102 "duplicate key"
+    h := ["k": 1, "k": 2] // ERROR E0102 "duplicate key"
+    fl := map[float64]int{1: 1, 1.0: 2} // ERROR E0102 "duplicate key 1.0"
+    an := map[any]int{1: 1, 1.0: 2, "1": 3}
+    i := map[string]int{"a" 1} // ERROR E0003 "expected ':' after a map key"
+    var2: [...]int = [1] // ERROR E0216 "[...] gives an array its length only in a typed literal"
+    p := Point{X: 1} // ERROR E0008 "write Point(X = 1)"
+    pg := Page[int]{Items: [1]} // ERROR E0008 "write Page[int](Items = [1])"
+    n := []any{null} // ERROR E0201 "any is not nullable"
+    println(a, b, c, d, e, f, g, h, fl, an, i, var2, p, pg, n)
+    for x in []int{1, 2} { // ERROR E0008 "a typed literal in a for header must be parenthesized"
+        println(x)
+    }
+}
+
+struct Page[T] {
+    Items: []T
+}

@@ -687,6 +687,19 @@ func (c *Checker) operandMismatch(e *syntax.BinaryExpr, x, y *operand) {
 		d.WithEdit(conv.Span(), target.String()+"("+conv.Span().Text()+")",
 			"Lyth never converts numbers implicitly; write %s(%s)", target, conv.Span().Short())
 	}
+	// arr == [1, 2]: an operator gives a list literal no expected type, so it
+	// is a slice; the typed literal spells the array.
+	for _, side := range []struct {
+		lit   syntax.Expr
+		other types.Type
+	}{{e.Y, xt}, {e.X, yt}} {
+		if l, ok := syntax.Unparen(side.lit).(*syntax.ListLit); ok && l.Type == nil {
+			if _, isArray := side.other.(*types.Array); isArray {
+				text := l.S.Text()
+				d.WithEdit(l.S, side.other.String()+"{"+text[1:len(text)-1]+"}", "write the array literal %s{...}", side.other)
+			}
+		}
+	}
 }
 
 // convertUntyped converts an untyped operand to target, reporting errors.
@@ -760,7 +773,14 @@ func (c *Checker) shift(e *syntax.BinaryExpr, x, y *operand) *operand {
 		c.convertUntyped(y, types.UInt, nil)
 	}
 	if x.val != nil && y.val != nil {
-		s, _ := constant.Uint64Val(y.val)
+		// An integral float constant (1e3) is an integer count; a count
+		// beyond go/types' limit for constant shifts is too large.
+		const maxShift = 1023 - 1 + 52
+		s, exact := constant.Uint64Val(constant.ToInt(y.val))
+		if !exact || s > maxShift {
+			c.errorf(diag.EOverflow, e.Y.Span(), "shift count %s is too large", y.val)
+			return invalid(e)
+		}
 		v := constant.Shift(constant.ToInt(x.val), goToken(e.Op), uint(s))
 		t := x.typ
 		if types.IsUntyped(t) {
@@ -1145,10 +1165,24 @@ func (c *Checker) join(t types.Type, y *operand, ye syntax.Expr) (types.Type, bo
 // Collections
 
 func (c *Checker) listLit(e *syntax.ListLit, want types.Type) *operand {
+	if e.Type != nil {
+		return c.typedListLit(e)
+	}
 	var elem types.Type
 	if want != nil {
 		if s, ok := types.Base(want).(*types.Slice); ok {
 			elem = s.Elem
+		}
+		if a, ok := types.Base(want).(*types.Array); ok {
+			// a: [3]int = [1, 2, 3]: a list literal is an array literal where
+			// an array is expected; it gives every element.
+			for _, x := range e.Elems {
+				c.assign(c.value(x, a.Elem), a.Elem, "array element")
+			}
+			if int64(len(e.Elems)) != a.Len {
+				c.errorf(diag.ETypeMismatch, e.S, "%s needs %d elements, got %d", types.Base(want), a.Len, len(e.Elems))
+			}
+			return &operand{mode: ModeValue, typ: &types.Array{Len: a.Len, Elem: a.Elem}}
 		}
 	}
 	if elem != nil {
@@ -1173,7 +1207,103 @@ func (c *Checker) listLit(e *syntax.ListLit, want types.Type) *operand {
 	return &operand{mode: ModeValue, typ: &types.Slice{Elem: t}}
 }
 
+// typedListLit checks []T{...}, [N]T{...}, and [...]T{...}. As in Go, an
+// array literal may give fewer elements than the length (the rest are zero),
+// but not more.
+func (c *Checker) typedListLit(e *syntax.ListLit) *operand {
+	var t types.Type
+	if at, ok := e.Type.(*syntax.ArrayType); ok && at.Len == nil {
+		elem := c.resolveType(at.Elem)
+		if elem == types.Invalid {
+			c.checkElems(e.Elems, nil)
+			return invalid(e)
+		}
+		t = &types.Array{Len: int64(len(e.Elems)), Elem: elem}
+		c.info.TypeExprs[e.Type] = t
+	} else {
+		t = c.resolveType(e.Type)
+	}
+	switch b := types.Base(t).(type) {
+	case *types.Slice:
+		c.checkElems(e.Elems, b.Elem)
+	case *types.Array:
+		c.checkElems(e.Elems, b.Elem)
+		if int64(len(e.Elems)) > b.Len {
+			c.errorf(diag.ETypeMismatch, e.Elems[b.Len].Span(), "%s holds %d elements; this literal gives %d", t, b.Len, len(e.Elems))
+		}
+	default:
+		c.checkElems(e.Elems, nil)
+		if t != types.Invalid {
+			c.errorf(diag.ETypeMismatch, e.Type.Span(), "a list literal needs a slice or array type, not %s", t)
+		}
+		return invalid(e)
+	}
+	return &operand{mode: ModeValue, typ: t}
+}
+
+func (c *Checker) checkElems(elems []syntax.Expr, elem types.Type) {
+	for _, x := range elems {
+		if elem == nil {
+			c.value(x, nil)
+			continue
+		}
+		c.assign(c.value(x, elem), elem, "list element")
+	}
+}
+
+// checkMapKeys reports constant keys a map literal with key type kt gives
+// twice; Go rejects them, and the second value would silently replace the
+// first. As in Go, a key is its value at its type: kt, or for an interface
+// key type the constant's default type (1 and 1.0 differ in a map[any]).
+func (c *Checker) checkMapKeys(keys []syntax.Expr, kt types.Type) {
+	if kt == nil || kt == types.Invalid {
+		return
+	}
+	seen := map[string]syntax.Expr{}
+	for _, k := range keys {
+		tv, ok := c.info.Types[k]
+		if !ok || tv.Value == nil {
+			continue
+		}
+		t := kt
+		if types.IsInterface(kt) {
+			t = types.DefaultType(tv.Type)
+		}
+		key := t.String() + " " + tv.Value.ExactString()
+		if first, dup := seen[key]; dup {
+			c.errorf(diag.EDuplicate, k.Span(), "duplicate key %s in map literal", k.Span().Short()).
+				WithRelated(first.Span(), "first given here")
+			continue
+		}
+		seen[key] = k
+	}
+}
+
 func (c *Checker) mapLit(e *syntax.MapLit, want types.Type) *operand {
+	op := c.mapLit0(e, want)
+	if m, ok := types.Base(op.typ).(*types.Map); ok && op.mode != ModeInvalid {
+		c.checkMapKeys(e.Keys, m.Key)
+	}
+	return op
+}
+
+func (c *Checker) mapLit0(e *syntax.MapLit, want types.Type) *operand {
+	if e.Type != nil {
+		t := c.resolveType(e.Type)
+		m, ok := types.Base(t).(*types.Map)
+		if !ok {
+			for i := range e.Keys {
+				c.value(e.Keys[i], nil)
+				c.value(e.Values[i], nil)
+			}
+			return invalid(e)
+		}
+		for i := range e.Keys {
+			c.assign(c.value(e.Keys[i], m.Key), m.Key, "map key")
+			c.assign(c.value(e.Values[i], m.Elem), m.Elem, "map value")
+		}
+		return &operand{mode: ModeValue, typ: t}
+	}
 	var kt, vt types.Type
 	if want != nil {
 		if m, ok := types.Base(want).(*types.Map); ok {

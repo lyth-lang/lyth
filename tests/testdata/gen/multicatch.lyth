@@ -1,0 +1,49 @@
+import "errors"
+import "strconv"
+
+struct NotFound { Key: string }
+func *NotFound.Error(): string = "no ${Key}"
+
+func pair(a: string, b: string): (int, int) throws {
+    x := strconv.Atoi(a)?
+    y := strconv.Atoi(b)?
+    return x, y
+}
+
+func lookup(k: string): (string, int) throws {
+    if k == "" {
+        throw &NotFound(Key = "empty")
+    }
+    return k, len(k)
+}
+
+func sum(a: string, b: string): int throws {
+    x, y := 0, 0
+    x, y = pair(a, b)?
+    return x + y
+}
+
+func main() {
+    for input in [["1", "2"], ["1", "x"]] {
+        a, b := pair(input[0], input[1]) catch (err) {
+            println("failed:", err)
+            continue
+        }
+        println(a + b)
+    }
+    pair("x", "y") catch {
+        println("both discarded")
+    }
+    p, q := 0, 0
+    p, q = pair("3", "4") catch {
+        return
+    }
+    println(p, q, sum("5", "6") catch { -1 }, sum("5", "z") catch { -1 })
+    name, size := lookup("") catch (e: *NotFound) {
+        println("not found:", e.Key)
+        return
+    } catch {
+        return
+    }
+    println(name, size, errors.New("x") != null)
+}

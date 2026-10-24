@@ -152,7 +152,8 @@ visible through other slices of the same array. In a slice type, `?` belongs
 to the element: `[]User?` holds nullable users. `for x in xs` ranges
 over elements, `for i, x in xs` over index and element, `for k, v in m` over
 keys and values, and `for i in a..<b` over numbers. An empty literal needs a
-type: `[]` or `[:]` with an annotation.
+type: `[]` or `[:]` with an annotation. Where nothing gives the type, write
+it as Go does: `[]int64{1, 2}`, `map[string]any{"status": "ok", "count": 3}`.
 
 `x in c` tests membership and `!in` negates it: an element of a list
 (`slices.Contains`), a key of a map (`_, ok := m[k]`), a substring

@@ -138,6 +138,10 @@ func (c *Checker) resolveType0(te syntax.TypeExpr) types.Type {
 		dir := map[syntax.ChanDir]types.ChanDir{syntax.ChanBoth: types.SendRecv, syntax.ChanSend: types.SendOnly, syntax.ChanReceive: types.RecvOnly}[te.Dir]
 		return &types.Chan{Dir: dir, Elem: elem}
 	case *syntax.ArrayType:
+		if te.Len == nil {
+			c.errorf(diag.EInvalidUse, te.S, "[...] gives an array its length only in a typed literal: [...]%s{a, b}", te.Elem.Span().Text())
+			return types.Invalid
+		}
 		n := int64(0)
 		x := c.expr(te.Len, types.Int)
 		if x.mode != ModeInvalid {

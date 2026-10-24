@@ -97,7 +97,7 @@ func (c *Checker) inferCall(e *syntax.CallExpr, sig *types.Signature, args []*sy
 	if len(missing) > 0 {
 		c.errorf(diag.ECannotInfer, e.Fun.Span(), "cannot infer type argument %s of %s", strings.Join(missing, ", "), e.Fun.Span().Short()).
 			WithNote("signature: %s", sig).
-			WithHint("give the type arguments: %s<...>(...)", e.Fun.Span().Short())
+			WithHint("give the type arguments: %s[...](...)", e.Fun.Span().Short())
 		return nil, nil
 	}
 	targs := make([]gotypes.Type, len(sig.TypeParams))

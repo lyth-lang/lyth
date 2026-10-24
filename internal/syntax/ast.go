@@ -243,7 +243,7 @@ type SliceType struct {
 	S    source.Span
 }
 
-// ArrayType is `[N]T`.
+// ArrayType is `[N]T`, or `[...]T` in a typed literal (Len is nil).
 type ArrayType struct {
 	Len  Expr
 	Elem TypeExpr
@@ -481,12 +481,14 @@ type TupleExpr struct {
 
 // ListLit is `[a, b, c]`.
 type ListLit struct {
+	Type  TypeExpr // []T{...} or [N]T{...}; nil for [a, b]
 	Elems []Expr
 	S     source.Span
 }
 
-// MapLit is `[k: v, ...]` or `[:]`.
+// MapLit is `[k: v, ...]`, `[:]`, or `map[K]V{k: v, ...}`.
 type MapLit struct {
+	Type   TypeExpr // map[K]V{...}; nil for [k: v]
 	Keys   []Expr
 	Values []Expr
 	S      source.Span

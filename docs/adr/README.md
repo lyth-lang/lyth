@@ -36,3 +36,4 @@ Accepted ADRs are immutable; a superseding ADR links back.
 | [0029](0029-extension-functions.md) | Extension functions are Go functions called like methods | Accepted (spelling amended by 0031) |
 | [0030](0030-standard-library.md) | The standard library is compiled with the program | Accepted |
 | [0031](0031-go-spelling.md) | Go's spelling for what Go already has: `func`, `:=`, Go types, `[T]`, headers, `self` | Accepted (supersedes 0007 for locals and parts of 0011; amends 0009, 0012, 0016, 0023, 0024, 0028, 0029) |
+| [0032](0032-typed-literals.md) | Go's typed literals for slices, arrays, and maps | Accepted (extends 0031) |
