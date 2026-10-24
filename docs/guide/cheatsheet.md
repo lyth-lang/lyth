@@ -71,7 +71,7 @@ has the exact rules.
 | `throw errors.New("bad")` | `return ..., errors.New("bad")` |
 | `parse(s) catch { 0 }` | `n, err := parse(s); if err != nil { n = 0 }` |
 | `parse(s) catch (err) { log(err); 0 }` | the same, with code in the `if` |
-| `f() catch {}` | `if err := f(); err != nil {}` |
+| `f() catch {}` | `_ = f()` |
 | `find(id) catch (_: *NotFound) { guest }?` | `if _, ok := errors.AsType[*NotFound](err); ok { u = guest } else { return ..., err }` |
 | `return w.Write(b)` (in a `throws` function) | `return w.Write(b)` |
 | `err.wrap("loading ${path}")` | `fmt.Errorf("loading %v: %w", path, err)` |
@@ -110,7 +110,7 @@ has the exact rules.
 | `v, ok := ch.receive()` | `v, ok := <-ch` |
 | `job := jobs.receive() ?: break` | `job := <-jobs; if job == nil { break }` |
 | `select { v := ch.receive() -> ...; else -> ... }` | `select { case v := <-ch: ...; default: ... }` |
-| `defer f.Close() catch {}` | `defer func() { if err := f.Close(); err != nil {} }()` |
+| `defer f.Close() catch {}` | `defer func() { _ = f.Close() }()` |
 
 ## Commands
 

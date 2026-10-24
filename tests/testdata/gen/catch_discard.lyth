@@ -1,0 +1,23 @@
+package main
+
+import "fmt"
+import "io"
+import "os"
+
+func closeIt(c: io.Closer) throws {
+    c.Close()?
+}
+
+func run(w: io.Writer, f: *os.File) {
+    closeIt(f) catch {}
+    fmt.Fprint(w, "ok") catch {}
+    f.Close() catch (_) {}
+    defer f.Close() catch {}
+    go { closeIt(f) catch {} }
+    send: (string) -> unit = { s -> fmt.Fprintln(w, s) catch {} }
+    send("hi")
+}
+
+func main() {
+    run(os.Stdout, os.Stdin)
+}

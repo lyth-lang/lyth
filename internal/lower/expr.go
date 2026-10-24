@@ -888,6 +888,16 @@ func (fl *fnLower) catchInto(e *syntax.CatchExpr, name string, define bool, span
 		fl.catchBoxed(e, nil, e.CatchSpan, name, rt, span)
 		return
 	}
+	if name == "" && e.Type == nil && len(e.Body.Stmts) == 0 {
+		// `f() catch {}` discards everything, as hand-written Go does:
+		// _ = f() (or _, _ = f() with a discarded value).
+		n := 1
+		if isResult {
+			n += len(info.Success)
+		}
+		fl.emit(&ast.AssignStmt{Lhs: blanks(n), Tok: token.ASSIGN, TokPos: fl.l.pos(span), Rhs: []ast.Expr{fl.expr(e.X)}}, span)
+		return
+	}
 	operand := fl.expr(e.X)
 	errName := ""
 	if info.Binder != nil {

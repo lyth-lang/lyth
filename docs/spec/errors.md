@@ -373,6 +373,7 @@ abstraction. Every error is a Go `error`.
 | `n := s.toInt() catch { 0 }` | `n, err := strconv.Atoi(s)`<br>`if err != nil { n = 0 }` |
 | `use(load()?)` | `v, err := load()`<br>`if err != nil { return err }`<br>`use(v)` |
 | `return w.Write(b)` (in `int throws`) | `return w.Write(b)` |
+| `f.Close() catch {}` | `_ = f.Close()` |
 | `n := s.toInt() catch { null }` | `var n *int`<br>`if v, err := strconv.Atoi(s); err == nil { n = new(v) }` |
 | `u := find(id) catch (_: *NotFound) { guest }?` | `u, err := find(id)`<br>`if err != nil {`<br>`if _, ok := errors.AsType[*NotFound](err); ok { u = guest } else { return User{}, err }`<br>`}` |
 
