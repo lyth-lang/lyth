@@ -170,3 +170,15 @@ go test ./tests -run TestGenGolden -update     # refresh golden files after inte
 go test ./internal/syntax -fuzz FuzzParse      # fuzz the parser
 go test ./internal/check -fuzz FuzzCheck       # fuzz the checker
 ```
+
+## License
+
+Lyth is licensed under either of
+
+- the [Apache License, Version 2.0](LICENSE-APACHE), or
+- the [MIT license](LICENSE-MIT),
+
+at your option. Unless you explicitly state otherwise, any contribution
+intentionally submitted for inclusion in Lyth by you, as defined in the
+Apache-2.0 license, shall be dual licensed as above, without any additional
+terms or conditions.
