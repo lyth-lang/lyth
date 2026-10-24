@@ -34,7 +34,7 @@ import (
 // builds keep devVersion (their pseudo-version says nothing useful).
 var version = devVersion
 
-const devVersion = "0.2.0-dev"
+const devVersion = "0.3.0-dev"
 
 var releaseVersion = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
 
