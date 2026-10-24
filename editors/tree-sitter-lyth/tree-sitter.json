@@ -1,0 +1,20 @@
+{
+  "grammars": [
+    {
+      "name": "lyth",
+      "camelcase": "Lyth",
+      "scope": "source.lyth",
+      "path": ".",
+      "file-types": ["lyth"],
+      "highlights": "queries/highlights.scm"
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "MIT OR Apache-2.0",
+    "description": "Lyth grammar for tree-sitter",
+    "links": {
+      "repository": "https://github.com/lyth-lang/lyth"
+    }
+  }
+}

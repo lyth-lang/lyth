@@ -1,0 +1,205 @@
+================================================================================
+Imports, structs, and methods
+================================================================================
+
+import "fmt"
+
+struct User : fmt.Stringer {
+    ID: int64
+    Email: string?
+}
+
+func *User.rename(name: string): string throws {
+    return name
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (import_declaration
+    (string
+      (string_content)))
+  (struct_declaration
+    (type_identifier)
+    (qualified_type
+      (identifier)
+      (type_identifier))
+    (field_list
+      (field_declaration
+        (identifier)
+        (primitive_type))
+      (field_declaration
+        (identifier)
+        (nullable_type
+          (primitive_type)))))
+  (function_declaration
+    (receiver
+      (type_identifier))
+    (identifier)
+    (parameters
+      (parameter
+        (identifier)
+        (primitive_type)))
+    (primitive_type)
+    (block
+      (keyword)
+      (identifier))))
+
+================================================================================
+Interfaces, enums, aliases, and generics
+================================================================================
+
+sealed interface Shape {
+    Area(): float64
+}
+
+enum Color { Red, Green }
+
+typealias Ids = []int
+
+func Max[T: cmp.Ordered](a: T, b: T): T = if a > b { a } else { b }
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (interface_declaration
+    (type_identifier)
+    (interface_body
+      (method_spec
+        (identifier)
+        (parameters)
+        (primitive_type))))
+  (enum_declaration
+    (type_identifier)
+    (enum_body
+      (enum_entry
+        (identifier))
+      (enum_entry
+        (identifier))))
+  (type_alias
+    (type_identifier)
+    (slice_type
+      (primitive_type)))
+  (function_declaration
+    (identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier)
+        (qualified_type
+          (identifier)
+          (type_identifier))))
+    (parameters
+      (parameter
+        (identifier)
+        (type_identifier))
+      (parameter
+        (identifier)
+        (type_identifier)))
+    (type_identifier))
+  (operator)
+  (if_expression
+    (identifier)
+    (operator)
+    (identifier)
+    (block
+      (identifier)))
+  (keyword)
+  (lambda
+    (identifier)))
+
+================================================================================
+Statements and expressions
+================================================================================
+
+func main() {
+    u := find(1)?
+    xs: []int = [1, 2]
+    f := { a: int, b -> a + b }
+    for i, x in xs {
+        println("${i}: ${x}")
+    }
+    when u {
+        is Admin -> 1
+        else -> 2
+    }
+    m := map[string]any{"a": 1}
+    v := load() catch (e) { 0 }
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameters)
+    (block
+      (short_var_declaration
+        (identifier))
+      (call_expression
+        (identifier)
+        (parenthesized
+          (number)))
+      (operator)
+      (typed_local
+        (identifier)
+        (slice_type
+          (primitive_type)))
+      (operator)
+      (bracketed
+        (number)
+        (number))
+      (short_var_declaration
+        (identifier))
+      (lambda
+        (lambda_parameters
+          (lambda_parameter
+            (identifier)
+            (primitive_type))
+          (lambda_parameter
+            (identifier)))
+        (identifier)
+        (operator)
+        (identifier))
+      (for_statement
+        (identifier)
+        (identifier)
+        (keyword)
+        (identifier)
+        (block
+          (call_expression
+            (identifier)
+            (parenthesized
+              (string
+                (interpolation
+                  (identifier))
+                (string_content)
+                (interpolation
+                  (identifier)))))))
+      (when_expression
+        (identifier)
+        (when_body
+          (type_test
+            (type_identifier))
+          (operator)
+          (number)
+          (keyword)
+          (operator)
+          (number)))
+      (short_var_declaration
+        (identifier))
+      (typed_literal
+        (map_type
+          (primitive_type)
+          (primitive_type))
+        (string
+          (string_content))
+        (number))
+      (short_var_declaration
+        (identifier))
+      (call_expression
+        (identifier)
+        (parenthesized))
+      (catch_clause
+        (identifier)
+        (block
+          (number))))))

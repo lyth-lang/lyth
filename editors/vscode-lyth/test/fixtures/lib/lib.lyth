@@ -1,0 +1,2 @@
+// Greet returns a greeting.
+func Greet(name: string): string = "hello ${name}"

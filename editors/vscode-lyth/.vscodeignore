@@ -1,0 +1,9 @@
+**
+!package.json
+!README.md
+!LICENSE
+!language-configuration.json
+!out/extension.js
+!syntaxes/**
+!snippets/**
+!images/**

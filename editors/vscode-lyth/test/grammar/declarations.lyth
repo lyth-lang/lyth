@@ -1,0 +1,30 @@
+// SYNTAX TEST "source.lyth" "declarations"
+
+import "fmt"
+// <------ keyword.control.import.lyth
+//     ^ punctuation.definition.string.begin.lyth
+//      ^^^ string.quoted.double.lyth
+
+struct User : fmt.Stringer {
+// <------ keyword.struct.lyth
+//     ^^^^ entity.name.type.lyth
+//                ^^^^^^^^ entity.name.type.lyth
+    ID: int64
+//  ^^ variable.parameter.lyth
+//    ^ punctuation.other.colon.lyth
+//      ^^^^^ storage.type.numeric.lyth
+    Email: string?
+//         ^^^^^^ storage.type.string.lyth
+//               ^ keyword.operator.optional.lyth
+}
+
+func *User.rename(name: string): string throws {
+// <---- keyword.function.lyth
+//   ^ keyword.operator.address.go
+//    ^^^^ entity.name.type.lyth
+//         ^^^^^^ entity.name.function.lyth
+//                ^^^^ variable.parameter.lyth
+//                                      ^^^^^^ storage.modifier.lyth
+    return name
+//  ^^^^^^ keyword.control.lyth
+}

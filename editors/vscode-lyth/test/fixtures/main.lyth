@@ -1,0 +1,9 @@
+import "fmt"
+import "example.com/fixture/lib"
+
+func double(n: int) = n * 2
+
+func main() {
+    total := double(21)
+    fmt.Println(lib.Greet("Lyth"), total)
+}

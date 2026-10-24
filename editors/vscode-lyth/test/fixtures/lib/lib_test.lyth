@@ -1,0 +1,7 @@
+import "testing"
+
+func TestGreet(t: *testing.T) {
+    if Greet("x") != "hello x" {
+        t.Fatal("wrong greeting")
+    }
+}

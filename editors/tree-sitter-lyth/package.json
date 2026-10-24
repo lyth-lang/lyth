@@ -1,0 +1,22 @@
+{
+  "name": "tree-sitter-lyth",
+  "version": "0.1.0",
+  "description": "Tree-sitter grammar for the Lyth programming language",
+  "main": "grammar.js",
+  "license": "MIT OR Apache-2.0",
+  "repository": "https://github.com/lyth-lang/lyth",
+  "scripts": {
+    "generate": "tree-sitter generate",
+    "test": "tree-sitter test"
+  },
+  "devDependencies": {
+    "tree-sitter-cli": "0.25.10"
+  },
+  "tree-sitter": [
+    {
+      "scope": "source.lyth",
+      "file-types": ["lyth"],
+      "highlights": "queries/highlights.scm"
+    }
+  ]
+}

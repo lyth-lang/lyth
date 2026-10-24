@@ -1,0 +1,4 @@
+grammars/*.wasm
+grammars/*.dylib
+grammars/*.so
+grammars/*.dll

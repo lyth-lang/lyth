@@ -1,0 +1,249 @@
+{
+  "name": "lyth",
+  "displayName": "Lyth",
+  "description": "Lyth language support: syntax highlighting, the Lyth language server (diagnostics, completion, hover with the generated Go, go to definition, references, rename, signature help, inlay hints, quick fixes), run and test buttons, snippets.",
+  "version": "0.1.0",
+  "publisher": "lyth-lang",
+  "license": "MIT OR Apache-2.0",
+  "icon": "images/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lyth-lang/lyth",
+    "directory": "editors/vscode-lyth"
+  },
+  "homepage": "https://lyth.bkymz.net",
+  "bugs": "https://github.com/lyth-lang/lyth/issues",
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Snippets"
+  ],
+  "keywords": [
+    "lyth",
+    "go",
+    "golang",
+    "language server"
+  ],
+  "main": "./out/extension.js",
+  "extensionKind": [
+    "workspace"
+  ],
+  "activationEvents": [
+    "workspaceContains:*.lyth",
+    "workspaceContains:*/*.lyth",
+    "workspaceContains:*/*/*.lyth"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Highlighting and snippets work in Restricted Mode. The language server and the run commands need a trusted workspace, because they run the Go toolchain on the code.",
+      "restrictedConfigurations": [
+        "lyth.path"
+      ]
+    },
+    "virtualWorkspaces": {
+      "supported": "limited",
+      "description": "The language server and the run commands need the files on disk."
+    }
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "lyth",
+        "aliases": [
+          "Lyth",
+          "lyth"
+        ],
+        "extensions": [
+          ".lyth"
+        ],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./images/lyth-light.svg",
+          "dark": "./images/lyth-dark.svg"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "lyth",
+        "scopeName": "source.lyth",
+        "path": "./syntaxes/lyth.tmLanguage.json"
+      },
+      {
+        "scopeName": "markdown.lyth.codeblock",
+        "path": "./syntaxes/lyth-markdown.tmLanguage.json",
+        "injectTo": [
+          "text.html.markdown"
+        ],
+        "embeddedLanguages": {
+          "meta.embedded.block.lyth": "lyth"
+        }
+      }
+    ],
+    "snippets": [
+      {
+        "language": "lyth",
+        "path": "./snippets/lyth.json"
+      }
+    ],
+    "configuration": {
+      "title": "Lyth",
+      "properties": {
+        "lyth.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "markdownDescription": "Path to the `lyth` command, used for the language server and to run files. Empty: `lyth` from the `PATH`, or Go's bin directory (`$GOBIN`, `$GOPATH/bin`, `~/go/bin`). A relative path is relative to the first workspace folder."
+        },
+        "lyth.vet": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Run `go vet` when a Lyth file is saved, and show its findings on the `.lyth` lines."
+        },
+        "lyth.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Logs the messages between VS Code and the Lyth language server in its output channel."
+        }
+      }
+    },
+    "configurationDefaults": {
+      "[lyth]": {
+        "editor.tabSize": 4,
+        "editor.insertSpaces": true
+      }
+    },
+    "commands": [
+      {
+        "command": "lyth.run",
+        "title": "Run File",
+        "category": "Lyth",
+        "icon": "$(play)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "lyth.test",
+        "title": "Run Tests in Package",
+        "category": "Lyth",
+        "icon": "$(beaker)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "lyth.runTest",
+        "title": "Run Test",
+        "category": "Lyth",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "lyth.showGeneratedGo",
+        "title": "Show Generated Go",
+        "category": "Lyth",
+        "icon": "$(open-preview)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "lyth.restartServer",
+        "title": "Restart Language Server",
+        "category": "Lyth",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "lyth.showOutput",
+        "title": "Show Language Server Output",
+        "category": "Lyth"
+      }
+    ],
+    "menus": {
+      "editor/title/run": [
+        {
+          "command": "lyth.run",
+          "when": "resourceLangId == lyth && resourceScheme == file",
+          "group": "navigation@0"
+        },
+        {
+          "command": "lyth.test",
+          "when": "resourceLangId == lyth && resourceScheme == file",
+          "group": "navigation@1"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "lyth.showGeneratedGo",
+          "when": "resourceLangId == lyth && resourceScheme == file",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "lyth.run",
+          "when": "editorLangId == lyth"
+        },
+        {
+          "command": "lyth.test",
+          "when": "editorLangId == lyth"
+        },
+        {
+          "command": "lyth.runTest",
+          "when": "false"
+        },
+        {
+          "command": "lyth.showGeneratedGo",
+          "when": "editorLangId == lyth"
+        }
+      ]
+    },
+    "taskDefinitions": [
+      {
+        "type": "lyth",
+        "required": [
+          "command"
+        ],
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "The lyth command to run: build, run, test, check, vet, ..."
+          },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Arguments after the command."
+          }
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "vscode:prepublish": "node scripts/build.mjs --production",
+    "check": "tsc -p . && tsc -p test --noEmit",
+    "test": "npm run test:grammar && npm run test:integration",
+    "test:grammar": "node scripts/build.mjs && vscode-tmgrammar-test \"test/grammar/*.lyth\"",
+    "test:integration": "node scripts/build.mjs && tsc -p test && node out/test/runTest.js",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "vscode-languageclient": "10.1.2"
+  },
+  "devDependencies": {
+    "@types/mocha": "10.0.10",
+    "@types/node": "20.19.43",
+    "@types/vscode": "1.91.0",
+    "@vscode/test-electron": "3.1.0",
+    "@vscode/vsce": "3.9.2",
+    "esbuild": "0.28.2",
+    "mocha": "11.7.6",
+    "typescript": "5.9.3",
+    "vscode-tmgrammar-test": "0.1.3"
+  }
+}

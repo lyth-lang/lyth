@@ -1,0 +1,17 @@
+// SYNTAX TEST "source.lyth" "expressions"
+
+func main() throws {
+    u := find(1)?
+//  ^ variable.other.assignment.lyth
+//    ^^ keyword.operator.assignment.go
+//       ^^^^ entity.name.function.lyth
+//            ^ constant.numeric.decimal.lyth
+//              ^ keyword.operator.optional.lyth
+    println("hi ${u.name}")
+//          ^ punctuation.definition.string.begin.lyth
+//              ^^ punctuation.section.embedded.begin.lyth
+//                ^ meta.embedded.line.lyth variable.other.lyth
+//                      ^ punctuation.section.embedded.end.lyth
+    // a comment
+//  ^^^^^^^^^^^^ comment.line.double-slash.lyth
+}

@@ -1,0 +1,22 @@
+id = "lyth"
+name = "Lyth"
+version = "0.1.0"
+schema_version = 1
+description = "Support for the Lyth programming language: syntax highlighting, outline, run and test buttons, and the Lyth language server (diagnostics, completion, hover with the generated Go, go to definition, references, rename, signature help, inlay hints, quick fixes)."
+authors = ["Berkay Akin"]
+repository = "https://github.com/lyth-lang/lyth"
+
+# The grammar is bundled in grammars/lyth/src (generated from editors/tree-sitter-lyth).
+[grammars.lyth]
+
+[language_servers.lyth]
+name = "lyth"
+languages = ["Lyth"]
+command = "lyth"
+args = ["lsp"]
+install = "go install github.com/lyth-lang/lyth/cmd/lyth@latest"
+root_markers = ["go.mod"]
+
+# Kuana's Install button: go install of the lyth command.
+[language_servers.lyth.installer]
+go = "github.com/lyth-lang/lyth/cmd/lyth"
