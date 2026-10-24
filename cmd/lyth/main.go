@@ -17,6 +17,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"time"
@@ -25,7 +27,20 @@ import (
 	"github.com/lyth-lang/lyth/internal/diag"
 )
 
-const version = "0.1.0-dev"
+// version is set by release builds (-ldflags "-X main.version=0.1.0"); a
+// `go install ...@v0.1.0` build reports its module version instead. Local
+// builds keep devVersion (their pseudo-version says nothing useful).
+var version = devVersion
+
+const devVersion = "0.1.0-dev"
+
+var releaseVersion = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
+
+func init() {
+	if info, ok := debug.ReadBuildInfo(); ok && version == devVersion && releaseVersion.MatchString(info.Main.Version) {
+		version = info.Main.Version[1:]
+	}
+}
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))

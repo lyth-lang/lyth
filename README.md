@@ -115,12 +115,14 @@ and no framework.
 
 ## Quick start
 
-Requirements: Go 1.26 or newer.
+Install with Homebrew on macOS or Linux (it installs Go too), or with Go 1.26 or newer:
 
 ```bash
-go install ./cmd/lyth
-lyth run examples/hello/hello.lyth
+brew install lyth-lang/tap/lyth
+go install github.com/lyth-lang/lyth/cmd/lyth@latest
 ```
+
+Then, in a clone of this repository, run `lyth run examples/hello/hello.lyth`.
 
 Inside a Go module, `lyth` works like the `go` command: `lyth build`, `lyth run
 ./cmd/api`, `lyth test ./...`, `lyth vet`, plus `lyth check` (type-check only) and

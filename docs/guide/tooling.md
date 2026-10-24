@@ -7,11 +7,21 @@ described in [compiler](../design/compiler.md).
 
 ## Installing
 
-Lyth needs Go 1.26 or newer. From a checkout of the repository:
+Lyth needs Go 1.26 or newer, which it uses to build programs. With Homebrew, on macOS or
+Linux (it installs Go too; `brew upgrade lyth` updates):
 
 ```bash
+brew install lyth-lang/tap/lyth
+```
+
+With Go, or from a checkout of the repository:
+
+```bash
+go install github.com/lyth-lang/lyth/cmd/lyth@latest
 go install ./cmd/lyth
 ```
+
+`lyth version` prints the installed version.
 
 ## Commands
 

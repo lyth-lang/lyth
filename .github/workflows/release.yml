@@ -1,0 +1,60 @@
+# Releases Lyth when a version tag (v0.1.0) is pushed: tests the tagged commit,
+# creates the GitHub release, and updates the Homebrew formula in
+# lyth-lang/homebrew-tap, which builds lyth from the tagged source.
+#
+# Needs the repository secret HOMEBREW_TAP_TOKEN: a fine-grained token with
+# read and write access to the contents of lyth-lang/homebrew-tap.
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: |
+          go vet ./...
+          go test ./...
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --title "Lyth ${GITHUB_REF_NAME#v}" --generate-notes
+
+      - name: Update the Homebrew formula
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "::error::the HOMEBREW_TAP_TOKEN secret is not set"
+            exit 1
+          fi
+          version="${GITHUB_REF_NAME#v}"
+          sha256=$(curl -fsSL "https://github.com/$GITHUB_REPOSITORY/archive/refs/tags/$GITHUB_REF_NAME.tar.gz" | sha256sum | cut -d' ' -f1)
+          git clone "https://x-access-token:$TAP_TOKEN@github.com/lyth-lang/homebrew-tap.git" tap
+          mkdir -p tap/Formula
+          # the template's header comment is for this repository; the formula starts at its class
+          sed -n -e '/^class Lyth/,$p' .github/homebrew/lyth.rb.tmpl |
+            sed -e "s/@VERSION@/$version/g" -e "s/@SHA256@/$sha256/g" > tap/Formula/lyth.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/lyth.rb
+          if git diff --cached --quiet; then
+            echo "the formula is already at $version"
+          else
+            git commit -m "lyth $version"
+            git push origin HEAD:main
+          fi
