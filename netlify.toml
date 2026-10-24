@@ -11,3 +11,6 @@
 [build.environment]
   NODE_VERSION = "24"
   GO_VERSION = "1.26.7"
+  # canonical URLs, the GitHub link in the header, and edit and source links
+  LYTH_SITE_URL = "https://lyth.bkymz.net"
+  LYTH_REPO_URL = "https://github.com/lyth-lang/lyth"

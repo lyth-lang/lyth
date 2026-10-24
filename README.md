@@ -4,6 +4,8 @@
 
 # Lyth
 
+**[Documentation](https://lyth.bkymz.net)** · [Tour](https://lyth.bkymz.net/guide/tour/) · [Lyth for Go programmers](https://lyth.bkymz.net/guide/lyth-for-go-programmers/) · [Cheat sheet](https://lyth.bkymz.net/guide/cheatsheet/)
+
 Lyth is a statically typed language that compiles to readable Go. It takes the
 boilerplate out of Go (`if err != nil` blocks, nil-check ladders, verbose
 closures, hand-written `json` tags) so programs are shorter and easier to read,
@@ -152,6 +154,8 @@ docs/               design, specification, ADRs
 ```
 
 ## Documentation
+
+The documentation is published at [lyth.bkymz.net](https://lyth.bkymz.net); its sources are below.
 
 - Guide: [tour](docs/guide/tour.md), [Lyth for Go programmers](docs/guide/lyth-for-go-programmers.md),
   [cheat sheet](docs/guide/cheatsheet.md), [Go interop](docs/guide/go-interop.md),

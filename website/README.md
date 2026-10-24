@@ -41,7 +41,8 @@ npm run dev
 
 `npm run build` writes the site to `dist/`. Set `LYTH_SITE_URL` (the published address) and
 `LYTH_REPO_URL` (for source and edit links) when publishing. `netlify.toml` at the repository
-root builds it on Netlify.
+root builds it on Netlify and sets both; the site is published at
+[lyth.bkymz.net](https://lyth.bkymz.net).
 
 After changing the code block settings (`expressiveCode` in `astro.config.mjs`), restart the dev
 server: pages it already rendered keep links to the old code styles until it starts afresh.
