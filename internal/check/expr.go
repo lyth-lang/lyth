@@ -1169,11 +1169,13 @@ func (c *Checker) listLit(e *syntax.ListLit, want types.Type) *operand {
 		return c.typedListLit(e)
 	}
 	var elem types.Type
+	named := namedCollection(want)
 	if want != nil {
-		if s, ok := types.Base(want).(*types.Slice); ok {
+		shape := types.Base(underlyingOf(want))
+		if s, ok := shape.(*types.Slice); ok {
 			elem = s.Elem
 		}
-		if a, ok := types.Base(want).(*types.Array); ok {
+		if a, ok := shape.(*types.Array); ok {
 			// a: [3]int = [1, 2, 3]: a list literal is an array literal where
 			// an array is expected; it gives every element.
 			for _, x := range e.Elems {
@@ -1182,14 +1184,14 @@ func (c *Checker) listLit(e *syntax.ListLit, want types.Type) *operand {
 			if int64(len(e.Elems)) != a.Len {
 				c.errorf(diag.ETypeMismatch, e.S, "%s needs %d elements, got %d", types.Base(want), a.Len, len(e.Elems))
 			}
-			return &operand{mode: ModeValue, typ: &types.Array{Len: a.Len, Elem: a.Elem}}
+			return &operand{mode: ModeValue, typ: typeOr(named, &types.Array{Len: a.Len, Elem: a.Elem})}
 		}
 	}
 	if elem != nil {
 		for _, x := range e.Elems {
 			c.assign(c.value(x, elem), elem, "list element")
 		}
-		return &operand{mode: ModeValue, typ: &types.Slice{Elem: elem}}
+		return &operand{mode: ModeValue, typ: typeOr(named, &types.Slice{Elem: elem})}
 	}
 	if len(e.Elems) == 0 {
 		c.errorf(diag.ECannotInfer, e.S, "cannot infer the element type of an empty list").
@@ -1306,7 +1308,7 @@ func (c *Checker) mapLit0(e *syntax.MapLit, want types.Type) *operand {
 	}
 	var kt, vt types.Type
 	if want != nil {
-		if m, ok := types.Base(want).(*types.Map); ok {
+		if m, ok := types.Base(underlyingOf(want)).(*types.Map); ok {
 			kt, vt = m.Key, m.Elem
 		}
 	}
@@ -1315,7 +1317,7 @@ func (c *Checker) mapLit0(e *syntax.MapLit, want types.Type) *operand {
 			c.assign(c.value(e.Keys[i], kt), kt, "map key")
 			c.assign(c.value(e.Values[i], vt), vt, "map value")
 		}
-		return &operand{mode: ModeValue, typ: &types.Map{Key: kt, Elem: vt}}
+		return &operand{mode: ModeValue, typ: typeOr(namedCollection(want), &types.Map{Key: kt, Elem: vt})}
 	}
 	if len(e.Keys) == 0 {
 		c.errorf(diag.ECannotInfer, e.S, "cannot infer the type of an empty map").
@@ -1334,6 +1336,30 @@ func (c *Checker) mapLit0(e *syntax.MapLit, want types.Type) *operand {
 		return invalid(e)
 	}
 	return &operand{mode: ModeValue, typ: &types.Map{Key: kt, Elem: vt}}
+}
+
+// namedCollection returns want when it is a Go named slice, array, or map
+// type (gin.H, http.Header, sort.StringSlice): a literal written where one
+// is expected takes its element types from the underlying type and keeps the
+// name, as Go's gin.H{...} does.
+func namedCollection(want types.Type) types.Type {
+	n, ok := types.Base(want).(*types.Named)
+	if !ok || n.Go == nil {
+		return nil
+	}
+	switch n.Go.Underlying().(type) {
+	case *gotypes.Slice, *gotypes.Array, *gotypes.Map:
+		return n
+	}
+	return nil
+}
+
+// typeOr returns t, or def when t is nil.
+func typeOr(t, def types.Type) types.Type {
+	if t != nil {
+		return t
+	}
+	return def
 }
 
 // commonType finds a type all operands are assignable to.

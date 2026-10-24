@@ -20,6 +20,10 @@ func (fl *fnLower) call(e *syntax.CallExpr) ast.Expr {
 	case check.CallConstruct:
 		return fl.construct(e, ci)
 	case check.CallConvert:
+		if isLit(ci.Args[0]) && types.Identical(fl.info.TypeOf(ci.Args[0]), ci.Target) {
+			// gin.H(["k": v]) is the literal gin.H{"k": v}.
+			return fl.expr(ci.Args[0])
+		}
 		x := fl.exprAs(ci.Args[0], ci.Target)
 		fun := fl.l.typeExpr(ci.Target)
 		switch fun.(type) {

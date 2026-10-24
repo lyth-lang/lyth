@@ -66,6 +66,42 @@ with pointer receivers work on locals (Lyth takes the address, as Go does); on
 a read-only value such as a parameter they are an error (E0504), because the
 method could modify it.
 
+## Named collection types
+
+Go packages define many named slice and map types: `http.Header`,
+`url.Values`, `template.FuncMap`, gin's `gin.H`. A Lyth literal written where
+one is expected has that type, and its elements are typed by the type's
+elements; a conversion gives the type in place:
+
+```kotlin
+import "fmt"
+import "net/http"
+import "net/url"
+import "sort"
+
+func accept(h: http.Header): string = h.Get("Accept")
+
+func main() {
+    h: http.Header = ["Accept": ["text/plain"]]
+    h.Add("Accept", "text/html")
+    fmt.Println(h.Values("Accept"), accept(["Accept": ["application/json"]]))
+
+    q := url.Values(["q": ["lyth"], "page": ["2"]])
+    fmt.Println(q.Encode())
+
+    names := sort.StringSlice(["carol", "alice", "bob"])
+    names.Sort()
+    fmt.Println(names)
+}
+```
+
+Each literal lowers to Go's literal of the named type, such as
+`http.Header{"Accept": {"text/plain"}}` and `url.Values{"q": {"lyth"}, ...}`.
+In gin, `c.JSON(200, gin.H(["error": msg, "code": 7]))` is
+`c.JSON(200, gin.H{"error": msg, "code": 7})`. Go's own spelling
+`gin.H{"error": msg}` is an error whose fix is the conversion: braces after a
+type name are a trailing lambda in Lyth.
+
 ## Implementing Go interfaces
 
 ```kotlin
@@ -266,6 +302,9 @@ imports inside `.lyth` files and would remove modules only Lyth code uses. The
 
 - A package cannot mix Lyth and Go source files yet, apart from `_test.go`
   files. Put Go code in its own package and import it.
+- Values of a Go named collection type cannot yet be indexed, measured with
+  `len`, or iterated directly (`h["Accept"]`, `len(q)`); use the type's
+  methods (`h.Values("Accept")`), or convert it first (`map[string][]string(h)`).
 - Iterating over Go iterator functions (`for x in seq` with an `iter.Seq`) is
   not implemented yet; collect one with `slices.Collect` or `maps.Collect`
   first.
