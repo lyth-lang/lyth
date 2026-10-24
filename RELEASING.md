@@ -12,6 +12,7 @@ Where Lyth and its editor extensions are published, and how each is released.
 | Documentation | https://lyth.bkymz.net | Netlify, built from `website/` on every push |
 | VS Code extension, VS Code Marketplace | https://marketplace.visualstudio.com/items?itemName=lyth-lang.lyth | https://marketplace.visualstudio.com/manage/publishers/lyth-lang (publisher `lyth-lang`) |
 | VS Code extension, Open VSX (VSCodium, Cursor, Windsurf, Gitpod) | https://open-vsx.org/extension/lyth-lang/lyth | https://open-vsx.org/user-settings/namespaces/lyth-lang (namespace `lyth-lang`; ownership claim: https://github.com/EclipseFdn/open-vsx.org/issues/14684) |
+| Claude Code skill (`claude plugin install lyth --marketplace lyth-lang/lyth`) | `skills/lyth` in this repository | `.claude-plugin/marketplace.json`; nothing to publish |
 | VS Code extension, each `.vsix` | https://github.com/lyth-lang/lyth/releases (tags `vscode-vX.Y.Z`) | the extension release workflow |
 
 The Kuana extension (`editors/kuana-lyth`, regenerated with `editors/build-kuana-extension.sh`)

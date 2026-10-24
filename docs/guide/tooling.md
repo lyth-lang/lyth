@@ -34,7 +34,10 @@ go install ./cmd/lyth
 | `lyth test [packages] [go test flags]` | Compiles packages with their `_test.lyth` files and runs `go test` ([testing](testing.md)). |
 | `lyth vet [packages]` | Runs `go vet` on the generated code and maps findings to `.lyth` positions. |
 | `lyth gen [-stdout \| -in-tree] [packages]` | Writes the generated Go: to stdout, or next to the sources as `*.lyth.go` files. |
+| `lyth fix [packages]` | Rewrites older Lyth syntax, and Go and Kotlin spellings of Lyth constructs, in the packages' files, test files included, then reports the errors left ([below](#lyth-fix)). |
 | `lyth mod tidy` | `go mod tidy` that also sees imports in `.lyth` files ([interop](go-interop.md#modules-and-third-party-packages)). |
+| `lyth init [module-path]` | Makes the current directory a Lyth module: `go.mod` (through `go mod init`; the path defaults to the directory's name), `main.lyth` when there is no Lyth code yet, `AGENTS.md` and `CLAUDE.md` for coding agents, and `.lyth/` in `.gitignore`. In an existing module it adds only what is missing. |
+| `lyth guide [topics \| topic]` | Prints the guide to writing this version of Lyth ([writing Lyth](writing-lyth.md)), the list of topics, or one documentation page. |
 | `lyth lsp [-no-vet]` | Runs the language server on stdin and stdout, for editors ([editors](#editors)). |
 | `lyth version` | Prints the compiler version. |
 
@@ -134,6 +137,32 @@ suggested edits. After Lyth's own checker, the generated Go is type-checked
 in-process with `go/types`; anything it finds (a gap in Lyth's checker) is
 reported at the exact Lyth span with code E0902, never as a raw Go error. The
 design is in [diagnostics](../design/diagnostics.md).
+
+### `lyth fix`
+
+Some diagnostics carry a fix: an edit that only respells the code, such as `fun` to `func`,
+`val x = 1` to `x := 1`, `Int` to `int`, `Point{X: 1}` to `Point(X = 1)`, or
+`strings.split` to `strings.Split` (the full list is in
+[writing Lyth](writing-lyth.md#changes-between-versions)). `lyth check` counts them, and
+`lyth fix` applies them, compiling again until none is left. Other hints, such as adding `?` to
+propagate an error or converting a number, change what the code does, and stay suggestions.
+With `-diagnostics=json`, an edit that is a fix has `"fix": true`.
+
+When a Lyth release changes its syntax, the compiler keeps reporting the older form with a fix,
+so `lyth fix` brings a module up to date after an upgrade.
+
+## AI coding agents
+
+Coding agents learn Lyth from the installed compiler. `lyth guide` prints
+[writing Lyth](writing-lyth.md) for the installed version, and `lyth guide <topic>` the other
+pages of this documentation. The `AGENTS.md` that `lyth init` writes (and its `CLAUDE.md`,
+which imports it for Claude Code) only tells agents to read `lyth guide` and to check their work
+with `lyth check` and `lyth fix`; it holds no language rules, so it stays true when Lyth
+changes. For Claude Code there is also a skill, installed as a plugin from the repository:
+
+```bash
+claude plugin install lyth --marketplace lyth-lang/lyth
+```
 
 ## Debugging and profiling
 

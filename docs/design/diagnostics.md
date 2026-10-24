@@ -84,6 +84,12 @@ explanations is **[planned]**.
 - Hints carry concrete edits where possible (insert `?`, add `throws`, wrap
   with `float64(...)`, write `func` for `fun`, use `=` instead of `:=`), so an
   LSP can offer quick fixes.
+- An edit that only respells what the code already means (an earlier Lyth
+  spelling, or a Go or Kotlin one) is a *fix* (`WithFix`, `"fix": true` in
+  JSON), and `lyth fix` applies it unasked. An edit that changes behavior
+  (adding `?`, a numeric conversion, a guessed name) is never a fix. When a
+  release changes syntax, the old form keeps a diagnostic with a fix
+  ([ADR 0033](../adr/0033-agents-learn-from-the-compiler.md)).
 
 ## 5. Diagnostics by class
 

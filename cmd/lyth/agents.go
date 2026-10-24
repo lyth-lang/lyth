@@ -1,15 +1,204 @@
 package main
 
+// lyth guide, lyth init, and lyth fix: how AI coding agents (and people)
+// learn the installed version of Lyth. The guide is embedded in the binary,
+// and projects only point at it: the AGENTS.md of every project made so far
+// and the Claude Code skill in skills/lyth run `lyth guide`, `lyth check`,
+// and `lyth fix`, so those commands and the guide topics must keep working
+// in every later version.
+
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/lyth-lang/lyth/docs"
 	"github.com/lyth-lang/lyth/internal/build"
 )
+
+// guideTopics are the pages lyth guide <topic> prints, by name. The guide
+// (docs/guide/writing-lyth.md) lists each of them.
+var guideTopics = []struct{ name, about, file string }{
+	{"tour", "the language by example", "guide/tour.md"},
+	{"go", "Lyth for Go programmers: each feature next to the Go it replaces", "guide/lyth-for-go-programmers.md"},
+	{"cheatsheet", "Lyth syntax next to the Go it compiles to", "guide/cheatsheet.md"},
+	{"interop", "Go packages, modules, and Lyth packages seen from Go", "guide/go-interop.md"},
+	{"testing", "tests, benchmarks, and fuzzing", "guide/testing.md"},
+	{"tooling", "the lyth command, diagnostics, editors, and builds", "guide/tooling.md"},
+	{"language", "the language reference", "spec/language.md"},
+	{"types", "the type system: nullability, platform types, generics", "spec/types.md"},
+	{"errors", "error handling in depth", "spec/errors.md"},
+	{"collections", "the lyth/coll collection functions", "design/collections.md"},
+}
+
+const guideFile = "guide/writing-lyth.md"
+
+func cmdGuide(args []string, stdout, stderr io.Writer) int {
+	switch {
+	case len(args) == 0:
+		text, err := fs.ReadFile(docs.FS, guideFile)
+		if err != nil {
+			fmt.Fprintf(stderr, "lyth: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "This is the guide to lyth %s, the Lyth installed here.\n\n%s", version, text)
+	case len(args) == 1 && args[0] == "topics":
+		for _, t := range guideTopics {
+			fmt.Fprintf(stdout, "%-12s %s\n", t.name, t.about)
+		}
+	case len(args) == 1:
+		for _, t := range guideTopics {
+			if t.name == args[0] {
+				text, err := fs.ReadFile(docs.FS, t.file)
+				if err != nil {
+					fmt.Fprintf(stderr, "lyth: %v\n", err)
+					return 1
+				}
+				stdout.Write(text)
+				return 0
+			}
+		}
+		names := make([]string, len(guideTopics))
+		for i, t := range guideTopics {
+			names[i] = t.name
+		}
+		fmt.Fprintf(stderr, "lyth: there is no guide topic %q; the topics are %s\n", args[0], strings.Join(names, ", "))
+		return 2
+	default:
+		fmt.Fprintln(stderr, "usage: lyth guide [topics | <topic>]")
+		return 2
+	}
+	return 0
+}
+
+// agentsMD is the AGENTS.md lyth init writes. It holds no language rules,
+// only commands, so it stays true when Lyth changes.
+const agentsMD = `# Notes for AI coding agents
+
+The ` + "`.lyth`" + ` files in this module are written in Lyth, a programming language that
+compiles to Go. Lyth changes between versions, and what you know about it may describe an
+older one.
+
+Before you write or change Lyth code, run ` + "`lyth guide`" + ` and read it: it is the guide to
+the Lyth version installed here. Check each change with ` + "`lyth check`" + `; when it reports
+older syntax, ` + "`lyth fix`" + ` rewrites it. Run the program with ` + "`lyth run`" + ` and the tests
+with ` + "`lyth test ./...`" + `. Don't edit the generated Go in ` + "`.lyth/`" + `, and don't write
+` + "`.go`" + ` files to get around a Lyth error.
+`
+
+// claudeMD makes Claude Code, which reads CLAUDE.md, read AGENTS.md too.
+const claudeMD = "@AGENTS.md\n"
+
+const helloLyth = `func main() {
+    println("Hello, Lyth!")
+}
+`
+
+// cmdInit makes the current directory a Lyth module, or prepares an
+// existing Go module: go.mod (through go mod init), main.lyth when there is
+// no Lyth code yet, AGENTS.md and CLAUDE.md for coding agents, and .lyth/ in
+// .gitignore. Files that exist are kept.
+func cmdInit(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 1 || len(args) == 1 && strings.HasPrefix(args[0], "-") {
+		fmt.Fprintln(stderr, "usage: lyth init [module-path]")
+		return 2
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(stderr, "lyth: %v\n", err)
+		return 1
+	}
+	if real, err := filepath.EvalSymlinks(wd); err == nil {
+		wd = real // as the module root is
+	}
+	mod, err := build.FindModule(wd)
+	root := wd
+	switch {
+	case err == nil:
+		root = mod.Root
+		if len(args) == 1 && args[0] != mod.Path {
+			fmt.Fprintf(stderr, "lyth: %s is already in module %s (%s)\n", wd, mod.Path, filepath.Join(root, "go.mod"))
+			return 1
+		}
+	default:
+		path := filepath.Base(wd)
+		if len(args) == 1 {
+			path = args[0]
+		}
+		cmd := exec.Command("go", "mod", "init", path)
+		cmd.Dir, cmd.Stdout, cmd.Stderr = wd, stdout, stderr
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(stderr, "lyth: go mod init %s: %v\n", path, err)
+			return 1
+		}
+	}
+	created := func(name string) { fmt.Fprintf(stdout, "lyth: created %s\n", name) }
+	writeNew := func(path, content string) bool {
+		if _, err := os.Stat(path); err == nil {
+			return false
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			fmt.Fprintf(stderr, "lyth: %v\n", err)
+			return false
+		}
+		rel, _ := filepath.Rel(wd, path)
+		created(rel)
+		return true
+	}
+	if !hasLyth(root) {
+		writeNew(filepath.Join(wd, "main.lyth"), helloLyth)
+	}
+	writeNew(filepath.Join(root, "AGENTS.md"), agentsMD)
+	writeNew(filepath.Join(root, "CLAUDE.md"), claudeMD)
+	if err := ignoreGenerated(root); err != nil {
+		fmt.Fprintf(stderr, "lyth: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// hasLyth reports whether the module at root has a .lyth file.
+func hasLyth(root string) bool {
+	found := errors.New("found")
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() && path != root && (strings.HasPrefix(d.Name(), ".") || d.Name() == "vendor" || d.Name() == "testdata") {
+			return filepath.SkipDir
+		}
+		if !d.IsDir() && strings.HasSuffix(d.Name(), ".lyth") {
+			return found
+		}
+		return nil
+	})
+	return err == found
+}
+
+// ignoreGenerated adds .lyth/, where builds put the generated Go, to the
+// module's .gitignore.
+func ignoreGenerated(root string) error {
+	path := filepath.Join(root, ".gitignore")
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if l := strings.TrimSpace(line); l == ".lyth" || l == ".lyth/" || l == "/.lyth/" || l == "/.lyth" {
+			return nil
+		}
+	}
+	if len(data) > 0 && data[len(data)-1] != '\n' {
+		data = append(data, '\n')
+	}
+	return os.WriteFile(path, append(data, ".lyth/\n"...), 0o644)
+}
 
 // cmdFix rewrites older, Kotlin, and Go spellings of Lyth constructs, the
 // edits the compiler marks as fixes, and reports what is left.

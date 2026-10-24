@@ -9,6 +9,8 @@
 //	lyth vet [packages]
 //	lyth test [packages] [go test flags]
 //	lyth fix [packages]
+//	lyth init [module-path]
+//	lyth guide [topics | topic]
 //	lyth lsp
 //	lyth version
 package main
@@ -60,6 +62,8 @@ Usage:
   lyth test [packages] [go test flags]                    run tests (_test.lyth and _test.go files)
   lyth fix [packages]                                     rewrite older Lyth syntax and Kotlin and Go spellings
   lyth mod tidy                                           go mod tidy that sees imports in .lyth files
+  lyth init [module-path]                                 create a Lyth module, with AGENTS.md for coding agents
+  lyth guide [topics | topic]                             the guide to writing this version of Lyth
   lyth lsp [-no-vet]                                      run the language server on stdin and stdout
   lyth version                                            print the compiler version
 
@@ -142,6 +146,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdTest(rest, stdout, stderr)
 	case "fix":
 		return cmdFix(rest, stdout, stderr)
+	case "init":
+		return cmdInit(rest, stdout, stderr)
+	case "guide":
+		return cmdGuide(rest, stdout, stderr)
 	case "lsp":
 		return cmdLSP(rest, os.Stdin, stdout, stderr)
 	case "mod":
