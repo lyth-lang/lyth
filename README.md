@@ -1,10 +1,12 @@
 # Lyth
 
-Lyth is a statically typed language that compiles to readable Go and builds
-with the official Go toolchain. It is spelled like Go wherever Go has the
-concept, and adds Kotlin-inspired features where Go has none. It keeps Go's
-runtime, performance model, standard library, and ecosystem, and changes what
-everyday code looks like and how often it fails at run time.
+Lyth is a statically typed language that compiles to readable Go. It takes the
+boilerplate out of Go (`if err != nil` blocks, nil-check ladders, verbose
+closures, hand-written `json` tags) so programs are shorter and easier to read,
+and it keeps everything else: Go's runtime and speed, its standard library,
+every Go package, and the official toolchain. Where Go already has a concept,
+Lyth spells it Go's way; what Lyth adds (null safety, `when`, lambdas) comes
+mostly from Kotlin.
 
 > **Status: early vertical slice (v0.1-dev).** The compiler works end to end:
 > it parses, type-checks, generates Go, validates it, builds it, and maps
@@ -15,26 +17,24 @@ everyday code looks like and how often it fails at run time.
 ```kotlin
 import "errors"
 
-struct User {
+struct User {       // json tags: "id", "name", "email"
     ID: int64
     Name: string
-    Email: string?                     // nullable: *string in Go, null in JSON
+    Email: string?  // *string in Go, null in JSON
 }
 
-var ErrNotFound = errors.New("not found")
-
-func find(id: int64): User? throws {        // Go: func find(id int64) (*User, error)
+func find(id: int64): User? throws {  // Go: (*User, error)
     if id < 0 {
         throw errors.New("negative id ${id}")
     }
     if id == 0 {
-        return null                        // absent is a value, not an error
+        return null  // absent is a value, not an error
     }
     return User(ID = id, Name = "Ada", Email = null)
 }
 
 func describe(raw: string): string throws {
-    id := raw.toInt64()?                // ? propagates the parse error
+    id := raw.toInt64()?  // ? propagates the parse error
     user := find(id)? ?: return "nobody"
     email := user.Email ?: "no email"
     return "${user.Name} <${email}>"
@@ -46,16 +46,37 @@ func main() throws {
 }
 ```
 
-The generated Go is what a careful Go programmer would write by hand
-(`v, err := ...; if err != nil { return ..., err }`), so performance matches
-idiomatic Go by construction. The benchmark suite confirms it: across 18
-benchmarks (JSON, HTTP, PostgreSQL, concurrency, CPU- and allocation-heavy
-code), Lyth and hand-written Go show no measurable difference in time,
-allocations, or memory ([results](docs/design/benchmarks.md)).
+## Why Lyth
 
-[`examples/todoapi`](examples/todoapi) is a complete REST API in Lyth: routing,
-JSON, bearer-token authentication, PostgreSQL through `pgx`, structured logging,
-graceful shutdown, and unit and integration tests, all on ordinary Go libraries.
+- **Less code for the same program.** `?` propagates an error, `catch` handles
+  one inside an expression, `?:` supplies a fallback for a missing value, and
+  lambdas, `when`, and string templates replace the statements Go needs around
+  them. In the [benchmark suite](docs/design/benchmarks.md), where each workload
+  is written independently in both languages, the Lyth versions are about 20%
+  shorter overall (277 versus 344 lines) and 37% shorter in error-heavy code, and a
+  collection pipeline takes less than half the lines of the equivalent loops.
+- **Easier to read and review.** Much of today's code is written with AI, often
+  hundreds of lines at a time, and people still have to read it. With the
+  plumbing gone, what is left is what the program does. The compiler checks
+  what a reviewer would otherwise have to spot: using a value that may be nil
+  without a check, or leaving an error unhandled, is a compile error rather
+  than a crash in production.
+- **Error handling without the ceremony.** `func find(id: int64): User? throws`
+  is Go's `func find(id int64) (*User, error)`. Errors stay values, as in Go:
+  no exceptions, no unwinding, no hidden control flow. Only the repetition
+  around them is gone.
+- **All of Go, with no trade-off.** The generated Go is what a careful Go
+  programmer would write: no runtime, no reflection, no framework. Across 18
+  benchmarks (JSON, HTTP, PostgreSQL, concurrency, CPU- and allocation-heavy
+  code), Lyth and hand-written Go show no measurable difference in time,
+  allocations, or memory ([results](docs/design/benchmarks.md)). Every Go
+  package is used directly under its Go names, Lyth packages are ordinary Go
+  packages that Go code can import, and builds use the official `go` command.
+- **Built for backends.** [`examples/todoapi`](examples/todoapi) is a complete
+  REST API in Lyth: routing, JSON, bearer-token authentication, PostgreSQL
+  through `pgx`, structured logging, graceful shutdown, and unit and
+  integration tests, on `net/http`, `pgx`, and other ordinary Go libraries
+  with no Lyth framework in between.
 
 ## What Lyth changes, and what it does not
 

@@ -5,6 +5,7 @@ import { defineConfig } from 'astro/config';
 import starlightLinksValidator from 'starlight-links-validator';
 import starlightThemeNext from 'starlight-theme-next';
 import { repo, repoUrl, sidebar, sources, syncDocs } from './scripts/sync-docs.mjs';
+import lythGrammar from './src/lyth-grammar.mjs';
 
 // Picks the same tab (Lyth, Go or Output) in every example on the page, or Lyth where an example
 // has no such tab, and remembers it, keeping the clicked example where it was on screen.
@@ -57,7 +58,7 @@ export default defineConfig({
 		lythDocs(),
 		starlight({
 			title: 'Lyth',
-			description: 'A statically typed language with Kotlin-inspired syntax that compiles to readable Go.',
+			description: "Lyth compiles to readable Go: less boilerplate, simpler error handling, nil safety at compile time, and shorter code that is easier to review, with every Go package and Go's speed.",
 			favicon: '/favicon.svg',
 			social: repoUrl ? [{ icon: 'github', label: 'Source', href: repoUrl }] : [],
 			customCss: ['@fontsource-variable/instrument-sans', '@fontsource/commit-mono', './src/styles/custom.css'],
@@ -65,6 +66,7 @@ export default defineConfig({
 				themes: ['one-dark-pro', 'one-light'],
 				// the default (5.5) washes the theme's colors out; 4.5 is WCAG AA
 				minSyntaxHighlightingColorContrast: 4.5,
+				shiki: { langs: [lythGrammar] },
 			},
 			head: [{ tag: 'script', content: tabScript }],
 			sidebar,

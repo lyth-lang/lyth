@@ -15,13 +15,15 @@ There is nothing to keep in sync by hand: edit the files below, and the site fol
   is set, and render as plain text otherwise. A new file in `docs/guide`, `docs/spec`, or
   `docs/design` must be added to the sidebar groups at the top of the script, or the build fails;
   ADRs are listed automatically.
+- Lyth code is highlighted with `src/lyth-grammar.mjs`, a TextMate grammar that gives tokens Go
+  also has the Go grammar's scopes, so Lyth and Go tabs color alike.
 - Every Lyth example (a ```` ```kotlin ```` or ```` ```lyth ```` block) that compiles on its own
   gets a **Go** tab with what `lyth gen` produces for it, from this checkout's compiler, and an
   **Output** tab with the output recorded in `src/data/doc-outputs.json`. Examples that declare
   test functions are compiled as `_test.lyth` files. Fragments and examples of errors don't
   compile and are shown without tabs.
 - `go test ./tests -run TestDocExamples` (part of `go test ./...`) compiles and runs every
-  example with `fun main` and fails when it doesn't compile or its output differs from the
+  example with `func main` and fails when it doesn't compile or its output differs from the
   recorded one. After checking the difference, rerecord with
   `LYTH_BLESS=1 go test ./tests -run TestDocExamples`. Mark an example whose output changes
   from run to run with `// output varies`.

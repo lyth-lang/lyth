@@ -1,9 +1,11 @@
 # Lyth — Design Overview
 
-Lyth is a statically typed language with Kotlin-inspired syntax that compiles to
-readable Go source code, which the official Go toolchain then builds. It keeps
-Go's runtime, performance model, standard library, and ecosystem, and changes
-how everyday code reads and how often it fails at runtime.
+Lyth is a statically typed language that compiles to readable Go source code,
+which the official Go toolchain then builds. It keeps Go's runtime, performance
+model, standard library, and ecosystem, and changes how much code a program
+takes, how it reads, and how often it fails at runtime: all of Go, in fewer
+lines. Where Go has a concept, Lyth spells it Go's way; most of what Lyth adds
+comes from Kotlin.
 
 This document states the vision, the principles used to make decisions, the goals
 and non-goals, and a summary of the major decisions. Normative details live in
@@ -14,8 +16,12 @@ the [language spec](../spec/language.md), [type system](../spec/types.md), and
 
 ## 1. What problem Lyth solves
 
-Go's runtime is excellent and its source language is deliberately austere. For
-backend developers the cost of that austerity concentrates in a few places:
+Go's runtime is excellent and its source language is deliberately austere. The
+cost of that austerity is length: the same logic takes more lines, and the lines
+that carry it are spread between error checks and nil checks. That cost grows as
+more code is written with AI and read by people, who review hundreds of lines at
+a time and need to see what a program does. For backend developers it
+concentrates in a few places:
 
 | Pain point in Go                                    | Lyth answer                                                | Cost to Go-ness |
 |-----------------------------------------------------|-----------------------------------------------------------|-----------------|

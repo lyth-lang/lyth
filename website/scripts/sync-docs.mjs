@@ -5,10 +5,10 @@
 //   examples/todoapi/README.md                                          the REST API example page
 //   README.md                                                            parts of the home page
 //
-// Every Lyth example (a ```kotlin or ```lyth block) that compiles on its own gets a Go tab with
-// what `lyth gen` produces for it from this checkout's compiler, and an Output tab with the output
-// recorded in src/data/doc-outputs.json by the doc-example test (rerecord with
-// `LYTH_BLESS=1 go test ./tests -run TestDocExamples`).
+// Every Lyth example (a ```kotlin or ```lyth block) is highlighted with src/lyth-grammar.mjs, and one
+// that compiles on its own gets a Go tab with what `lyth gen` produces for it from this checkout's
+// compiler, and an Output tab with the output recorded in src/data/doc-outputs.json by the
+// doc-example test (rerecord with `LYTH_BLESS=1 go test ./tests -run TestDocExamples`).
 
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -130,7 +130,7 @@ let exampleId = 0;
 
 /** Tabs with the example, its Go and its output (radio buttons, so they work without JS). */
 function example(source, outputs) {
-	const tabs = [['lyth', 'Lyth', fence('kotlin', source)]];
+	const tabs = [['lyth', 'Lyth', fence('lyth', source)]];
 	const go = goFor(source);
 	if (go) tabs.push(['go', 'Go', fence('go', go)]);
 	const output = outputs.get(source);
@@ -193,7 +193,8 @@ function convert(rest, srcDir, outputs) {
 			while (++i < rest.length && !rest[i].startsWith('```')) body.push(rest[i]);
 			body.push(rest[i]);
 		} else {
-			body.push(rewriteLinks(rest[i], srcDir));
+			// an indented Lyth block (in a list item) is highlighted as Lyth, without tabs
+			body.push(rewriteLinks(rest[i].replace(/^(\s+)```kotlin(?=\s*$)/, '$1```lyth'), srcDir));
 		}
 	}
 	return body.join('\n');
@@ -239,6 +240,7 @@ export function syncDocs() {
 	if (missing.length) throw new Error(`add ${missing.join(', ')} to the sidebar groups in website/scripts/sync-docs.mjs`);
 	const pages = [
 		...srcs.map(([file, slug]) => page(file, slug, outputs)),
+		readmeSection('Why Lyth', 'why', outputs),
 		readmeSection('What Lyth changes, and what it does not', 'changes', outputs),
 		readmeSection('Quick start', 'quickstart', outputs),
 		homeExample(),
