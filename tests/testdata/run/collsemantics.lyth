@@ -1,0 +1,125 @@
+// collsemantics: the guarantees of the Collection API (docs/design/collections.md):
+// order, stability, empty and nil inputs, input immutability, aliasing, and
+// how often callbacks run.
+import "lyth/coll"
+
+struct Item {
+    ID: int
+    Group: string
+    Rank: int
+}
+
+struct Box {
+    N: int
+}
+
+func ids(items: []Item): []int = items.Map { it.ID }
+
+func main() {
+    items := [
+        Item(ID = 1, Group = "b", Rank = 2),
+        Item(ID = 2, Group = "a", Rank = 1),
+        Item(ID = 3, Group = "b", Rank = 1),
+        Item(ID = 4, Group = "a", Rank = 2),
+        Item(ID = 5, Group = "c", Rank = 1),
+    ]
+
+    // Order: results keep the input order; sorts are stable.
+    println("filter", ids(items.Filter { it.Rank == 1 }))
+    println("sortedBy", ids(items.SortedBy { it.Rank }))
+    println("sortedWith", ids(items.SortedWith { a, b -> b.Rank - a.Rank }))
+    groups := items.GroupBy { it.Group }
+    println("groups", groups.SortedKeys(), ids(groups["a"]), ids(groups["b"]))
+    println("distinctBy", ids(items.DistinctBy { it.Group }), [3, 1, 3, 2, 1].Distinct())
+    yes, no := items.Partition { it.Rank == 2 }
+    println("partition", ids(yes), ids(no))
+    println("flatMap", items.Take(2).FlatMap { [it.ID, it.ID * 10] })
+    println("associateBy", items.AssociateBy { it.Group }["b"].ID)
+
+    // Callbacks run once per element, in order (SortedBy computes each key once).
+    seen: []int = []
+    keyCalls := 0
+    items.SortedBy { x ->
+        keyCalls++
+        seen = append(seen, x.ID)
+        x.Rank
+    }
+    println("key calls", keyCalls, seen)
+
+    // Find, Any, and All stop at the first element that decides the result.
+    findCalls := 0
+    _, found := items.Find { x ->
+        findCalls++
+        x.ID == 2
+    }
+    anyCalls := 0
+    some := items.Any { x ->
+        anyCalls++
+        x.ID == 1
+    }
+    mapCalls := 0
+    items.Map { x ->
+        mapCalls++
+        x.ID
+    }
+    println("short-circuit", findCalls, found, anyCalls, some, mapCalls)
+
+    // The input is never changed.
+    before := ids(items)
+    items.SortedBy { -it.ID }
+    items.SortedWith { a, b -> b.ID - a.ID }
+    items.Filter { it.ID > 2 }
+    items.Take(10)
+    items.Distinct()
+    println("input unchanged", ids(items) == null, ids(items), before)
+
+    // Results never share storage with the input: changing or appending to a
+    // result leaves the input alone, and changing the input leaves the result.
+    taken := items.Take(2)
+    taken[0].ID = 100
+    taken = append(taken, items[4])
+    filtered := items.Filter { true }
+    items[1].ID = 200
+    println("aliasing", items[0].ID, filtered[1].ID, len(taken), cap(items.Take(2)))
+    items[1].ID = 2
+
+    // Elements are copied as values: pointers still point at the same struct.
+    boxes := [&Box(N = 1)]
+    boxes.Filter { true }[0].N = 9
+    println("shallow", boxes[0].N)
+
+    // Find returns (element, true) for the first match, else (zero, false).
+    zero, foundZero := [0, 1, 0].Find { it == 0 }
+    _, foundTwo := [0, 1].Find { it == 2 }
+    firstB, _ := items.Find { it.Group == "b" }
+    nilItems: []Item
+    none, foundNone := nilItems.Find { true }
+    println("find", zero, foundZero, foundTwo, firstB.ID, none.ID, foundNone)
+
+    // Empty and nil inputs give empty, non-nil results and neutral values.
+    empty: []Item = []
+    println("nil", nilItems.Filter { true } == null, nilItems.Map { it.ID } == null, nilItems.SortedBy { it.ID } == null, nilItems.Take(3) == null)
+    println("empty", len(empty.GroupBy { it.Group }), empty.Any { true }, empty.All { false }, empty.Count { true }, empty.Fold(7) { acc, x -> acc + x.ID })
+    println("take", len(items.Take(-1)), len(items.Take(0)), len(items.Take(99)), ids(items.Take(2)))
+    println("set", len([1, 1, 2].ToSet()), 2 in [1, 1, 2].ToSet(), 3 in [1, 1, 2].ToSet())
+}
+
+// Output:
+// filter [2 3 5]
+// sortedBy [2 3 5 1 4]
+// sortedWith [1 4 2 3 5]
+// groups [a b c] [2 4] [1 3]
+// distinctBy [1 2 5] [3 1 2]
+// partition [1 4] [2 3 5]
+// flatMap [1 10 2 20]
+// associateBy 3
+// key calls 5 [1 2 3 4 5]
+// short-circuit 2 true 1 true 5
+// input unchanged false [1 2 3 4 5] [1 2 3 4 5]
+// aliasing 1 2 3 2
+// shallow 9
+// find 0 true false 1 0 false
+// nil false false false false
+// empty 0 false true 0 7
+// take 0 0 5 [1 2]
+// set 2 true false

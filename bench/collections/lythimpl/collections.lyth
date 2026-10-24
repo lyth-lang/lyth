@@ -1,0 +1,22 @@
+// Package lythimpl is the Lyth version of the collections workload, written
+// with lyth/coll chains.
+package lythimpl
+
+import "lyth/coll"
+
+// Profile is a candidate in a ranking.
+struct Profile {
+    ID: int
+    Distance: int
+    Hidden: bool
+}
+
+// Rank returns the nearest limit visible profiles that are not blocked.
+func Rank(ps: []Profile, blocked: map[int]bool, limit: int): []Profile =
+    ps.Filter { !it.Hidden && it.ID !in blocked }.SortedBy { it.Distance }.Take(limit)
+
+// NearIDs returns the IDs of the profiles closer than max.
+func NearIDs(ps: []Profile, max: int): []int = ps.Filter { it.Distance < max }.Map { it.ID }
+
+// ByDistance returns the profiles sorted by distance, leaving ps unchanged.
+func ByDistance(ps: []Profile): []Profile = ps.SortedBy { it.Distance }

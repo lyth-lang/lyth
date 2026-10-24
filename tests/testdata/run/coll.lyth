@@ -1,4 +1,6 @@
 // coll checks the standard library's collection operations (lyth/coll).
+import "cmp"
+import "encoding/json"
 import "lyth/coll"
 
 struct Todo {
@@ -25,6 +27,33 @@ func main() {
     done, open := todos.Partition { it.Done }
     println(len(done), len(open), todos.AssociateBy { it.ID }[2].Title)
     println([[1, 2], [3]].FlatMap { it })
+
+    // Ranking with a set for membership, a sort, and a limit.
+    blocked := [2].ToSet()
+    ranked := todos
+        .Filter { it.ID !in blocked }
+        .SortedWith { a, b -> cmp.Compare(b.ID, a.ID) }
+        .Take(5)
+    println(ranked.Map { it.ID }, todos.Take(1).Map { it.ID }, len(todos.Take(0)), len(todos.Take(-1)))
+    println(todos.DistinctBy { it.Tag }.Map { it.ID })
+
+    // Results are new slices: changing one leaves the input alone.
+    firstTwo := todos.Take(2)
+    firstTwo[0].Title = "changed"
+    println(todos[0].Title)
+
+    // Empty and nil inputs give empty, non-nil results ([] in JSON, not null).
+    nilTodos: []Todo
+    empty := [
+        nilTodos.Filter { it.Done }.Map { it.ID },
+        nilTodos.SortedBy { it.ID }.Map { it.ID },
+        nilTodos.SortedWith { a, b -> 0 }.Map { it.ID },
+        nilTodos.Take(3).Map { it.ID },
+        nilTodos.DistinctBy { it.Tag }.Map { it.ID },
+        nilTodos.Map { it.ID }.Distinct(),
+    ]
+    b := json.Marshal(empty) catch { []byte("?") }
+    println(string(b), len(nilTodos.ToSet()))
 }
 
 // Output:
@@ -35,3 +64,7 @@ func main() {
 // [2 3 1] [3 1 2]
 // 1 2 fix bug
 // [1 2 3]
+// [3 1] [1] 0 0
+// [1 2]
+// write spec
+// [[],[],[],[],[],[]] 0

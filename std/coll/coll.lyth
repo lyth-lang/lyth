@@ -107,11 +107,77 @@ func []T.Distinct[T: comparable](): []T {
     return out
 }
 
+// DistinctBy returns the first element for each key, in first-seen order.
+func []T.DistinctBy[T, K: comparable](key: (T) -> K): []T {
+    seen: map[K]bool = [:]
+    out: []T = []
+    for x in self {
+        k := key(x)
+        if k !in seen {
+            seen[k] = true
+            out = append(out, x)
+        }
+    }
+    return out
+}
+
 // SortedBy returns a copy sorted by the key of each element; elements with
-// equal keys keep their order.
+// equal keys keep their order. key runs once per element, in order: the keys
+// are computed before sorting rather than at each comparison.
 func []T.SortedBy[T, K: cmp.Ordered](key: (T) -> K): []T {
-    out := slices.Clone(self)
-    slices.SortStableFunc(out, { a, b -> cmp.Compare(key(a), key(b)) })
+    pairs := make([]keyed[T, K], len(self))
+    for i, x in self {
+        pairs[i] = keyed[T, K](key = key(x), value = x)
+    }
+    slices.SortStableFunc(pairs, { a, b -> cmp.Compare(a.key, b.key) })
+    out := make([]T, len(pairs))
+    for i, p in pairs {
+        out[i] = p.value
+    }
+    return out
+}
+
+// keyed is an element with its sort key.
+struct keyed[T, K] {
+    key: K
+    value: T
+}
+
+// SortedWith returns a copy sorted by compare, which returns a negative
+// number, zero, or a positive number as cmp.Compare does; elements that
+// compare equal keep their order. It sorts by several keys or in descending
+// order: { a, b -> cmp.Compare(b.Score, a.Score) }.
+func []T.SortedWith[T](compare: (T, T) -> int): []T {
+    out := copyOf(self)
+    slices.SortStableFunc(out, compare)
+    return out
+}
+
+// Take returns a copy of the first n elements, or of all of them when there
+// are fewer; n <= 0 gives an empty slice.
+func []T.Take[T](n: int): []T {
+    out: []T = []
+    if n <= 0 {
+        return out
+    }
+    return append(out, self[:min(n, len(self))]...)
+}
+
+// ToSet returns a set of the elements: a map from each element to true, so
+// x in set is a map lookup rather than a scan of the slice.
+func []T.ToSet[T: comparable](): map[T]bool {
+    out := make(map[T]bool, len(self))
+    for x in self {
+        out[x] = true
+    }
+    return out
+}
+
+// copyOf returns a copy of xs that is never nil, so an empty result encodes
+// as [] rather than null.
+func copyOf[T](xs: []T): []T {
+    out := make([]T, len(xs))
+    copy(out, xs)
     return out
 }
 

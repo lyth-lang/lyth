@@ -500,8 +500,9 @@ to `Page(...)`, or written out: `Page[string](...)`, `maxOf[int](3, 7)`.
 plain Go function taking the receiver first, `Shout("done")`, and its body
 reaches the receiver through `self`. The standard library's `lyth/coll`
 provides collection operations this way (`Filter`, `Map`, `GroupBy`,
-`SortedBy`, ...). Each returns a new slice, so a loop is still the cheapest
-choice on a hot path.
+`SortedBy`, `Take`, ...). Each returns a new slice and never changes its
+receiver, so a loop is still the cheapest choice on a hot path; the
+[Collection API](../design/collections.md) lists them with their costs.
 
 ## Goroutines
 

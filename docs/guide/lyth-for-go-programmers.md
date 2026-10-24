@@ -461,7 +461,8 @@ nested helper calls. `lyth/coll` is a Lyth package of generic extension
 functions: `orders.Filter { ... }` is the Go call `coll.Filter(orders, ...)`,
 and the Go tab shows the chain. Each step allocates a new slice, which the
 code makes visible; where that matters, a loop is still available and reads
-the same as Go.
+the same as Go. The [Collection API](../design/collections.md) documents each
+operation's result, empty-input behavior, and measured cost.
 
 ## Read-only parameters and shadowing
 

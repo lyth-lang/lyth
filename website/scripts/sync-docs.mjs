@@ -34,7 +34,7 @@ export const groups = [
 	{ label: 'Language reference', pages: ['spec/language', 'spec/types', 'spec/errors'] },
 	{
 		label: 'Design',
-		pages: ['design/overview', 'design/compiler', 'design/interop', 'design/diagnostics', 'design/benchmarks'],
+		pages: ['design/overview', 'design/compiler', 'design/interop', 'design/diagnostics', 'design/collections', 'design/benchmarks'],
 	},
 ];
 

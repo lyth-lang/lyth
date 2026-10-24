@@ -1,0 +1,52 @@
+# lyth/coll chains (lythimpl) vs hand-written Go loops (goimpl), bench/collections
+# Both return new, right-sized, non-nil results (TestEquivalence checks it).
+# Apple M1 Pro, go1.26.7 darwin/arm64, 6 runs each alternating which goes first, -benchtime 300ms
+# lyth test -bench . -benchmem ./collections/...   (Go) and with -tags impl_lyth (Lyth)
+
+                       │    go.txt    │               lyth.txt                │
+                       │    sec/op    │    sec/op     vs base                │
+Rank/n=100-10            4.522µ ±  2%   5.684µ ±  7%   +25.70% (p=0.002 n=6)
+Rank/n=1000-10           85.83µ ±  3%   96.94µ ±  2%   +12.94% (p=0.002 n=6)
+Rank/n=10000-10          1.456m ±  1%   1.556m ±  4%    +6.89% (p=0.002 n=6)
+Rank/n=100000-10         18.28m ±  4%   19.33m ±  4%    +5.75% (p=0.002 n=6)
+NearIDs/n=100-10         260.6n ±  9%   609.6n ± 15%  +133.99% (p=0.002 n=6)
+NearIDs/n=1000-10        1.903µ ±  7%   4.064µ ±  7%  +113.56% (p=0.002 n=6)
+NearIDs/n=10000-10       21.56µ ±  7%   48.46µ ± 10%  +124.79% (p=0.002 n=6)
+NearIDs/n=100000-10      239.1µ ± 10%   558.0µ ± 11%  +133.39% (p=0.002 n=6)
+ByDistance/n=100-10      4.409µ ±  4%   5.068µ ±  4%   +14.96% (p=0.002 n=6)
+ByDistance/n=1000-10     87.99µ ±  3%   90.99µ ±  4%    +3.41% (p=0.041 n=6)
+ByDistance/n=10000-10    1.339m ±  2%   1.359m ±  2%         ~ (p=0.180 n=6)
+ByDistance/n=100000-10   17.85m ±  3%   18.02m ±  3%         ~ (p=1.000 n=6)
+geomean                  88.93µ         123.5µ         +38.82%
+
+                       │    go.txt    │                lyth.txt                │
+                       │     B/op     │     B/op       vs base                │
+Rank/n=100-10            3.094Ki ± 0%   11.672Ki ± 0%  +277.27% (p=0.002 n=6)
+Rank/n=1000-10           24.47Ki ± 0%   125.67Ki ± 0%  +413.60% (p=0.002 n=6)
+Rank/n=10000-10          240.5Ki ± 0%   1300.4Ki ± 0%  +440.79% (p=0.002 n=6)
+Rank/n=100000-10         2.290Mi ± 0%   15.372Mi ± 0%  +571.39% (p=0.002 n=6)
+NearIDs/n=100-10           960.0 ± 0%     3440.0 ± 0%  +258.33% (p=0.002 n=6)
+NearIDs/n=1000-10        7.938Ki ± 0%   27.953Ki ± 0%  +252.17% (p=0.002 n=6)
+NearIDs/n=10000-10       125.2Ki ± 0%    460.0Ki ± 0%  +267.41% (p=0.002 n=6)
+NearIDs/n=100000-10      1.864Mi ± 0%    6.965Mi ± 0%  +273.56% (p=0.002 n=6)
+ByDistance/n=100-10      2.625Ki ± 0%    5.750Ki ± 0%  +119.05% (p=0.002 n=6)
+ByDistance/n=1000-10     24.00Ki ± 0%    56.00Ki ± 0%  +133.33% (p=0.002 n=6)
+ByDistance/n=10000-10    240.0Ki ± 0%    560.0Ki ± 0%  +133.33% (p=0.002 n=6)
+ByDistance/n=100000-10   2.289Mi ± 0%    5.344Mi ± 0%  +133.45% (p=0.002 n=6)
+geomean                  61.07Ki         213.8Ki       +250.11%
+
+                       │   go.txt   │               lyth.txt                │
+                       │ allocs/op  │  allocs/op   vs base                 │
+Rank/n=100-10            2.000 ± 0%   10.000 ± 0%   +400.00% (p=0.002 n=6)
+Rank/n=1000-10           2.000 ± 0%   14.000 ± 0%   +600.00% (p=0.002 n=6)
+Rank/n=10000-10          2.000 ± 0%   20.000 ± 0%   +900.00% (p=0.002 n=6)
+Rank/n=100000-10         2.000 ± 0%   30.000 ± 0%  +1400.00% (p=0.002 n=6)
+NearIDs/n=100-10         4.000 ± 0%    7.000 ± 0%    +75.00% (p=0.002 n=6)
+NearIDs/n=1000-10        7.000 ± 0%   10.000 ± 0%    +42.86% (p=0.002 n=6)
+NearIDs/n=10000-10       13.00 ± 0%    16.00 ± 0%    +23.08% (p=0.002 n=6)
+NearIDs/n=100000-10      22.00 ± 0%    26.00 ± 0%    +18.18% (p=0.002 n=6)
+ByDistance/n=100-10      1.000 ± 0%    2.000 ± 0%   +100.00% (p=0.002 n=6)
+ByDistance/n=1000-10     1.000 ± 0%    2.000 ± 0%   +100.00% (p=0.002 n=6)
+ByDistance/n=10000-10    1.000 ± 0%    2.000 ± 0%   +100.00% (p=0.002 n=6)
+ByDistance/n=100000-10   1.000 ± 0%    2.000 ± 0%   +100.00% (p=0.002 n=6)
+geomean                  2.665         7.633        +186.47%

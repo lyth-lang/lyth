@@ -1,0 +1,18 @@
+// Collection operations live in lyth/coll; the diagnostics name it.
+
+struct Todo {
+    ID: int
+    Done: bool
+}
+
+func main() {
+    todos := [Todo(ID = 1, Done = false)]
+    a := todos.Filter { !it.Done } // ERROR E0205 "Filter is in the standard library: import"
+    b := todos.filter { !it.Done } // ERROR E0205 "Lyth's collection operations are exported Go names: Filter"
+    c := todos.first { it.Done } // ERROR E0205 "exported Go names: Find"
+    d := todos.unique() // ERROR E0205 "Distinct"
+    e := todos.contains(todos[0]) // ERROR E0205 "test membership with in: x in xs"
+    f := todos.exclude { it.Done } // ERROR E0205 "xs.Filter { !... }"
+    g := todos.isEmpty() // ERROR E0205 "len(xs) == 0"
+    println(a, b, c, d, e, f, g)
+}

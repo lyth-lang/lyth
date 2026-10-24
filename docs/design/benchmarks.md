@@ -46,6 +46,14 @@ same inputs before any timing is trusted.
 The Lyth implementations are 3–37% shorter than the Go ones (277 versus 344
 lines in total), mostly because `?` replaces `if err != nil` blocks.
 
+`collections` was added after the results in §4 and measures something
+different: the Lyth side uses `lyth/coll` chains and the Go side the loops a Go
+programmer writes instead, at 100 to 100,000 elements. It shows what a chain
+costs relative to a loop, not a difference in generated code, so it is
+reported separately ([Collection API §5](collections.md#5-mutation-ordering-and-cost),
+`bench/results/collections.txt`) and is not part of the summary in §1. A
+full `benchrun` run includes it.
+
 ## 3. Method
 
 - **Driver.** `go run ./cmd/benchrun` builds `lyth` from the repository, runs

@@ -206,10 +206,26 @@ func (c *Checker) lookupMember(t types.Type, name string, id *syntax.Ident) *mem
 	switch base.(type) {
 	case *types.Slice, *types.Map, *types.Array, *types.Chan:
 		switch name {
-		case "size", "length", "count", "len":
+		case "size", "length", "len":
 			d.WithHint("use the builtin len(...)")
 		case "add", "push", "append":
 			d.WithHint("use append: xs = append(xs, x)")
+		case "contains", "includes", "has", "containsKey":
+			d.WithHint("test membership with in: x in xs (for a map, the keys)")
+		case "isEmpty", "isNotEmpty":
+			d.WithHint("compare the length: len(xs) == 0")
+		case "forEach", "each":
+			d.WithHint("use a loop: for x in xs { ... }")
+		case "exclude", "filterNot", "reject":
+			d.WithHint("negate the condition: xs.Filter { !... } (import \"lyth/coll\")")
+		default:
+			if coll, ok := collNames[name]; ok {
+				if coll == name {
+					d.WithHint("%s is in the standard library: import \"lyth/coll\"", name)
+				} else {
+					d.WithHint("Lyth's collection operations are exported Go names: %s (import \"lyth/coll\")", coll)
+				}
+			}
 		}
 	case *types.Basic:
 		if types.IsString(base) && (name == "length" || name == "size" || name == "len") {
@@ -639,4 +655,22 @@ func entryNames(d *types.TypeDecl) []string {
 		names[i] = e.Name
 	}
 	return names
+}
+
+// collNames maps the operations of lyth/coll, and the Kotlin names users
+// try for them, to their lyth/coll names. TestCollNames keeps it in step
+// with std/coll.
+var collNames = map[string]string{
+	"Filter": "Filter", "Map": "Map", "FlatMap": "FlatMap", "Find": "Find", "Any": "Any",
+	"All": "All", "Count": "Count", "Fold": "Fold", "Partition": "Partition",
+	"Distinct": "Distinct", "DistinctBy": "DistinctBy", "SortedBy": "SortedBy",
+	"SortedWith": "SortedWith", "Take": "Take", "ToSet": "ToSet", "GroupBy": "GroupBy",
+	"AssociateBy": "AssociateBy", "Keys": "Keys", "SortedKeys": "SortedKeys", "Values": "Values",
+
+	"filter": "Filter", "map": "Map", "flatMap": "FlatMap", "find": "Find", "first": "Find",
+	"firstOrNull": "Find", "any": "Any", "all": "All", "count": "Count", "fold": "Fold",
+	"reduce": "Fold", "partition": "Partition", "distinct": "Distinct", "unique": "Distinct",
+	"distinctBy": "DistinctBy", "sortedBy": "SortedBy", "sortBy": "SortedBy",
+	"sortedWith": "SortedWith", "take": "Take", "toSet": "ToSet", "groupBy": "GroupBy",
+	"associateBy": "AssociateBy", "keys": "Keys", "values": "Values",
 }
