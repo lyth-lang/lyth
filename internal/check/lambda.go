@@ -14,6 +14,10 @@ func signatureOf(t types.Type) *types.Signature {
 	case *types.Signature:
 		return b
 	case *types.Named:
+		if u := definedUnder(b); u != nil {
+			sig, _ := types.Base(u).(*types.Signature)
+			return sig
+		}
 		if b.Go != nil {
 			if sig, ok := b.Go.Underlying().(*gotypes.Signature); ok {
 				return types.LiftSignature(sig)
@@ -80,7 +84,7 @@ func (c *Checker) lambda(e *syntax.LambdaExpr, want types.Type) *operand {
 						t = at
 					}
 				}
-				v := &VarSym{name: p.Name.Name, Type: t, Kind: ParamVar, Span: p.Name.S, Used: true}
+				v := &VarSym{name: p.Name.Name, Type: t, Kind: ParamVar, Span: p.Name.S, Used: true, owner: fn}
 				if p.Name.Name != "_" {
 					c.declare(scope, v, p.Name.S)
 				}
@@ -117,7 +121,7 @@ func (c *Checker) lambda(e *syntax.LambdaExpr, want types.Type) *operand {
 			} else {
 				t = c.resolveType(p.Type)
 			}
-			v := &VarSym{name: p.Name.Name, Type: t, Kind: ParamVar, Span: p.Name.S, Used: true}
+			v := &VarSym{name: p.Name.Name, Type: t, Kind: ParamVar, Span: p.Name.S, Used: true, owner: fn}
 			if p.Name.Name != "_" {
 				c.declare(scope, v, p.Name.S)
 			}

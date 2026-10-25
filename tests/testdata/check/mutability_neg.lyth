@@ -8,11 +8,11 @@ struct Counter {
 }
 
 func Counter.bump() {
-    Count++ // ERROR E0502 "value receiver"
+    self.Count++ // ERROR E0502 "value receiver"
 }
 
 func *Counter.inc() {
-    Count++
+    self.Count++
 }
 
 func *Counter.reset() {

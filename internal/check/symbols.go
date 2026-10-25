@@ -47,6 +47,19 @@ type VarSym struct {
 	// NotReassigned is set for a local its function never assigns after
 	// declaring it (see reassignedNames); such a local smart-casts.
 	NotReassigned bool
+	// Rebinds is the parameter a local declared by ctx := f(ctx) replaces
+	// (ADR 0039). InPlace is set when the parameter is declared in the same
+	// scope, the function's outermost block, where Go's := assigns it.
+	Rebinds *VarSym
+	InPlace bool
+	// FreshName asks the lowering for a Go name of its own: the local
+	// replaces a parameter that a closure created earlier captured, which
+	// Go's ctx, cancel := ... would assign under the closure.
+	FreshName bool
+	// owner is the function or lambda that declares a parameter, and
+	// captured records that a nested function literal used it.
+	owner    *funcCtx
+	captured bool
 }
 
 func (v *VarSym) Name() string          { return v.name }
@@ -119,7 +132,7 @@ type TypeSym struct {
 	Span    source.Span
 	Pkg     *Package
 	syn     syntax.Decl
-	// Alias is set for typealias declarations; Type is resolved lazily.
+	// Alias is set for type aliases (type Name = Type); Type is resolved lazily.
 	Alias     *syntax.TypeAliasDecl
 	AliasPub  bool
 	GoName    string
@@ -229,6 +242,13 @@ type Scope struct {
 
 func newScope(parent *Scope, kind ScopeKind) *Scope {
 	return &Scope{parent: parent, kind: kind, syms: map[string]Symbol{}}
+}
+
+// Replace makes sym the symbol of its name in s from now on, hiding the one
+// declared before (a parameter replaced by ctx := f(ctx), ADR 0039).
+func (s *Scope) Replace(sym Symbol) {
+	s.syms[sym.Name()] = sym
+	s.order = append(s.order, sym)
 }
 
 // Insert adds a symbol; it returns the existing symbol if the name is taken.

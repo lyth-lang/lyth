@@ -19,17 +19,20 @@ has the exact rules.
 | `struct User { Name: string }` | ``type User struct { Name string `json:"name"` }`` |
 | `struct Circle : Shape { R: float64 }` | `type Circle struct { ... }` and `var _ Shape = Circle{}` |
 | `secret: string` (lower-case field) | `secret string` (unexported, no `json` tag) |
-| `func User.Hello(): string` (the receiver is `self`) | `func (u User) Hello() string` |
+| `struct Item { Base; Name: string }` (a type alone on a line embeds it) | ``type Item struct { Base; Name string `json:"name"` }`` |
+| `func User.Hello(): string = "hi ${self.Name}"` (members through `self`) | `func (u User) Hello() string { return "hi " + u.Name }` |
 | `func *User.rename(n: string)` (pointer receiver) | `func (u *User) rename(n string)` |
 | `interface Shape { Area(): float64 }` | `type Shape interface { Area() float64 }` |
-| `typealias Handler = (Ctx) -> unit throws` | `type Handler = func(Ctx) error` |
+| `type Handler = (Ctx) -> unit throws` | `type Handler = func(Ctx) error` |
+| `type UserID int64`, `type Role string`, `func Role.Valid(): bool` | `type UserID int64`, `type Role string`, `func (r Role) Valid() bool` |
 | `func maxOf[T: cmp.Ordered](a: T, b: T): T` | `func maxOf[T cmp.Ordered](a T, b T) T` |
 | `struct Page[T] { Items: []T }`, `func Page[T].First(): T` | `type Page[T any] struct { ... }`, `func (p Page[T]) First() T` |
 | `func string.Shout(): string` (extension), `"hi".Shout()` | `func Shout(s string) string`, `Shout("hi")` |
-| `enum Color { Red, Green }` | `type Color int`, `const ( ColorRed Color = iota; ColorGreen )`, and a `String` method |
+| `enum Color { Red, Green }` | `type Color int`, `const ( ColorRed Color = iota; ColorGreen )`, `String`, and `MarshalText`/`UnmarshalText` with the names `"red"`, `"green"` |
+| `enum Plan: string { Free = "free" }` | `type Plan string`, `const PlanFree Plan = "free"`, and an `UnmarshalText` that accepts only the values |
 | `sealed interface Shape { ... }` and `struct Circle : Shape` | an interface with an unexported `isShape()` that only declared members have |
-| `import "net/http" as h` | `import h "net/http"` |
-| `import (` / `"fmt"` / `"net/http" as h` / `)` | `import (` / `"fmt"` / `h "net/http"` / `)` |
+| `import h "net/http"` | `import h "net/http"` (the same) |
+| `import (` / `"fmt"` / `h "net/http"` / `)` | `import (` / `"fmt"` / `h "net/http"` / `)` |
 
 ## Types
 

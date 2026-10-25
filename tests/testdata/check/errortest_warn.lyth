@@ -1,0 +1,23 @@
+// A type test of an error type on an error value misses wrapped errors
+// (W0007, ADR 0041); interface targets and values bound as any do not warn.
+import "errors"
+import "io"
+
+struct NotFound {
+    ID: int
+}
+
+func *NotFound.Error(): string = "not found ${self.ID}"
+
+func classify(err: error): string = when err {
+    is *NotFound -> "not found" // WARN W0007 "a wrapped *NotFound does not match"
+    else -> "other"
+}
+
+func main() {
+    err: error = errors.New("x")
+    println(err is *NotFound) // WARN W0007 "a type test sees only the dynamic type of err"
+    nf := err as? *NotFound // WARN W0007 "a wrapped *NotFound does not match"
+    v: any = err
+    println(v is *NotFound, err is io.Reader, nf == null, classify(err))
+}

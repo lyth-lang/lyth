@@ -8,7 +8,7 @@ struct Store {
 }
 
 func Store.get(key: string): int throws {
-    v, ok := Items[key]
+    v, ok := self.Items[key]
     if !ok {
         throw ErrNotFound
     }

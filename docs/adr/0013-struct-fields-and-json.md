@@ -1,6 +1,6 @@
 # ADR 0013: Public fields by default; automatic `json` tags
 
-**Status:** Accepted; field visibility and the json key rule amended by [0022](0022-capitalization-is-visibility.md)
+**Status:** Accepted; field visibility and the json key rule amended by [0022](0022-capitalization-is-visibility.md); the key rule and optional fields amended by [0036](0036-automatic-json-tags.md)
 
 ## Context
 Go's reflection-based libraries (`encoding/json`, `database/sql` scanners,

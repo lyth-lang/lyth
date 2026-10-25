@@ -6,13 +6,13 @@ struct Circle {
     R: float64
 }
 
-func Circle.Area(): float64 = 3 * R * R
+func Circle.Area(): float64 = 3 * self.R * self.R
 
 struct NotFound {
     Key: string
 }
 
-func *NotFound.Error(): string = "not found: ${Key}"
+func *NotFound.Error(): string = "not found: ${self.Key}"
 
 func describe(s: Shape): string {
     if s is Circle {

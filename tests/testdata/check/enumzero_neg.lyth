@@ -1,0 +1,17 @@
+// A string-backed enum has a zero value only when "" is one of its entries
+// (ADR 0035).
+enum Plan: string { Free = "free", Pro = "pro" }
+
+enum Mode: string { Off = "", On = "on" }
+
+struct Account {
+    Plan: Plan
+    Mode: Mode
+}
+
+func main() {
+    p: Plan // ERROR E0405 "p of type Plan needs an initializer: Plan has no zero value"
+    m: Mode
+    a := Account(Mode = Mode.On) // ERROR E0211 "missing field Plan in construction of Account"
+    println(p, m, a.Plan, int(Plan.Pro)) // ERROR E0214 "cannot convert Plan.Pro (type Plan) to int"
+}

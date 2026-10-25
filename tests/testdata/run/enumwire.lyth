@@ -1,0 +1,99 @@
+// Enums on the wire (ADR 0035): a plain enum travels by its entry's name
+// under the json key rule, decoding rejects anything else, and a
+// string-backed enum is Go's type T string with exactly its values.
+import "encoding/json"
+import jsonv2 "encoding/json/v2"
+import "fmt"
+import "log/slog"
+import "os"
+import "strconv"
+
+enum Status { Active, Suspended, PendingReview }
+
+enum Plan: string {
+    Free = "free",
+    Pro = "pro",
+    InProgress = "in_progress",
+}
+
+// "" is an entry, so Visibility has a zero value.
+enum Visibility: string { Default = "", Public = "public", Private = "private" }
+
+// MarshalJSON and UnmarshalJSON keep numbers in JSON; json prefers them to
+// the generated text methods.
+enum Priority { Low, High }
+
+func Priority.MarshalJSON(): []byte throws = []byte(strconv.Itoa(int(self)))
+
+func *Priority.UnmarshalJSON(data: []byte) throws {
+    n := strconv.Atoi(string(data))?
+    *self = Priority(n)
+}
+
+struct Task {
+    Status: Status
+    Plan: Plan
+    Next: Plan?
+    Visibility: Visibility
+    Priority: Priority
+}
+
+// An enum keys a map in a struct field: the keys are its wire names.
+struct Report {
+    Counts: map[Status]int
+}
+
+func decode(s: string) {
+    t := Task(Status = Status.Active, Plan = Plan.Free)
+    json.Unmarshal([]byte(s), &t) catch (err) {
+        fmt.Println("rejected:", err)
+        return
+    }
+    fmt.Println("decoded:", t.Status, t.Plan, t.Next ?: Plan.Free, "[${t.Visibility}]", t.Priority)
+}
+
+func main() throws {
+    t := Task(Status = Status.PendingReview, Plan = Plan.InProgress, Visibility = Visibility.Public, Priority = Priority.High)
+    v1 := json.Marshal(t)?
+    v2 := jsonv2.Marshal(t)?
+    fmt.Println(string(v1))
+    fmt.Println(string(v1) == string(v2))
+
+    decode(`{"status":"suspended","plan":"pro","next":"free","priority":0}`)
+    decode(`{"status":1}`)
+    decode(`{"status":"Suspended"}`)
+    decode(`{"plan":"gold"}`)
+    decode(`{"visibility":"secret"}`)
+
+    counts := json.Marshal([Status.Active: 2, Status.Suspended: 1])?
+    fmt.Println(string(counts))
+    back: map[Status]int = [:]
+    json.Unmarshal(counts, &back)?
+    fmt.Println(back[Status.Active], back[Status.Suspended])
+    report := json.Marshal(Report(Counts = [Status.PendingReview: 3]))?
+    fmt.Println(string(report))
+
+    // fmt and templates use String (the entry name), slog uses MarshalText.
+    fmt.Println(Status.PendingReview, "${Status.PendingReview}", Plan.InProgress, string(Plan.Pro))
+    log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions(ReplaceAttr = { _, a ->
+        if a.Key == slog.TimeKey { slog.Attr() } else { a }
+    })))
+    log.Info("task", "status", Status.PendingReview, "plan", Plan.Pro)
+
+    _ = Status(9).MarshalText() catch (err) { fmt.Println(err); []byte("") }
+}
+
+// Output:
+// {"status":"pendingReview","plan":"in_progress","visibility":"public","priority":1}
+// true
+// decoded: Suspended pro free [] Low
+// rejected: json: cannot unmarshal number into Go struct field Task.status of type main.Status: JSON value must be string type
+// rejected: invalid Status "Suspended"
+// rejected: invalid Plan "gold"
+// rejected: invalid Visibility "secret"
+// {"active":2,"suspended":1}
+// 2 1
+// {"counts":{"pendingReview":3}}
+// PendingReview PendingReview in_progress pro
+// level=INFO msg=task status=pendingReview plan=pro
+// invalid Status 9

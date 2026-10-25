@@ -1,0 +1,74 @@
+// Struct embedding (ADR 0043): what can be embedded, ambiguous and nullable
+// promotion, value receivers, sealed membership, and construction.
+import "io"
+import "sync"
+
+interface Store {
+    Delete(id: int64) throws
+}
+
+struct fake {
+    Store?
+}
+
+struct A { Name: string }
+struct B { Name: string }
+
+struct AB {
+    A
+    B
+}
+
+struct Box[T] {
+    T // ERROR E0216 "a type parameter cannot be embedded"
+}
+
+struct PtrIface {
+    *Store // ERROR E0216 "*Store cannot be embedded"
+}
+
+struct Ints {
+    []int // ERROR E0216 "only a type name can be embedded"
+}
+
+struct GoStyle {
+    ID int64 // ERROR E0008 "struct fields are declared as name: Type"
+}
+
+sealed interface Shape {
+    Area(): float64
+}
+
+struct Circle : Shape {
+    R: float64
+}
+
+func Circle.Area(): float64 = self.R
+
+struct Ring {
+    Circle
+}
+
+struct Guarded {
+    sync.Mutex
+    n: int
+}
+
+func Guarded.peek(): int {
+    self.Lock() // ERROR E0504 "cannot call Lock on self"
+    return self.n
+}
+
+struct Wrapper {
+    io.Reader
+}
+
+func main() {
+    f := fake()
+    f.Delete(1) catch {} // ERROR E0401 "Delete is promoted through the nullable field Store"
+    ab := AB()
+    println(ab.Name) // ERROR E0205 "ambiguous selector Name"
+    s: Shape = Ring(Circle = Circle(R = 1)) // ERROR E0201 "embedding one of its members does not make Ring a member"
+    w := Wrapper() // ERROR E0211 "missing field Reader in construction of Wrapper"
+    println(s, w)
+}

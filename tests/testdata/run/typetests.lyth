@@ -11,23 +11,23 @@ struct Circle {
     R: float64
 }
 
-func Circle.Area(): float64 = 3 * R * R
+func Circle.Area(): float64 = 3 * self.R * self.R
 
 struct Square {
     Side: float64
 }
 
-func Square.Area(): float64 = Side * Side
+func Square.Area(): float64 = self.Side * self.Side
 
 struct NotFound {
     Key: string
 }
 
-func *NotFound.Error(): string = "not found: ${Key}"
+func *NotFound.Error(): string = "not found: ${self.Key}"
 
 // Type aliases name existing types; they do not create new ones.
-typealias Transform = (int) -> int
-typealias Millis = time.Duration
+type Transform = (int) -> int
+type Millis = time.Duration
 
 func twice(f: Transform, x: int): int = f(f(x))
 

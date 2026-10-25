@@ -147,7 +147,7 @@ func (a *analysis) describe(o *occurrence) string {
 		b.WriteString("\n\nGo constant `" + k.GoName + "`")
 	case *check.TypeSym:
 		if k.Alias != nil {
-			b.WriteString(code("lyth", "typealias "+k.Name()+" = "+typeString(k.Type)))
+			b.WriteString(code("lyth", "type "+k.Name()+" = "+typeString(k.Type)))
 			doc = k.Alias.Doc
 		} else {
 			b.WriteString(code("lyth", "type "+k.Name()))
@@ -406,22 +406,22 @@ func declDoc(d syntax.Decl) string {
 }
 
 var keywordDocs = map[string]string{
-	"throws":    "`func f(): T throws` can fail: in Go it returns `(T, error)`. Call it with `f()?` to pass the error on, or handle it with `catch`.",
-	"throw":     "`throw err` returns `err` from a `throws` function (with zero values for its other results).",
-	"catch":     "`call() catch { fallback }` handles a failed call; `catch (err) { ... }` binds the error; `catch (e: *NotFound) { ... }?` handles one error type through wrapping.",
-	"when":      "`when x { 1, 2 -> ...; is T -> ...; in 1..9 -> ...; else -> ... }` chooses a branch by value, type, or range. Over an enum or sealed interface it must cover every case or have `else`.",
-	"is":        "`x is T` tests a value's type (a Go type assertion); after the test, `x` is a `T` (smart cast).",
-	"as":        "`x as T` converts or asserts to `T` (panics when it fails); `x as? T` gives `null` instead.",
-	"in":        "`x in xs` tests membership: ranges, slices, arrays, map keys, and substrings. `for x in xs` iterates.",
-	"null":      "`null` is the absent value of a nullable type `T?` (Go's nil). Use `?.`, `?:`, `!!`, or a check before using a nullable value.",
-	"self":      "`self` is a method's receiver (Go's receiver variable). It cannot be declared or assigned.",
-	"typealias": "`typealias Name = Type` gives a type another name (a Go alias).",
-	"sealed":    "`sealed interface` is implemented only by structs of its own package that declare it (`struct T : I`); a `when` over it can be exhaustive.",
-	"enum":      "`enum Color { Red, Green }` declares named constants (Go: `ColorRed` iota constants with a `String` method).",
-	"func":      "`func name(a: A): R { ... }` declares a function; `func T.m()` a method with value receiver, `func *T.m()` with pointer receiver.",
-	"struct":    "`struct T { Field: Type }` declares a struct; build one by calling the type: `T(Field = x)`.",
-	"defer":     "`defer f()` or `defer { ... }` runs when the function returns.",
-	"go":        "`go { ... }` runs the block in a new goroutine.",
+	"throws": "`func f(): T throws` can fail: in Go it returns `(T, error)`. Call it with `f()?` to pass the error on, or handle it with `catch`.",
+	"throw":  "`throw err` returns `err` from a `throws` function (with zero values for its other results).",
+	"catch":  "`call() catch { fallback }` handles a failed call; `catch (err) { ... }` binds the error; `catch (e: *NotFound) { ... }?` handles one error type through wrapping.",
+	"when":   "`when x { 1, 2 -> ...; is T -> ...; in 1..9 -> ...; else -> ... }` chooses a branch by value, type, or range. Over an enum or sealed interface it must cover every case or have `else`.",
+	"is":     "`x is T` tests a value's type (a Go type assertion); after the test, `x` is a `T` (smart cast).",
+	"as":     "`x as T` converts or asserts to `T` (panics when it fails); `x as? T` gives `null` instead.",
+	"in":     "`x in xs` tests membership: ranges, slices, arrays, map keys, and substrings. `for x in xs` iterates.",
+	"null":   "`null` is the absent value of a nullable type `T?` (Go's nil). Use `?.`, `?:`, `!!`, or a check before using a nullable value.",
+	"self":   "`self` is a method's receiver (Go's receiver variable). It cannot be declared or assigned.",
+	"type":   "`type Name Underlying` declares a new type (a Go defined type); `type Name = Type` gives a type another name (a Go alias).",
+	"sealed": "`sealed interface` is implemented only by structs of its own package that declare it (`struct T : I`); a `when` over it can be exhaustive.",
+	"enum":   "`enum Color { Red, Green }` declares named constants (Go: `ColorRed` iota constants with a `String` method; JSON carries the name `\"red\"`). `enum Plan: string { Free = \"free\" }` gives entries string values (Go: `type Plan string`).",
+	"func":   "`func name(a: A): R { ... }` declares a function; `func T.m()` a method with value receiver, `func *T.m()` with pointer receiver.",
+	"struct": "`struct T { Field: Type }` declares a struct; build one by calling the type: `T(Field = x)`.",
+	"defer":  "`defer f()` or `defer { ... }` runs when the function returns.",
+	"go":     "`go { ... }` runs the block in a new goroutine.",
 }
 
 // wordAt returns the identifier around byte offset off.
@@ -591,7 +591,7 @@ func (a *analysis) renamable(k any) string {
 			return v.Name() + " is a built-in type"
 		}
 	case *check.PkgSym:
-		return "rename an import with import \"path\" as name"
+		return "rename an import with import name \"path\""
 	}
 	defs := a.defs[k]
 	if len(defs) == 0 && !declSpan(k).IsValid() {

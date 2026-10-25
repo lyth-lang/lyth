@@ -4,7 +4,7 @@ package lythimpl
 import "context"
 import "encoding/json"
 import "errors"
-import "github.com/jackc/pgx/v5" as pgx
+import pgx "github.com/jackc/pgx/v5"
 import "github.com/jackc/pgx/v5/pgxpool"
 
 // ErrNotFound is returned when no user has the requested id.

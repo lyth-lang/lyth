@@ -5,7 +5,7 @@ struct Point {
     Y: int
 }
 
-func Point.plus(o: Point) = Point(X = X + o.X, Y = Y + o.Y)
+func Point.plus(o: Point) = Point(X = self.X + o.X, Y = self.Y + o.Y)
 func Point.lengthSquared() = X * X + Y * Y
 
 // twice uses square before its declaration: inference follows references.

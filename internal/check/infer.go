@@ -209,6 +209,12 @@ func coreTerm(tp *gotypes.TypeParam) gotypes.Type {
 // type: http.Header indexes, ranges, and takes len like the map it is.
 func collectionOf(t types.Type) types.Type {
 	b := types.Base(t)
+	if u := definedUnder(b); u != nil {
+		switch ub := types.Base(u).(type) {
+		case *types.Slice, *types.Map, *types.Array, *types.Chan, *types.Basic:
+			return ub
+		}
+	}
 	if n, ok := b.(*types.Named); ok && n.Go != nil {
 		switch n.Go.Underlying().(type) {
 		case *gotypes.Slice, *gotypes.Map, *gotypes.Array, *gotypes.Chan, *gotypes.Basic:
@@ -222,10 +228,31 @@ func collectionOf(t types.Type) types.Type {
 func CollectionOf(t types.Type) types.Type { return collectionOf(t) }
 
 func underlyingOf(t types.Type) types.Type {
+	if u := definedUnder(t); u != nil {
+		return u
+	}
 	if n, ok := types.Base(t).(*types.Named); ok && n.Go != nil {
 		return types.Lift(n.Go.Underlying())
 	}
 	return t
+}
+
+// definedUnder returns the underlying type of a Lyth defined type (ADR
+// 0037), with an instance's type arguments substituted, or nil for any
+// other type.
+func definedUnder(t types.Type) types.Type {
+	n, ok := types.Base(t).(*types.Named)
+	if !ok || n.Decl == nil || n.Decl.Kind != types.DefinedDecl {
+		return nil
+	}
+	u := types.DefinedUnder(n)
+	if u == nil || u == types.Invalid {
+		return nil
+	}
+	if bind := declBindings(n); bind != nil {
+		u = subst(u, bind)
+	}
+	return u
 }
 
 // declBindings binds the type parameters of a generic Lyth type to the type

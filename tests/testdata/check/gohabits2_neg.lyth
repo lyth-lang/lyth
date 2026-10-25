@@ -9,7 +9,7 @@ const ( // ERROR E0008 "Lyth declares one constant per line"
     B = 2
 )
 
-func f(in: int): int = 1 // ERROR E0003 "in is a keyword and cannot be a name"
+func f(is: int): int = 1 // ERROR E0003 "is is a keyword and cannot be a name"
 
 func walk() {
     filepath.WalkDir(".", { path, d, err ->

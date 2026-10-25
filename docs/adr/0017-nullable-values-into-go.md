@@ -1,6 +1,6 @@
 # ADR 0017: Nullable values may be passed to Go APIs
 
-**Status:** Accepted (refines ADR 0009)
+**Status:** Accepted (refines ADR 0009); interface-typed Go parameters amended by [0040](0040-optionals-into-any.md)
 
 ## Context
 Go parameters of nil-able types are platform types in Lyth (`Any!`,

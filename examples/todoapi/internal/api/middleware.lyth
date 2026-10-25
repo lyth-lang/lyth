@@ -9,17 +9,17 @@ struct statusRecorder {
     status: int
 }
 
-func *statusRecorder.Header(): http.Header = w.Header()
+func *statusRecorder.Header(): http.Header = self.w.Header()
 
-func *statusRecorder.Write(b: []byte): int throws = w.Write(b)?
+func *statusRecorder.Write(b: []byte): int throws = self.w.Write(b)?
 
 func *statusRecorder.WriteHeader(code: int) {
-    status = code
-    w.WriteHeader(code)
+    self.status = code
+    self.w.WriteHeader(code)
 }
 
 // Unwrap gives http.ResponseController access to the underlying writer.
-func *statusRecorder.Unwrap(): http.ResponseWriter = w
+func *statusRecorder.Unwrap(): http.ResponseWriter = self.w
 
 // logRequests logs one line per request.
 func logRequests(log: *slog.Logger, next: http.Handler): http.Handler = http.HandlerFunc({ w, r ->

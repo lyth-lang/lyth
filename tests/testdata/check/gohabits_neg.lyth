@@ -24,7 +24,7 @@ func main() {
         println("go")
     }()
     var n int // ERROR E0008 "local variables are declared with :="
-    in := 3 // ERROR E0003 "in is a keyword and cannot be a variable name"
+    when := 3 // ERROR E0003 "when is a keyword and cannot be a variable name"
     for i := 0; i < n; i++ { // ERROR E0008 "Lyth has no three-part for loop"
         println(i)
     }

@@ -1,7 +1,8 @@
-// Go's renamed imports, and for loops over functions that are not iterators.
+// Renamed imports in the spelling before ADR 0044, and for loops over
+// functions that are not iterators.
 import (
     "fmt"
-    s "strings" // ERROR E0003 "a renamed import is written"
+    "strings" as s // ERROR E0008 "a renamed import is written name"
 )
 
 func pairs(yield: (string, int) -> bool) {}

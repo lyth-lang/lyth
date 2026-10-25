@@ -1,6 +1,6 @@
 # ADR 0022: Capitalization is visibility; Lyth names are Go names
 
-**Status:** Accepted (supersedes 0010; amends 0013)
+**Status:** Accepted (supersedes 0010; amends 0013); the json key rule amended by [0036](0036-automatic-json-tags.md)
 
 ## Context
 ADR 0010 kept Lyth's own naming: declarations were private unless `pub`,

@@ -4,8 +4,8 @@ package optional_reuse
 
 //line optional_reuse.lyth:4
 type Patch struct {
-	DiscountPct *int    `json:"discountPct"`
-	Phone       *string `json:"phone"`
+	DiscountPct *int    `json:"discountPct,omitzero"`
+	Phone       *string `json:"phone,omitzero"`
 }
 
 func Clamp(pct *int) *int {

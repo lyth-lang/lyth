@@ -228,6 +228,19 @@ func (fl *fnLower) declareLocal(v *check.VarSym) string {
 	if name, ok := fl.locals[v]; ok {
 		return name
 	}
+	if v.Rebinds != nil {
+		// ctx := f(ctx) (ADR 0039) keeps the parameter's name, as Go's
+		// ctx, cancel := ... does, unless a closure created before it
+		// captured the parameter: then Go's line would change what the
+		// closure sees, so the local gets a name of its own.
+		name := fl.declareLocal(v.Rebinds)
+		if v.FreshName {
+			fl.taken[name] = true
+			name = fl.alloc(name)
+		}
+		fl.locals[v] = name
+		return name
+	}
 	name := v.Name()
 	if name == "_" {
 		return "_"
@@ -570,6 +583,14 @@ func (fl *fnLower) localDecl(s *syntax.LocalDecl) {
 		return
 	}
 	value := syntax.Unparen(s.Value)
+	if v.Rebinds != nil && v.InPlace && !v.FreshName {
+		// name := f(name) in the function's outermost block: Go has no new
+		// variable to declare there, so the parameter is assigned.
+		name := fl.declareLocal(v)
+		fl.exprInto(s.Value, ast.NewIdent(name), v.Type)
+		fl.useIfUnused(v, name, s.S)
+		return
+	}
 	if fl.typeTestDecl(s, v, value) {
 		return
 	}
@@ -638,12 +659,20 @@ func (fl *fnLower) useIfUnused(v *check.VarSym, name string, span source.Span) {
 
 func (fl *fnLower) destructure(s *syntax.LocalDecl, vars []*check.VarSym) {
 	value := syntax.Unparen(s.Value)
+	// a, b := f(a, b), all replacing parameters in the outermost block, has
+	// no new variable for Go's := (ADR 0039): it assigns.
+	define := false
+	for _, v := range vars {
+		if v != nil && v.Name() != "_" && !(v.Rebinds != nil && v.InPlace && !v.FreshName) {
+			define = true
+		}
+	}
 	if try, ok := value.(*syntax.TryExpr); ok && fl.simpleTry(try) {
 		names := make([]string, len(vars))
 		for i, v := range vars {
 			names[i] = fl.declareLocal(v)
 		}
-		fl.tryInto(try, names, true, s.S)
+		fl.tryInto(try, names, define, s.S)
 		for i, v := range vars {
 			if v != nil {
 				fl.useIfUnused(v, names[i], s.S)
@@ -657,7 +686,7 @@ func (fl *fnLower) destructure(s *syntax.LocalDecl, vars []*check.VarSym) {
 		for i, v := range vars {
 			names[i] = fl.declareLocal(v)
 		}
-		fl.catchIntoNames(c, names, true, s.S)
+		fl.catchIntoNames(c, names, define, s.S)
 		for i, v := range vars {
 			if v != nil {
 				fl.useIfUnused(v, names[i], s.S)
@@ -681,7 +710,7 @@ func (fl *fnLower) destructure(s *syntax.LocalDecl, vars []*check.VarSym) {
 		lhs = append(lhs, ast.NewIdent(name))
 	}
 	tok := token.DEFINE
-	if allBlank {
+	if allBlank || !define {
 		tok = token.ASSIGN
 	}
 	fl.emit(&ast.AssignStmt{Lhs: lhs, Tok: tok, TokPos: fl.l.pos(s.S), Rhs: rhs}, s.S)

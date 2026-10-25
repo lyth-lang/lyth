@@ -1,6 +1,6 @@
 # ADR 0012: Features considered and rejected
 
-**Status:** Accepted; extended by [0031](0031-go-spelling.md), which adopts `:=` (rejected here) as the declaration of locals
+**Status:** Accepted; extended by [0031](0031-go-spelling.md), which adopts `:=` (rejected here) as the declaration of locals; the `$name` row amended by [0042](0042-dollar-names-in-strings.md)
 
 | Feature | Why rejected | Instead |
 |---|---|---|

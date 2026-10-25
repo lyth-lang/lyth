@@ -10,7 +10,7 @@ struct Page[T] {
     Total: int
 }
 
-func Page[T].Empty(): bool = len(Items) == 0
+func Page[T].Empty(): bool = len(self.Items) == 0
 
 // An extension function is a Go function taking the receiver first.
 func []T.Second[T](): T = self[1]

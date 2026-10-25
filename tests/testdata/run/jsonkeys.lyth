@@ -1,0 +1,37 @@
+// Automatic json tags (ADR 0036): lower-camel keys with initialisms lowered
+// as words, optional fields left out when null, and a tag without a name
+// keeps the automatic name.
+import "encoding/json"
+import "fmt"
+
+struct Page {
+    IDs: []int64
+    URLs: []string
+    UserID: int64
+    HTTPServer: string
+    IPv4: string
+    APIKey: string
+    NextCursor: string?   `json:",omitempty"`
+    Count: int            `json:",string"`
+    Limit: int?           `json:",string"`
+    Note: string?
+    Total: int?
+    ETag: string          `json:"etag"`
+    Secret: string        `json:"-"`
+    Raw: string           `json:"raw_value"`
+}
+
+func main() throws {
+    empty := json.Marshal(Page())?
+    fmt.Println(string(empty))
+    full := json.Marshal(Page(IDs = [1], URLs = ["u"], UserID = 7, NextCursor = "c2", Count = 3, Limit = 9, Note = "n", Total = 0, ETag = "x", Secret = "s", Raw = "r"))?
+    fmt.Println(string(full))
+    back := Page()
+    json.Unmarshal([]byte(`{"ids":[4],"note":"hi","nextCursor":"c9","count":"5"}`), &back)?
+    fmt.Println(back.IDs, back.Note ?: "-", back.NextCursor ?: "-", back.Count, back.Total == null)
+}
+
+// Output:
+// {"ids":null,"urls":null,"userID":0,"httpServer":"","ipv4":"","apiKey":"","count":"0","etag":"","raw_value":""}
+// {"ids":[1],"urls":["u"],"userID":7,"httpServer":"","ipv4":"","apiKey":"","nextCursor":"c2","count":"3","limit":"9","note":"n","total":0,"etag":"x","raw_value":"r"}
+// [4] hi c9 5 true

@@ -11,7 +11,7 @@
 (keyword) @keyword
 
 [
-  "func" "struct" "interface" "sealed" "enum" "typealias" "const" "var" "val" "import" "package" "as"
+  "func" "struct" "interface" "sealed" "enum" "type" "typealias" "const" "var" "val" "import" "package" "as"
   "if" "while" "for" "when" "select" "catch" "is" "!is" "as?" "throws" "map" "chan"
   "break" "continue" "return"
 ] @keyword

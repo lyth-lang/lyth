@@ -13,7 +13,7 @@ struct Holder {
     printed: Box[counter]
 }
 
-typealias CounterStore = Store[counter]
+type CounterStore = Store[counter]
 
 func describe(b: Box[counter]): string = b.s.String()
 

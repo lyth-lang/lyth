@@ -11,7 +11,7 @@ the [interop matrix](../design/interop.md#10-compatibility-matrix).
 
 ```kotlin
 import (
-    "crypto/sha256" as sha
+    sha "crypto/sha256"
     "fmt"
     "net/url"
     "strings"
@@ -27,7 +27,8 @@ func main() {
 ```
 
 Imports are Go import paths, resolved by the `go` command against your
-`go.mod`, and the qualifier is the package's declared name. `as` renames it.
+`go.mod`, and the qualifier is the package's declared name. A name before the
+path renames it, as in Go (`sha "crypto/sha256"`).
 Imports can be grouped in parentheses, one per line, or written one per
 `import`; Go's `sha "crypto/sha256"` is an error that `lyth fix` rewrites.
 Go identifiers are used exactly as Go spells them (`u.Host`, `strings.Cut`):
@@ -119,22 +120,22 @@ struct Temperature {
     Celsius: float64
 }
 
-func Temperature.String(): string = "${Celsius}°C"
+func Temperature.String(): string = "${self.Celsius}°C"
 
 struct NotFound {
     Key: string
 }
 
-func *NotFound.Error(): string = "not found: ${Key}"
+func *NotFound.Error(): string = "not found: ${self.Key}"
 
 struct byLength : sort.Interface {
     Words: []string
 }
 
-func byLength.Len(): int = len(Words)
-func byLength.Less(i: int, j: int): bool = len(Words[i]) < len(Words[j])
+func byLength.Len(): int = len(self.Words)
+func byLength.Less(i: int, j: int): bool = len(self.Words[i]) < len(self.Words[j])
 func byLength.Swap(i: int, j: int) {
-    Words[i], Words[j] = Words[j], Words[i]
+    self.Words[i], self.Words[j] = self.Words[j], self.Words[i]
 }
 
 func lookup(key: string): int throws {
@@ -207,7 +208,7 @@ import "net/http/httptest"
 import "strings"
 import "unicode"
 
-typealias Middleware = (http.Handler) -> http.Handler
+type Middleware = (http.Handler) -> http.Handler
 
 func withHeader(name: string, value: string): Middleware = { next ->
     http.HandlerFunc({ w, r ->
@@ -229,7 +230,7 @@ func main() {
 
 Lambdas are Go closures and can be passed wherever Go expects a function. A
 lambda converted to a named Go function type, such as `http.HandlerFunc`,
-takes its parameter types from that type. `typealias` names a function type
+takes its parameter types from that type. `type Name = Type` names a function type
 without creating a new one, which suits handler and middleware types. A Go
 callback type that returns an error (`fs.WalkDirFunc`) accepts a lambda that
 uses `?`, because Go has no `throws` and a trailing `error` is how it says a
@@ -246,15 +247,16 @@ checks: a nil dereference panics as it would in Go, with the `.lyth` line in the
 stack trace. Declare a local of type `T?` for a Go result (`u: *url.URL? = f()`)
 when you want Lyth to make you check it.
 
-In the other direction, a nullable Lyth value may be passed to a Go parameter in
-its Go representation: a `string?` goes in as `*string` (nil when null), which
-is what `database/sql`, `pgx`, and `encoding/json` expect for optional values.
-See [ADR 0017](../adr/0017-nullable-values-into-go.md).
-
-Lyth's own interface types work differently. When a nullable pointer or
-optional value becomes an `error?`, `any?`, or other nullable interface in
-Lyth code, null becomes a nil interface, never Go's non-nil interface holding a
-nil pointer, and an optional value goes in unboxed
+In the other direction, a nullable Lyth value may be passed to a Go parameter.
+To an interface parameter (`any`, `...any`, `fmt.Stringer`) it goes in the way
+Lyth converts to its own interfaces: null as a nil interface, never Go's
+non-nil interface holding a nil pointer, and an optional value unboxed, so a
+present `string?` arrives as a `string`
+([ADR 0040](../adr/0040-optionals-into-any.md)). `fmt`, `log/slog`, and test
+messages print the value, and `database/sql`, `pgx`, and `encoding/json` read a
+nil interface as NULL or `null`, as they read a nil `*string`. A pointer to the
+field (`&user.Email`) is still a pointer, for APIs that write into it (`Scan`,
+`json.Unmarshal`). Lyth's own interface types follow the same rule
 ([types](../spec/types.md#56-optional-values-int-string-user)).
 
 ## Lyth packages seen from Go
@@ -273,11 +275,11 @@ var ErrInsufficient = errors.New("insufficient funds")
 func Open(owner: string): *Account = &Account(Owner = owner, Balance = 0, pin = "0000")
 
 func *Account.Withdraw(amount: int64): int64 throws {
-    if amount > Balance {
+    if amount > self.Balance {
         throw ErrInsufficient
     }
-    Balance -= amount
-    return Balance
+    self.Balance -= amount
+    return self.Balance
 }
 ```
 

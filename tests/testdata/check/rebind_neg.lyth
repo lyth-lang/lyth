@@ -1,0 +1,30 @@
+// := replaces a parameter only with a value of its type derived from it
+// (ADR 0039); plain assignment stays an error.
+import "strconv"
+
+func parse(id: string): int {
+    id := strconv.Atoi(id) catch { 0 } // ERROR E0201 "id would change type from string to int"
+    return len(id)
+}
+
+func ignore(limit: int): int {
+    limit := 50 // ERROR E0005 "limit is a parameter; := cannot declare it again"
+    return limit
+}
+
+func assign(name: string): string {
+    name = name + "!" // ERROR E0501 "cannot assign to parameter name"
+    return name
+}
+
+func shadow(n: int): int {
+    if n > 0 {
+        n := 1 // WARN W0006 "n hides the parameter declared in an enclosing scope"
+        return n
+    }
+    return n
+}
+
+func main() {
+    println(parse("1"), ignore(3), assign("a"), shadow(1))
+}

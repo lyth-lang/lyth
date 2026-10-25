@@ -456,17 +456,6 @@ func (a *analysis) scopeCompletions(c *completions, fd *fileData, off int) {
 		for _, v := range locals {
 			c.add(completionItem{Label: v.Name(), Kind: itemVariable, Detail: typeString(v.Type)}, "0")
 		}
-		// In a method, the receiver's fields and methods by bare name.
-		for f, fi := range fd.info.Funcs {
-			if f.S.File == fd.src && f.S.Start <= off && off <= f.S.End && fi.Sym != nil && fi.Sym.Recv != nil {
-				for _, fl := range fi.Sym.Recv.Fields {
-					c.add(completionItem{Label: fl.Name, Kind: itemField, Detail: typeString(fl.Type)}, "1")
-				}
-				for _, m := range fi.Sym.Recv.Methods {
-					c.add(callItem(m.Name, itemMethod, m.Sig, nil), "1")
-				}
-			}
-		}
 	}
 	if fd.pkg != nil && fd.pkg.Checked != nil && fd.pkg.Checked.Scope != nil {
 		for _, sym := range fd.pkg.Checked.Scope.Symbols() {
@@ -540,7 +529,7 @@ var builtinTypes = []string{
 }
 
 var keywordList = []string{
-	"func", "struct", "interface", "enum", "sealed", "typealias", "const", "var", "import", "if", "else", "when", "for",
+	"func", "struct", "interface", "enum", "sealed", "type", "const", "var", "import", "if", "else", "when", "for",
 	"in", "while", "return", "break", "continue", "throw", "throws", "catch", "is", "as", "defer", "go", "select", "self",
 	"null", "true", "false", "map", "chan",
 }

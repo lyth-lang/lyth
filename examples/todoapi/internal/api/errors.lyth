@@ -12,7 +12,7 @@ struct apiError {
     message: string
 }
 
-func *apiError.Error(): string = message
+func *apiError.Error(): string = self.message
 
 func badRequest(message: string): error = &apiError(status = http.StatusBadRequest, code = "bad_request", message = message)
 
@@ -41,7 +41,7 @@ func *Server.writeError(w: http.ResponseWriter, r: *http.Request, err: error) {
         errors.Is(err, todo.ErrNotFound) -> writeJSON(w, http.StatusNotFound,
             errorResponse(Error = errorDetail(Code = "not_found", Message = "todo not found")))
         else -> {
-            log.ErrorContext(r.Context(), "request failed", "method", r.Method, "path", r.URL.Path, "error", err)
+            self.log.ErrorContext(r.Context(), "request failed", "method", r.Method, "path", r.URL.Path, "error", err)
             writeJSON(w, http.StatusInternalServerError, internalError())
         }
     }

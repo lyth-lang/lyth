@@ -6,9 +6,9 @@ struct Point {
     Y: int
 }
 
-func Point.add(o: Point): Point = Point(X + o.X, Y + o.Y)
+func Point.add(o: Point): Point = Point(self.X + o.X, self.Y + o.Y)
 
-func Point.show(): string = "(${X}, ${Y})"
+func Point.show(): string = "(${self.X}, ${self.Y})"
 
 struct Account {
     Owner: string
@@ -17,10 +17,10 @@ struct Account {
 }
 
 func *Account.deposit(amount: int64) {
-    Balance += amount
+    self.Balance += amount
 }
 
-func Account.summary(): string = "${Owner}: ${Balance}"
+func Account.summary(): string = "${self.Owner}: ${self.Balance}"
 
 struct Tagged {
     ID: int64

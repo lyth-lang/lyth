@@ -11,8 +11,8 @@ struct Circle : Shape, fmt.Stringer {
     R: float64
 }
 
-func Circle.Area(): float64 = 3 * R * R
-func Circle.String(): string = "circle(${R})"
+func Circle.Area(): float64 = 3 * self.R * self.R
+func Circle.String(): string = "circle(${self.R})"
 
 // A pointer receiver: only *counter implements io.Writer.
 struct counter : io.Writer {
@@ -20,7 +20,7 @@ struct counter : io.Writer {
 }
 
 func *counter.Write(p: []byte): int throws {
-    N += len(p)
+    self.N += len(p)
     return len(p)
 }
 
@@ -29,12 +29,12 @@ struct byLen : sort.Interface {
     Words: []string
 }
 
-func byLen.Len(): int = len(Words)
-func byLen.Less(i: int, j: int): bool = len(Words[i]) < len(Words[j])
+func byLen.Len(): int = len(self.Words)
+func byLen.Less(i: int, j: int): bool = len(self.Words[i]) < len(self.Words[j])
 func byLen.Swap(i: int, j: int) {
-    a, b := Words[j], Words[i]
-    Words[i] = a
-    Words[j] = b
+    a, b := self.Words[j], self.Words[i]
+    self.Words[i] = a
+    self.Words[j] = b
 }
 
 func main() throws {

@@ -115,3 +115,86 @@ func main() {
 		t.Error("the Go if statement should still be reported")
 	}
 }
+
+// TestFixLeavesDollarNames checks that lyth fix does not rewrite $name in a
+// string (ADR 0042): when name is a variable, $name may be the text it is
+// (PostgreSQL's $body$) or Kotlin's template, so E0006 stays for the author
+// to decide, and the string is unchanged. $set, naming nothing, is text.
+func TestFixLeavesDollarNames(t *testing.T) {
+	src := `func trigger(body: string): string {
+    return "AS $body$ " + body + " $body$ LANGUAGE plpgsql"
+}
+
+func main() {
+    println(trigger("BEGIN END;"), "$set")
+}
+`
+	root := writeModule(t, "dollars", map[string]string{"main.lyth": src})
+	changed, s, err := build.Fix(&build.Config{WorkDir: root, Stdout: os.Stdout, Stderr: os.Stderr}, build.Target{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(filepath.Join(root, "main.lyth"))
+	if len(changed) != 0 || string(got) != src {
+		t.Errorf("lyth fix changed the strings (%v):\n%s", changed, got)
+	}
+	out := render(s.Sink.All())
+	if strings.Count(out, "error[E0006]") != 2 || !strings.Contains(out, `write ${body} to interpolate it, or \$body to keep the dollar sign`) {
+		t.Errorf("want E0006 for both $body, with both edits as hints:\n%s", out)
+	}
+}
+
+// TestFixLeavesAmbiguousMembers checks that lyth fix inserts self. only
+// where a bare name can mean nothing but the member (ADR 0038): a name that
+// also names a package-level variable, an import before a dot, or a
+// package-level function stays as written, with the edit as a hint.
+func TestFixLeavesAmbiguousMembers(t *testing.T) {
+	src := `import "log"
+
+var limit = 50
+
+func validate(n: int): bool = n > 0
+
+struct Query {
+    limit: int
+    log: *log.Logger
+    Count: int
+}
+
+func Query.pageSize(): int = limit
+
+func Query.note() {
+    log.Println(Count)
+}
+
+func Query.validate(): bool = validate(self.Count)
+
+func main() {}
+`
+	want := strings.Replace(src, "log.Println(Count)", "log.Println(self.Count)", 1)
+	root := writeModule(t, "ambiguous", map[string]string{"main.lyth": src})
+	_, s, err := build.Fix(&build.Config{WorkDir: root, Stdout: os.Stdout, Stderr: os.Stderr}, build.Target{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(filepath.Join(root, "main.lyth"))
+	if string(got) != want {
+		t.Errorf("lyth fix wrote:\n%s\nwant:\n%s", got, want)
+	}
+	out := render(s.Sink.All())
+	for _, msg := range []string{
+		"limit is a field of self and also names the package-level variable limit",
+		"log is a field of self and also names the import log",
+		"validate is a method of self and also names the function validate",
+		"hint: if the field is meant: self.limit",
+	} {
+		if !strings.Contains(out, msg) {
+			t.Errorf("missing %q in:\n%s", msg, out)
+		}
+	}
+	// A second run changes nothing.
+	changed, _, err := build.Fix(&build.Config{WorkDir: root, Stdout: os.Stdout, Stderr: os.Stderr}, build.Target{})
+	if err != nil || len(changed) != 0 {
+		t.Errorf("second lyth fix changed %v (err %v)", changed, err)
+	}
+}

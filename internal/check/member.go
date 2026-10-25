@@ -1,8 +1,8 @@
 package check
 
 import (
-	"go/constant"
 	gotypes "go/types"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -26,7 +26,23 @@ func (c *Checker) selector(e *syntax.SelectorExpr, want types.Type) *operand {
 	name := e.Sel.Name
 	// Package members.
 	if id, ok := syntax.Unparen(e.X).(*syntax.Ident); ok {
-		if ps, ok := c.lookup(id.Name).(*PkgSym); ok {
+		member := c.implicitMember(id.Name)
+		// In func Circle.Kind(): Kind = Kind.Round, Kind meant the enum
+		// even when members were in scope by name: a method value has no
+		// members. It still does, with no migration error.
+		if member != nil && member.Method != nil {
+			if ts, ok := c.lookup(id.Name).(*TypeSym); ok && ts.Decl != nil && ts.Decl.Kind == types.EnumDecl {
+				if entry := ts.Decl.LookupEntry(name); entry != nil {
+					c.info.Uses[id] = ts
+					c.info.Entries[e] = entry
+					return &operand{mode: ModeValue, typ: ts.Type, val: entryConst(entry)}
+				}
+			}
+		}
+		// strings.Join in a method of a struct with a field strings: []string
+		// names the package, since the field has no member Join and so
+		// cannot have been meant.
+		if ps, ok := c.lookup(id.Name).(*PkgSym); ok && (member == nil || !c.memberHas(member, e.Sel)) {
 			c.info.Uses[id] = ps
 			ps.Used = true
 			c.record(&operand{mode: ModePackage, typ: types.Invalid, expr: e.X, pkg: ps.Pkg})
@@ -38,20 +54,11 @@ func (c *Checker) selector(e *syntax.SelectorExpr, want types.Type) *operand {
 			}
 			return c.pkgMember(e, ps.Pkg)
 		}
-		// In fun Circle.Kind(): Kind = Kind.Round, Kind names the method
-		// through the implicit receiver; a method value has no members, so
-		// the enum type of that name is meant.
-		if m, ok := c.lookup(id.Name).(*MemberSym); ok && m.Method != nil {
-			if ts, ok := c.lookupSkippingMembers(id.Name).(*TypeSym); ok && ts.Decl != nil && ts.Decl.Kind == types.EnumDecl {
-				if entry := ts.Decl.LookupEntry(name); entry != nil {
-					c.info.Uses[id] = ts
-					c.info.Entries[e] = entry
-					return &operand{mode: ModeValue, typ: ts.Type, val: constant.MakeInt64(int64(entry.Value))}
-				}
-			}
-		}
 	}
+	saveX := c.selectorX
+	c.selectorX = syntax.Unparen(e.X)
 	x := c.expr(e.X, nil)
+	c.selectorX = saveX
 	if x.mode == ModeInvalid {
 		return invalid(e)
 	}
@@ -59,7 +66,7 @@ func (c *Checker) selector(e *syntax.SelectorExpr, want types.Type) *operand {
 		if d := types.EnumOf(x.typ); d != nil && !types.IsNullable(x.typ) {
 			if entry := d.LookupEntry(name); entry != nil {
 				c.info.Entries[e] = entry // an iota constant in Go
-				return &operand{mode: ModeValue, typ: x.typ, val: constant.MakeInt64(int64(entry.Value))}
+				return &operand{mode: ModeValue, typ: x.typ, val: entryConst(entry)}
 			}
 			d := c.errorf(diag.EUnknownMember, e.Sel.S, "enum %s has no entry %s", d.Name, name)
 			if s := closest(name, entryNames(types.EnumOf(x.typ))); s != "" {
@@ -260,6 +267,10 @@ func ChanOf(t types.Type) *types.Chan {
 	case *types.Chan:
 		return b
 	case *types.Named:
+		if u := definedUnder(b); u != nil {
+			ch, _ := types.Base(u).(*types.Chan)
+			return ch
+		}
 		if b.Go != nil {
 			if ch, ok := types.Base(types.Lift(b.Go.Underlying())).(*types.Chan); ok {
 				return ch
@@ -347,6 +358,9 @@ func (c *Checker) lythMember(d *types.TypeDecl, name string, id *syntax.Ident) *
 			return mm
 		}
 	}
+	if m, found := c.promotedMember(d, name, id); found {
+		return m
+	}
 	dg := c.errorf(diag.EUnknownMember, id.S, "%s has no field or method %s", d.Name, name)
 	best, bestDist := "", 3
 	for _, f := range d.Fields {
@@ -363,6 +377,93 @@ func (c *Checker) lythMember(d *types.TypeDecl, name string, id *syntax.Ident) *
 		dg.WithHint("did you mean %s?", best)
 	}
 	return nil
+}
+
+// promotedMember finds a field or method promoted through the embedded
+// fields of a Lyth struct (ADR 0043). go/types resolves the promotion over
+// the shadow package, with Go's depth and ambiguity rules; the path is then
+// followed through the Lyth declarations, so a promoted Lyth member keeps its
+// Lyth type (nullability, throws). found is false when nothing is promoted
+// under that name; m is nil when found reports an error.
+func (c *Checker) promotedMember(d *types.TypeDecl, name string, id *syntax.Ident) (m *member, found bool) {
+	if d.Kind != types.StructDecl || d.Shadow == nil || !slices.ContainsFunc(d.Fields, func(f *types.Field) bool { return f.Embedded }) {
+		return nil, false
+	}
+	obj, index, indirect := gotypes.LookupFieldOrMethod(d.Shadow, true, c.shadow, name)
+	if obj == nil {
+		if index != nil {
+			c.errorf(diag.EUnknownMember, id.S, "ambiguous selector %s: more than one embedded field of %s promotes it at the same depth", name, d.Name).
+				WithHint("select it through the embedded field that is meant")
+			return nil, true
+		}
+		return nil, false
+	}
+	// Follow the embedded fields while they are Lyth structs.
+	var cur types.Type = &types.Named{Decl: d, Args: typeParamTypes(d.TypeParams)}
+	var through *types.Field
+	path := index[:len(index)-1]
+	for _, i := range path {
+		n, ok := types.Base(cur).(*types.Named)
+		if !ok || n.Decl == nil || n.Decl.Kind != types.StructDecl || i >= len(n.Decl.Fields) {
+			cur = nil
+			break
+		}
+		f := n.Decl.Fields[i]
+		ft := f.Type
+		if bind := declBindings(n); bind != nil {
+			ft = subst(ft, bind)
+		}
+		if through == nil && types.MayBeNull(ft) && !types.IsPlatform(ft) {
+			through = f
+		}
+		cur = types.Base(ft)
+		if p, ok := cur.(*types.Pointer); ok {
+			cur = types.Base(p.Elem)
+		}
+	}
+	if through != nil {
+		c.errorf(diag.ENullable, id.S, "%s is promoted through the nullable field %s", name, through.Name).
+			WithHint("check the field first: if x.%s != null { x.%s.%s }", through.Name, through.Name, name)
+		return nil, true
+	}
+	owner, _ := cur.(*types.Named)
+	var bind bindings
+	if owner != nil {
+		bind = declBindings(owner)
+	}
+	lyth := func(t types.Type) types.Type {
+		if bind != nil {
+			return subst(t, bind)
+		}
+		return t
+	}
+	switch o := obj.(type) {
+	case *gotypes.Var:
+		last := index[len(index)-1]
+		if owner != nil && owner.Decl != nil && owner.Decl.Kind == types.StructDecl && last < len(owner.Decl.Fields) {
+			f := owner.Decl.Fields[last]
+			return &member{kind: SelField, goName: f.GoName, typ: lyth(f.Type), obj: f}, true
+		}
+		return &member{kind: SelField, goName: o.Name(), typ: types.Lift(o.Type()), obj: o}, true
+	case *gotypes.Func:
+		if owner != nil && owner.Decl != nil {
+			for _, lm := range owner.Decl.Methods {
+				if lm.GoName == o.Name() {
+					if fs, ok := lm.Sym.(*FuncSym); ok && fs.Pkg == c.pkg {
+						c.ensureInferred(fs)
+					}
+					return &member{kind: SelMethod, goName: lm.GoName, typ: lyth(lm.Sig), ptrRecv: lm.PtrRecv && !indirect, obj: lm}, true
+				}
+			}
+		}
+		sig := o.Type().(*gotypes.Signature)
+		ptr := false
+		if recv := sig.Recv(); recv != nil && !indirect {
+			_, ptr = recv.Type().(*gotypes.Pointer)
+		}
+		return &member{kind: SelMethod, goName: o.Name(), typ: types.LiftSignature(sig), ptrRecv: ptr, obj: o}, true
+	}
+	return nil, false
 }
 
 func (c *Checker) lookupMemberQuiet(t types.Type, name string) *member {

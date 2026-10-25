@@ -118,7 +118,7 @@ Precisely, and only what has been demonstrated (tracked in
 - **Toolchain**: `go build/test/vet`, modules, build tags, cross-compilation,
   `-race`, pprof, and delve all work on Lyth output because it is plain Go.
 - **Documented limitations**: declaring type-set constraints, cgo inside Lyth
-  files, struct embedding in Lyth-declared structs, `goto` and `fallthrough`,
+  files, `goto` and `fallthrough`,
   external test packages, and mixing Go and Lyth files in one package. Each has
   a specific diagnostic today.
 
@@ -144,7 +144,7 @@ struct Repo {
 // Fallible: compiles to func (r *Repo) Find(ctx context.Context, id int64) (*User, error)
 func *Repo.Find(ctx: context.Context, id: int64): User? throws {
     u := User()
-    row := Db.QueryRowContext(ctx, "select id, name, email from users where id = $1", id)
+    row := self.Db.QueryRowContext(ctx, "select id, name, email from users where id = $1", id)
     err := row.Scan(&u.ID, &u.Name, &u.Email)
     if errors.Is(err, sql.ErrNoRows) {
         return null                     // missing user: a value, not an error

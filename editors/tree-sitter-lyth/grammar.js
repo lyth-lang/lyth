@@ -2,7 +2,7 @@
  * Tree-sitter grammar for Lyth.
  *
  * Made for editors: highlighting, outline, indentation, bracket matching, text objects and
- * runnables. Declarations (functions and methods, structs, interfaces, enums, type aliases,
+ * runnables. Declarations (functions and methods, structs, interfaces, enums, type declarations,
  * constants, variables, imports), parameters and fields with their types, calls, member
  * accesses, lambdas, control-flow headers and strings with `${}` templates are recognized;
  * everything else is a token stream grouped by brackets, which keeps the parser small, fast
@@ -20,6 +20,9 @@ const PRIMITIVE_TYPES = [
   'float32', 'float64', 'complex64', 'complex128', 'string', 'bool', 'byte', 'rune', 'any', 'error',
   'comparable', 'unit',
 ];
+
+// in is a keyword that may also be a name (ADR 0044): tc.in, func stage(in: ...)
+const nameOrIn = ($) => choice($.identifier, alias('in', $.identifier));
 
 const commaSep1 = (rule) => seq(rule, repeat(seq(',', rule)), optional(','));
 const commaSep = (rule) => optional(commaSep1(rule));
@@ -41,13 +44,19 @@ module.exports = grammar({
     [$.field_declaration, $.typed_local],
     [$.parameter, $.typed_local],
     [$.channel_type],
+    [$.type_parameter, $.array_type],
+    [$._atom, $.field_declaration, $.typed_local],
+    [$.keyword, $.field_declaration, $.typed_local],
+    [$.keyword, $.parameter, $.typed_local],
+    [$.keyword, $.typed_local, $.lambda_parameter],
+    [$.keyword, $.lambda_parameter],
+    [$.keyword, $.typed_local],
     [$._atom, $._simple_type, $.qualified_type],
     [$._atom, $.method_spec, $._simple_type],
     [$._atom, $.typed_local, $._simple_type],
     [$._atom, $.short_var_declaration, $._simple_type],
     [$.channel_type, $.operator],
     [$.pointer_type, $.operator],
-    [$._atom, $.field_declaration, $.typed_local],
     [$._atom, $.parameter, $.typed_local],
     [$.method_call],
     [$.call_expression],
@@ -87,6 +96,7 @@ module.exports = grammar({
         $.interface_declaration,
         $.enum_declaration,
         $.type_alias,
+        $.type_definition,
         $.const_declaration,
         $.var_declaration,
         $.if_expression,
@@ -144,7 +154,12 @@ module.exports = grammar({
     import_declaration: ($) =>
       prec.dynamic(10, prec.right(seq('import', choice($._import_spec, seq('(', repeat(choice($._import_spec, ';')), ')'))))),
 
-    _import_spec: ($) => prec.right(seq(field('path', $.string), optional(seq('as', field('alias', $.identifier))))),
+    // import h "net/http" (Go's form), and "net/http" as h (the form before ADR 0044)
+    _import_spec: ($) =>
+      choice(
+        seq(field('alias', $.identifier), field('path', $.string)),
+        prec.right(seq(field('path', $.string), optional(seq('as', field('alias', $.identifier))))),
+      ),
 
     // func f(...), func T.m(), func *T.m(), func Page[T].first(), func []T.second[T](), func string.shout()
     function_declaration: ($) =>
@@ -179,7 +194,7 @@ module.exports = grammar({
     type_parameter: ($) => seq(field('name', alias($.identifier, $.type_identifier)), optional(seq(':', field('constraint', $._type)))),
 
     parameters: ($) => seq('(', repeat(choice($.parameter, $._element)), ')'),
-    parameter: ($) => prec.dynamic(20, seq(field('name', $.identifier), ':', optional('...'), field('type', $._type))),
+    parameter: ($) => prec.dynamic(20, seq(field('name', nameOrIn($)), ':', optional('...'), field('type', $._type))),
 
     _result: ($) => choice($._type, $.tuple_type),
     tuple_type: ($) => prec.dynamic(5, seq('(', commaSep1($._type), ')')),
@@ -197,7 +212,7 @@ module.exports = grammar({
       ),
     field_list: ($) => seq('{', repeat(choice($.field_declaration, $._element)), '}'),
     field_declaration: ($) =>
-      prec.dynamic(20, prec.right(seq(field('name', $.identifier), ':', field('type', $._type), optional(field('tag', $.raw_string))))),
+      prec.dynamic(20, prec.right(seq(field('name', nameOrIn($)), ':', field('type', $._type), optional(field('tag', $.raw_string))))),
 
     interface_declaration: ($) =>
       prec.dynamic(
@@ -225,15 +240,37 @@ module.exports = grammar({
         ),
       ),
 
+    // enum Color { Red, Green }, enum Plan: string { Free = "free" }
     enum_declaration: ($) =>
-      prec.dynamic(10, seq('enum', field('name', alias($.identifier, $.type_identifier)), field('body', $.enum_body))),
+      prec.dynamic(
+        10,
+        seq(
+          'enum',
+          field('name', alias($.identifier, $.type_identifier)),
+          optional(seq(':', field('backing', $._type))),
+          field('body', $.enum_body),
+        ),
+      ),
     enum_body: ($) => seq('{', commaSep($.enum_entry), '}'),
-    enum_entry: ($) => field('name', $.identifier),
+    enum_entry: ($) => seq(field('name', $.identifier), optional(seq('=', field('value', $.string)))),
 
+    // type Handler = (Ctx) -> unit; typealias is the spelling before ADR 0037
     type_alias: ($) =>
       prec.dynamic(
         10,
-        seq('typealias', field('name', alias($.identifier, $.type_identifier)), optional($.type_parameters), '=', field('type', $._type)),
+        seq(
+          choice('type', 'typealias'),
+          field('name', alias($.identifier, $.type_identifier)),
+          optional($.type_parameters),
+          '=',
+          field('type', $._type),
+        ),
+      ),
+    // type UserID int64
+    type_definition: ($) =>
+      prec.dynamic(
+        10,
+        seq('type', field('name', alias($.identifier, $.type_identifier)), optional($.type_parameters), field('type', $._type)),
       ),
 
     const_declaration: ($) =>
@@ -247,7 +284,7 @@ module.exports = grammar({
       prec.dynamic(8, seq(field('name', $.identifier), repeat(seq(',', field('name', $.identifier))), ':=')),
 
     // x: T = e, x: T
-    typed_local: ($) => prec.dynamic(6, seq(field('name', $.identifier), ':', field('type', $._type))),
+    typed_local: ($) => prec.dynamic(6, seq(field('name', nameOrIn($)), ':', field('type', $._type))),
 
     // ------------------------------------------------------------------ types
 
@@ -343,7 +380,7 @@ module.exports = grammar({
       ),
     method_call: ($) =>
       prec.dynamic(5, prec(3, seq(choice('.', '?.'), field('name', $.identifier), choice(seq($.parenthesized, optional($.lambda)), $.lambda)))),
-    member_access: ($) => prec(1, seq(choice('.', '?.'), field('name', choice($.identifier, $.number)))),
+    member_access: ($) => prec(1, seq(choice('.', '?.'), field('name', choice(nameOrIn($), $.number)))),
 
     // []int{1, 2}, map[string]any{"a": 1}, [3]int{1, 2}
     typed_literal: ($) =>
@@ -352,7 +389,7 @@ module.exports = grammar({
     // { a, b -> a + b }, { it * 2 }
     lambda: ($) => prec.dynamic(1, seq('{', optional($.lambda_parameters), repeat($._element), '}')),
     lambda_parameters: ($) => prec.dynamic(30, seq(commaSep1($.lambda_parameter), '->')),
-    lambda_parameter: ($) => seq(field('name', $.identifier), optional(seq(':', field('type', $._type)))),
+    lambda_parameter: ($) => seq(field('name', nameOrIn($)), optional(seq(':', field('type', $._type)))),
 
     // ------------------------------------------------------------------ tokens
 

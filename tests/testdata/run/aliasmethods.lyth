@@ -4,8 +4,8 @@ import "fmt"
 struct Pt {
     X: int
 }
-typealias Point = Pt
-func Point.String(): string = "P(${X})"
+type Point = Pt
+func Point.String(): string = "P(${self.X})"
 func main() {
     s: fmt.Stringer = Pt(2)
     fmt.Println(s, Point(3).String())

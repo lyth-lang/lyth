@@ -3,7 +3,7 @@ package lythimpl
 
 import "encoding/json"
 import "net/http"
-import "lythbench/jsoncodec/lythimpl" as orders
+import orders "lythbench/jsoncodec/lythimpl"
 
 struct orderResponse {
     ID: int64

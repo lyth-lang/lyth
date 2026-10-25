@@ -17,13 +17,13 @@ struct Loud {
     Word: string
 }
 
-func Loud.String(): string = "${Word}!"
+func Loud.String(): string = "${self.Word}!"
 
 struct Quiet {
     Word: string
 }
 
-func Quiet.string(): string = "${Word}..."
+func Quiet.string(): string = "${self.Word}..."
 
 func main() throws {
     a := Account(ID = 1, UserID = 7, DisplayName = "Ada", HTTPPort = 8080, secret = "s")

@@ -12,7 +12,7 @@ func C.describe(name: string): string {
     return f()
 }
 func C.fieldInLambda(): string {
-    f := { "${name}:${total}" }
+    f := { "${self.name}:${self.total}" }
     return f()
 }
 func main() {

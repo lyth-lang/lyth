@@ -1071,6 +1071,12 @@ func (c *Checker) intArgs(args []*syntax.Arg) {
 
 // underlyingSignature returns the function signature underlying t, or nil.
 func underlyingSignature(t types.Type) types.Type {
+	if u := definedUnder(t); u != nil {
+		if sig, ok := types.Base(u).(*types.Signature); ok {
+			return sig
+		}
+		return nil
+	}
 	switch b := types.Base(t).(type) {
 	case *types.Signature:
 		return b

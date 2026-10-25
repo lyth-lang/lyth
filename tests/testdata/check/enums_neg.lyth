@@ -12,19 +12,19 @@ struct Circle : Shape {
     R: float64
 }
 
-func Circle.Area(): float64 = R
+func Circle.Area(): float64 = self.R
 
 struct Rect : Shape {
     W: float64
 }
 
-func Rect.Area(): float64 = W
+func Rect.Area(): float64 = self.W
 
 struct Square {
     S: float64
 }
 
-func Square.Area(): float64 = S * S
+func Square.Area(): float64 = self.S * self.S
 
 func Color.String(): string = "x" // ERROR E0102 "enum Color already has a String method"
 

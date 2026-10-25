@@ -58,23 +58,23 @@ struct Celsius {
     Deg: float64
 }
 
-func Celsius.String(): string = "${Deg}C"
+func Celsius.String(): string = "${self.Deg}C"
 
 struct Page[T] {
     Items: []T
     Total: int
 }
 
-func Page[T].Count(): int = len(Items)
+func Page[T].Count(): int = len(self.Items)
 
-func Page[T].First(fallback: T): T = if len(Items) > 0 { Items[0] } else { fallback }
+func Page[T].First(fallback: T): T = if len(self.Items) > 0 { self.Items[0] } else { fallback }
 
 struct Pair[K: comparable, V] {
     Key: K
     Value: V
 }
 
-func Pair[K, V].String(): string = "${Key}=${Value}"
+func Pair[K, V].String(): string = "${self.Key}=${self.Value}"
 
 interface Container[T] {
     Get(): T
@@ -84,8 +84,8 @@ struct Box[T] : fmt.Stringer, Container[T] {
     Value: T
 }
 
-func Box[T].String(): string = "Box(${Value})"
-func Box[T].Get(): T = Value
+func Box[T].String(): string = "Box(${self.Value})"
+func Box[T].Get(): T = self.Value
 
 func unwrap[T](c: Container[T]): T = c.Get()
 

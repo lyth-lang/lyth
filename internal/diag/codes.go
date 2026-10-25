@@ -72,10 +72,13 @@ const (
 	EGoLink      Code = "E0904"
 
 	// Warnings.
-	WUnusedVar    Code = "W0001"
-	WUnusedImport Code = "W0002"
-	WPreferThrows Code = "W0003"
-	WUnnecessary  Code = "W0004"
-	WUnreachable  Code = "W0005"
-	WShadow       Code = "W0006"
+	WUnusedVar     Code = "W0001"
+	WUnusedImport  Code = "W0002"
+	WPreferThrows  Code = "W0003"
+	WUnnecessary   Code = "W0004"
+	WUnreachable   Code = "W0005"
+	WShadow        Code = "W0006"
+	WErrorTypeTest Code = "W0007"
+	WJSONKey       Code = "W0008"
+	WJSONKeyChange Code = "W0009"
 )

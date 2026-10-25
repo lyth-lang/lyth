@@ -415,18 +415,9 @@ func (l *lexer) scanString() {
 				l.scanTemplateToken()
 			}
 			segStart = l.off
-		case c == '$' && l.off+1 < len(l.src) && l.isLetterAt(l.off+1):
-			end := l.off + 1
-			for end < len(l.src) {
-				r, size := utf8.DecodeRune(l.src[end:])
-				if !isLetter(r) && !(r < utf8.RuneSelf && isDigit(byte(r))) {
-					break
-				}
-				end += size
-			}
-			name := string(l.src[l.off+1 : end])
-			l.errorf(diag.EDollarTemplate, l.off, end, "string templates use ${...}; \"$%s\" would print literally", name).
-				WithFix(l.span(l.off, end), "${"+name+"}", "write ${%s} to interpolate, or \\$%s for a literal dollar sign", name, name)
+		case c == '$':
+			// $name is text; the checker reports it when name is a variable
+			// in scope, Kotlin's template habit (E0006, ADR 0042).
 			text.WriteByte('$')
 			l.off++
 		default:

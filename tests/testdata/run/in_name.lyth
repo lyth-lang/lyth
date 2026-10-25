@@ -1,0 +1,52 @@
+// in names fields, parameters, locals, named arguments, and lambda
+// parameters wherever the membership operator cannot appear (ADR 0044).
+
+struct parseCase {
+    name: string
+    in: string
+    want: int
+}
+
+func stage(in: <-chan int, out: chan<- int) {
+    for v in in {
+        out.send(v * 2)
+    }
+    out.close()
+}
+
+func describe(in: string, keys: []string): string = if in in keys { "known ${in}" } else { "unknown ${in}" }
+
+func main() {
+    cases := [
+        parseCase("one", "1", 1),
+        parseCase(name = "two", in = "2", want = 2),
+    ]
+    for tc in cases {
+        println(tc.name, tc.in, tc.want, tc.in in ["1", "2"])
+    }
+
+    in := make(chan int, 3)
+    out := make(chan int, 3)
+    for i in 1..3 {
+        in.send(i)
+    }
+    in.close()
+    stage(in, out)
+    total := 0
+    for v in out {
+        total += v
+    }
+    println(total)
+
+    in2 := ["a", "b"]
+    println(describe("a", in2), describe(in = "z", keys = in2))
+    double := { in: int -> in * 2 }
+    println(double(21), 3 in 1..5, 7 !in 1..5)
+}
+
+// Output:
+// one 1 1 true
+// two 2 2 true
+// 12
+// known a unknown z
+// 42 true true

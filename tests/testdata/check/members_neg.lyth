@@ -1,0 +1,79 @@
+// Members are reached through self (ADR 0038). A bare name that meant a
+// member before is an error. Its edit is a fix that lyth fix applies only
+// where the name can mean nothing else; where it now also names something
+// valid there (a package-level variable or function, an import before a
+// dot, a type or builtin that is called), the edit is a hint.
+import "log"
+
+var limit = 50
+
+func validate(n: int): bool = n > 0
+
+struct Stats {
+    Hits: int
+}
+
+struct Query {
+    limit: int
+    log: *log.Logger
+    Count: int
+    max: int
+    min: int
+    print: (string) -> unit
+}
+
+func Query.pageSize(): int {
+    if self.limit > 0 {
+        return limit // ERROR E0101 "limit is a field of self and also names the package-level variable limit"
+    }
+    return 0
+}
+
+func Query.note() {
+    log.Println("x") // ERROR E0101 "log is a field of self and also names the import log"
+}
+
+func *Query.bump(n: int) {
+    Count += n // ERROR E0101 "Count is a field of self; write self.Count"
+    ok() // ERROR E0101 "ok is a method of self; write self.ok"
+    f := { -> Count } // ERROR E0101 "Count is a field of self; write self.Count"
+    g := ok // ERROR E0101 "ok is a method of self; write self.ok"
+    println(f(), g)
+}
+
+func Query.ok(): bool = self.Count >= 0
+
+// A method named like a package-level function: both calls are valid.
+func Query.validate(): bool = validate(self.Count) // ERROR E0101 "validate is a method of self and also names the function validate"
+
+// A method named like a type: Stats() could construct either.
+func Query.Stats(): Stats = Stats() // ERROR E0101 "Stats is a method of self and also names the type Stats"
+
+// A field that is not a function cannot be called, so max(...) is the
+// builtin; as a value, max can only be the field.
+func Query.span(): int {
+    widest := max(self.max, 10)
+    low := min // ERROR E0101 "min is a field of self; write self.min"
+    return max - low + widest // ERROR E0101 "max is a field of self; write self.max"
+}
+
+// A field that is a function, named like a builtin: both calls are valid.
+func Query.say() {
+    print("x") // ERROR E0101 "print is a field of self and also names the builtin print"
+}
+
+// A local, a parameter, or a lambda parameter of the same name is not a
+// member: it is what the name means.
+func Query.shadowed(Count: int): int {
+    limit := 3
+    each := { log: string -> len(log) }
+    inner := { Count + limit }
+    outer := { inner() + Count }
+    return Count + limit + each("ab") + outer()
+}
+
+func main() {
+    q := Query(log = log.Default(), print = { println(it) })
+    q.say()
+    println(q.pageSize(), q.shadowed(1), q.span())
+}

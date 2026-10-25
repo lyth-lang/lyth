@@ -51,7 +51,7 @@ struct ValidationError {
 
 func *ValidationError.Error(): string {
     problems: []string = []
-    for field, problem in Fields {
+    for field, problem in self.Fields {
         problems = append(problems, field + " " + problem)
     }
     slices.Sort(problems)
@@ -70,7 +70,7 @@ func NewTodo.Normalize(): NewTodo throws {
     if len(problems) > 0 {
         throw &ValidationError(Fields = problems)
     }
-    return NewTodo(Title = trimmed, Due = Due)
+    return NewTodo(Title = trimmed, Due = self.Due)
 }
 
 // Normalize validates a patch and trims its title.
@@ -81,7 +81,7 @@ func Patch.Normalize(): Patch throws {
     if title != null {
         out.Title = checkTitle(title, problems)
     }
-    if title == null && Done == null && Due == null {
+    if title == null && self.Done == null && self.Due == null {
         problems["body"] = "must set at least one of title, done, due"
     }
     if len(problems) > 0 {

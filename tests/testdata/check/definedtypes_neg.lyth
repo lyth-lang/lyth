@@ -1,0 +1,39 @@
+// Defined types (ADR 0037): distinct types, what they cannot be, and the
+// Go spellings that have a Lyth declaration.
+import "context"
+
+type UserID int64
+type OrderID int64
+type User struct { // ERROR E0008 "a struct is declared struct User"
+    Name string
+}
+type Ref *Item
+type Loop Loop // ERROR E0216 "invalid recursive type Loop"
+type Anything any // ERROR E0601 "a defined type cannot be an interface"
+type Maybe int? // ERROR E0216 "a defined type cannot be nullable"
+type Shape Item // ERROR E0601 "a defined type cannot be a struct"
+typealias Old = int // ERROR E0008 "type aliases are declared with type Name = Type"
+type Pairs[K: comparable] = map[K]K // ERROR E0008 "generic type aliases are not supported yet"
+
+struct Item {
+    N: int
+}
+
+struct Worker {
+    name: string
+    cancel: context.CancelFunc
+}
+
+func Ref.Get(): int = 1 // ERROR E0216 "Ref is a pointer type, which cannot have methods"
+
+func lookup(id: UserID): string = "${id}"
+
+func main() {
+    o := OrderID(1)
+    println(lookup(o)) // ERROR E0201 "type mismatch in argument id of lookup"
+    n: int64 = UserID(3) // ERROR E0201 "type mismatch in initializer of n"
+    w := Worker(name = "w") // ERROR E0211 "missing field cancel"
+    c: context.CancelFunc // ERROR E0405 "context.CancelFunc has no zero value"
+    old: Old = 1
+    println(n, w.name, old)
+}

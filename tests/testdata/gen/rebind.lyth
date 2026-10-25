@@ -1,0 +1,24 @@
+// := replacing a parameter (ADR 0039) is Go's own line; a name with no new
+// variable beside it assigns, and a parameter an earlier closure captured
+// gets a local of its own.
+import "context"
+import "strings"
+import "time"
+
+func deadline(ctx: context.Context): bool {
+    ctx, cancel := context.WithTimeout(ctx, time.Second)
+    defer cancel()
+    _, ok := ctx.Deadline()
+    return ok
+}
+
+func normalize(name: string): string {
+    name := strings.TrimSpace(name)
+    return strings.ToUpper(name)
+}
+
+func captured(ctx: context.Context): bool {
+    before := { -> ctx.Err() == null }
+    ctx := context.WithValue(ctx, "k", "v")
+    return before() && ctx.Value("k") != null
+}

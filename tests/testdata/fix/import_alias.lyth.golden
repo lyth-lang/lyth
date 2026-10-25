@@ -1,0 +1,12 @@
+// Renamed imports written before ADR 0044, which lyth fix rewrites to Go's
+// spelling.
+import "fmt"
+import u "net/url"
+import (
+    str "strings"
+    _ "net/http/pprof"
+)
+
+func main() {
+    fmt.Println(str.ToUpper(u.QueryEscape("a b")))
+}

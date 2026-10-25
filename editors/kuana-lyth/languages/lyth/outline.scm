@@ -25,7 +25,11 @@
   name: (identifier) @name) @item
 
 (type_alias
-  "typealias" @context
+  ["type" "typealias"] @context
+  name: (type_identifier) @name) @item
+
+(type_definition
+  "type" @context
   name: (type_identifier) @name) @item
 
 (const_declaration

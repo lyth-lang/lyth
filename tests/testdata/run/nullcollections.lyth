@@ -28,7 +28,7 @@ func main() {
     fmt.Println(len(ys), len(zs), ys == null, zs, len(tags), len(v?.Tags), if len(zs) > 5 { zs } else { null })
 }
 
-func U.All(): []string = Tags
+func U.All(): []string = self.Tags
 
 func more() {
     u: U? = null

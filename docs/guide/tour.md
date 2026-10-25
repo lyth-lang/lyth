@@ -95,14 +95,14 @@ struct Point {
     Y: int
 }
 
-func Point.plus(o: Point): Point = Point(X = X + o.X, Y = Y + o.Y)
+func Point.plus(o: Point): Point = Point(X = self.X + o.X, Y = self.Y + o.Y)
 
 func *Point.moveBy(dx: int) {
-    X += dx
+    self.X += dx
 }
 
 // String makes Point a fmt.Stringer, so printing uses it.
-func Point.String(): string = "(${X}, ${Y})"
+func Point.String(): string = "(${self.X}, ${self.Y})"
 
 func main() {
     p := Point(1, 2)
@@ -116,7 +116,8 @@ A struct is constructed by calling it, with named arguments in any order or
 positional arguments for all fields. Methods are declared outside the struct,
 as in Go: `func Point.plus` has a value receiver and `func *Point.moveBy` a
 pointer receiver. Inside a method, the receiver is `self`, and fields and
-methods are also in scope by name (`X` is `self.X`). A value receiver is a
+methods are reached through it (`self.X`), as Go reaches them through its
+receiver variable. A value receiver is a
 copy, so assigning to its fields is a compile error; `func *T.M()` declares a
 pointer receiver, which sees and can change the caller's value. There are no
 static methods: a constructor is a package function such as `NewPoint`.
@@ -370,14 +371,14 @@ struct Circle : Shape {
     R: float64
 }
 
-func Circle.Area(): float64 = 3 * R * R
+func Circle.Area(): float64 = 3 * self.R * self.R
 
 struct Rect {
     W: float64
     H: float64
 }
 
-func Rect.Area(): float64 = W * H
+func Rect.Area(): float64 = self.W * self.H
 
 func describe(s: Shape): string = when s {
     is Circle -> "circle of radius ${s.R}"
@@ -425,7 +426,7 @@ struct Card : Payment {
     Amount: int
 }
 
-func Card.Cents(): int = Amount
+func Card.Cents(): int = self.Amount
 
 struct Voucher : Payment {
     Code: string
@@ -449,6 +450,9 @@ func main() {
 
 An `enum` is a closed set of values. It compiles to Go's `iota` constants
 (`SuitHearts`, `SuitSpades`, ...) and a `String` method, so it prints by name.
+In JSON it is its name too (`"hearts"`), and decoding rejects anything else.
+`enum Plan: string { Free = "free", Pro = "pro" }` gives entries fixed string
+values, for a wire format or database column that is already defined.
 A `sealed interface` is a closed set of types: only structs of the same
 package that declare it (`struct Card : Payment`) implement it.
 
@@ -472,7 +476,7 @@ struct Page[T] {
     Total: int
 }
 
-func Page[T].Empty(): bool = len(Items) == 0
+func Page[T].Empty(): bool = len(self.Items) == 0
 
 func string.Shout(): string = self + "!"
 

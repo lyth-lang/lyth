@@ -1,0 +1,16 @@
+// A string-backed enum lowers to Go's type T string with typed constants
+// and an UnmarshalText that accepts exactly its values (ADR 0035).
+enum Plan: string {
+    Free = "free",
+    Pro = "pro",
+    Enterprise = "enterprise",
+}
+
+func Plan.paid(): bool = when self {
+    Free -> false
+    Pro, Enterprise -> true
+}
+
+func main() {
+    println(Plan.Pro, Plan.Pro.paid())
+}

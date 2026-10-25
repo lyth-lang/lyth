@@ -239,7 +239,7 @@
       }
     },
     "type-declaration": {
-      "match": "\\b(?:(sealed)\\s+)?(struct|interface|enum|typealias)\\s+([A-Za-z_]\\w*)(?:(\\[[^\\]\\n]*\\]))?(?:\\s*(:)\\s*((?:(?:\\*|\\[\\d*\\])*(?:map\\[[^\\]\\n]+\\])?(?:<-\\s*)?(?:chan\\b(?:\\s*<-)?\\s*)?(?:\\*|\\[\\d*\\])*[A-Za-z_]\\w*(?:\\.[A-Za-z_]\\w*)?(?:\\[[^\\]\\n]*\\])?\\??)(?:\\s*,\\s*(?:\\*|\\[\\d*\\])*(?:map\\[[^\\]\\n]+\\])?(?:<-\\s*)?(?:chan\\b(?:\\s*<-)?\\s*)?(?:\\*|\\[\\d*\\])*[A-Za-z_]\\w*(?:\\.[A-Za-z_]\\w*)?(?:\\[[^\\]\\n]*\\])?\\??)*))?",
+      "match": "\\b(?:(sealed)\\s+)?(struct|interface|enum|type|typealias)\\s+([A-Za-z_]\\w*)(?:(\\[[^\\]\\n]*\\]))?(?:\\s*(:)\\s*((?:(?:\\*|\\[\\d*\\])*(?:map\\[[^\\]\\n]+\\])?(?:<-\\s*)?(?:chan\\b(?:\\s*<-)?\\s*)?(?:\\*|\\[\\d*\\])*[A-Za-z_]\\w*(?:\\.[A-Za-z_]\\w*)?(?:\\[[^\\]\\n]*\\])?\\??)(?:\\s*,\\s*(?:\\*|\\[\\d*\\])*(?:map\\[[^\\]\\n]+\\])?(?:<-\\s*)?(?:chan\\b(?:\\s*<-)?\\s*)?(?:\\*|\\[\\d*\\])*[A-Za-z_]\\w*(?:\\.[A-Za-z_]\\w*)?(?:\\[[^\\]\\n]*\\])?\\??)*))?",
       "captures": {
         "1": {
           "name": "storage.modifier.lyth"
@@ -459,7 +459,7 @@
     "keywords": {
       "patterns": [
         {
-          "match": "\\b(break|catch|continue|defer|else|for|go|if|in|is|as|return|select|throw|when|while)\\b",
+          "match": "(?<!\\.)\\b(break|catch|continue|defer|else|for|go|if|in|is|as|return|select|throw|when|while)\\b",
           "name": "keyword.control.lyth"
         },
         {
@@ -510,7 +510,7 @@
           "name": "keyword.interface.lyth"
         },
         {
-          "match": "\\b(enum|typealias)\\b",
+          "match": "\\b(enum|type|typealias)\\b",
           "name": "keyword.type.lyth"
         },
         {

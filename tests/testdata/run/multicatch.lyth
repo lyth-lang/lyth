@@ -3,7 +3,7 @@ import "errors"
 import "strconv"
 
 struct NotFound { Key: string }
-func *NotFound.Error(): string = "no ${Key}"
+func *NotFound.Error(): string = "no ${self.Key}"
 
 func pair(a: string, b: string): (int, int) throws {
     x := strconv.Atoi(a)?

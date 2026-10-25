@@ -1,0 +1,16 @@
+// $name is an error only when name is a variable, parameter, or constant in
+// scope (ADR 0042); the error has hints and no fix.
+const table = "orders"
+
+var region = "eu"
+
+func greet(name: string): string = "Hello $name" // ERROR E0006 "\"$name\" prints literally"
+
+func main() {
+    count := 3
+    println("$count items") // ERROR E0006 "templates are written ${count}"
+    println("in $table") // ERROR E0006 "\"$table\" prints literally"
+    println("$region") // ERROR E0006 "\"$region\" prints literally"
+    each := { item: string -> "$item" } // ERROR E0006 "\"$item\" prints literally"
+    println("$set $ref $missing \$count", greet("a"), each("x"))
+}

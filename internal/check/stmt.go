@@ -143,7 +143,7 @@ func (c *Checker) stmt(s syntax.Stmt) bool {
 
 // lhs checks an assignment target without counting it as a use.
 func (c *Checker) lhs(e syntax.Expr) *operand {
-	if id, ok := syntax.Unparen(e).(*syntax.Ident); ok {
+	if id, ok := syntax.Unparen(e).(*syntax.Ident); ok && c.implicitMember(id.Name) == nil {
 		sym := c.lookup(id.Name)
 		if v, ok := sym.(*VarSym); ok {
 			c.info.Uses[id] = v
@@ -167,8 +167,10 @@ func (c *Checker) localDecl(s *syntax.LocalDecl) bool {
 		want = c.resolveType(s.Type)
 	}
 	redeclared := false
+	var param *VarSym // the parameter this declaration may replace (ADR 0039)
 	if s.Define && name.Name != "_" {
-		if old := c.scope.LookupLocal(name.Name); old != nil {
+		param = c.paramNamed(name.Name)
+		if old := c.scope.LookupLocal(name.Name); old != nil && (param == nil || old != param) {
 			// Go's "no new variables on left side of :=".
 			c.errorf(diag.EColonEquals, name.S, "%s is already declared in this scope; := declares a new variable", name.Name).
 				WithRelated(old.DeclSpan(), "previous declaration").
@@ -213,12 +215,92 @@ func (c *Checker) localDecl(s *syntax.LocalDecl) bool {
 		c.errorf(diag.EInvalidUse, s.S, "%s cannot have type unit", name.Name)
 		t = types.Invalid
 	}
+	if param != nil {
+		sameScope := c.scope.LookupLocal(name.Name) == param
+		if c.readsVar(s.Value, param) && (sameScope || c.fitsParam(t, param)) {
+			c.info.Locals[s] = []*VarSym{c.rebind(param, name, t, sameScope)}
+			return terminates
+		}
+		if sameScope {
+			c.errorf(diag.EColonEquals, name.S, "%s is a parameter; := cannot declare it again", name.Name).
+				WithRelated(param.Span, "parameter %s declared here", name.Name).
+				WithHint("this would ignore the argument %s; choose another name, or derive the new value from it (%s := f(%s))", name.Name, name.Name, name.Name)
+			redeclared = true
+		}
+	}
 	v := c.newLocal(name, t)
 	if !redeclared {
 		c.declareLocal(v, name)
 	}
 	c.info.Locals[s] = []*VarSym{v}
 	return terminates
+}
+
+// paramNamed returns the parameter of the enclosing function or lambda that
+// name refers to here, or nil when name means something else.
+func (c *Checker) paramNamed(name string) *VarSym {
+	if c.fn == nil {
+		return nil
+	}
+	for s := c.scope; s != nil && s.kind != PackageScope && s.kind != UniverseScope; s = s.parent {
+		if sym := s.syms[name]; sym != nil {
+			if v, ok := sym.(*VarSym); ok && v.Kind == ParamVar && !v.Implicit && v.owner == c.fn {
+				return v
+			}
+			return nil
+		}
+	}
+	return nil
+}
+
+// fitsParam reports whether a value of type t can replace param: it has the
+// parameter's type, or a Go type that Lyth treats as it (context.Context!
+// from context.WithTimeout for a context.Context parameter).
+func (c *Checker) fitsParam(t types.Type, param *VarSym) bool {
+	if types.Identical(t, param.Type) {
+		return true
+	}
+	if types.IsPlatform(t) && types.Identical(types.Base(t), types.Base(param.Type)) {
+		return true
+	}
+	return false
+}
+
+// readsVar reports whether e, already checked, reads v.
+func (c *Checker) readsVar(e syntax.Expr, v *VarSym) bool {
+	if e == nil {
+		return false
+	}
+	reads := false
+	syntax.Walk(e, func(n syntax.Node) {
+		if id, ok := n.(*syntax.Ident); ok && c.info.Uses[id] == Symbol(v) {
+			reads = true
+		}
+	})
+	return reads
+}
+
+// rebind declares the local that replaces param from here to the end of the
+// block, for name := f(name) (ADR 0039): the parameter itself is never
+// assigned, so parameters stay read-only. The local has the parameter's
+// type, which keeps the generated line Go's own ctx, cancel := ...; in the
+// function's outermost block that line assigns the parameter, which only a
+// closure created before it could observe (FreshName).
+func (c *Checker) rebind(param *VarSym, name *syntax.Ident, t types.Type, sameScope bool) *VarSym {
+	if sameScope && t != types.Invalid && param.Type != types.Invalid && !c.fitsParam(t, param) {
+		c.errorf(diag.ETypeMismatch, name.S, "%s would change type from %s to %s; choose a new name", name.Name, param.Type, t).
+			WithRelated(param.Span, "parameter %s declared here", name.Name)
+	}
+	v := &VarSym{name: name.Name, Type: param.Type, Mutable: true, Kind: LocalVar, Span: name.S, Rebinds: param, InPlace: sameScope, FreshName: param.captured}
+	v.NotReassigned = c.fn.reassigned != nil && !c.fn.reassigned[name.Name]
+	c.info.Defs[name] = v
+	if sameScope {
+		c.scope.Replace(v) // hides the parameter from here on
+	} else {
+		c.scope.Insert(v)
+	}
+	c.fn.locals = append(c.fn.locals, v)
+	return v
 }
 
 // newLocal returns a variable declared by := or name: Type. It is mutable;
@@ -242,17 +324,6 @@ func (c *Checker) warnShadow(id *syntax.Ident) {
 			c.warnf(diag.WShadow, id.S, "%s hides the %s declared in an enclosing scope", id.Name, map[bool]string{true: "parameter", false: "variable"}[v.Kind == ParamVar]).
 				WithRelated(v.Span, "%s declared here", id.Name).
 				WithHint("choose another name; to change the outer %s, assign it with = instead of declaring it", id.Name)
-			return
-		}
-	}
-	// In a method, fields are in scope by name; a local of the same name
-	// hides the field, which stays reachable as self.name.
-	for s := c.scope; s != nil; s = s.parent {
-		if s.kind == FuncScope && s.fn != nil && s.fn.recvDecl != nil {
-			if f := s.fn.recvDecl.LookupField(id.Name); f != nil {
-				c.warnf(diag.WShadow, id.S, "%s hides the field %s of self", id.Name, id.Name).
-					WithHint("choose another name, or write self.%s for the field", id.Name)
-			}
 			return
 		}
 	}
@@ -287,6 +358,14 @@ func (c *Checker) destructure(s *syntax.LocalDecl) bool {
 			}
 			if id.Name == "_" {
 				continue
+			}
+			if p := c.paramNamed(id.Name); p != nil && ts != nil && c.readsVar(s.Value, p) {
+				// g, ctx := errgroup.WithContext(ctx) (ADR 0039).
+				if same := c.scope.LookupLocal(id.Name) == p; same || c.fitsParam(t, p) {
+					vars[i] = c.rebind(p, id, t, same)
+					fresh = true
+					continue
+				}
 			}
 			if old := c.scope.LookupLocal(id.Name); old != nil {
 				ov, ok := old.(*VarSym)

@@ -9,21 +9,21 @@ struct Circle : Shape {
     R: float64
 }
 
-func Circle.Area(): float64 = math.Pi * R * R
+func Circle.Area(): float64 = math.Pi * self.R * self.R
 
 struct Rect : Shape {
     W: float64
     H: float64
 }
 
-func Rect.Area(): float64 = W * H
+func Rect.Area(): float64 = self.W * self.H
 
 struct Triangle : Shape {
     Base: float64
     Height: float64
 }
 
-func Triangle.Area(): float64 = Base * Height / 2
+func Triangle.Area(): float64 = self.Base * self.Height / 2
 
 func describe(s: Shape): string = when s {
     is Circle -> "circle of radius ${s.R}"

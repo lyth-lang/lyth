@@ -1,0 +1,21 @@
+// $name in a string is text unless name is a variable in scope (ADR 0042):
+// MongoDB operators, JSON Schema keywords, and PostgreSQL dollar quotes need
+// no escaping, and \$ keeps a dollar anywhere.
+func trigger(table: string): string {
+    return "CREATE FUNCTION touch_${table}() RETURNS trigger AS $fn$ BEGIN RETURN NEW; END; $fn$ LANGUAGE plpgsql"
+}
+
+func main() {
+    update := map[string]any{"$set": ["status": "paid"], "$inc": ["version": 1]}
+    filter := map[string]any{"age": ["$gte": 18], "$or": [["a": 1]]}
+    schema := ["$ref": "#/definitions/User", "$schema": "https://json-schema.org/draft/2020-12/schema"]
+    println(len(update), len(filter), schema["$ref"])
+    println(trigger("orders"))
+    name := "ada"
+    println("costs $5, $1 and $$, ${name} and \$name")
+}
+
+// Output:
+// 2 2 #/definitions/User
+// CREATE FUNCTION touch_orders() RETURNS trigger AS $fn$ BEGIN RETURN NEW; END; $fn$ LANGUAGE plpgsql
+// costs $5, $1 and $$, ada and $name

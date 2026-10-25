@@ -41,9 +41,9 @@ struct File {
     Name: string
 }
 
-func File.Read(): string = "contents of ${Name}"
+func File.Read(): string = "contents of ${self.Name}"
 func File.Close() {
-    println("closed ${Name}")
+    println("closed ${self.Name}")
 }
 
 func main() throws {

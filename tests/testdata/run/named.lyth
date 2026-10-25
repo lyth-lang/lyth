@@ -24,7 +24,7 @@ struct Server {
     Name: string
 }
 
-func Server.describe(verbose: bool = false, prefix: string = "server"): string = if verbose { "${prefix} ${Name} (verbose)" } else { "${prefix} ${Name}" }
+func Server.describe(verbose: bool = false, prefix: string = "server"): string = if verbose { "${prefix} ${self.Name} (verbose)" } else { "${prefix} ${self.Name}" }
 
 var trace: []string = []
 

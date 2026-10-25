@@ -1,0 +1,46 @@
+// Members by bare name, before ADR 0038: lyth fix writes self. in front of
+// each one that can only mean the member. A name that also names something
+// valid there (a package-level variable, an import before a dot) is left to
+// the author (TestFixLeavesAmbiguousMembers).
+import "log"
+
+enum Kind { Round, Square }
+
+struct Config {
+    Name: string
+}
+
+struct Query {
+    Config: Config
+    out: *log.Logger
+    Count: int
+    max: int
+}
+
+func Query.pageSize(): int {
+    if max > 0 {
+        return max
+    }
+    return 10
+}
+
+func *Query.bump(n: int) {
+    Count += n
+    if validate() {
+        out.Printf("count %d", Count)
+    }
+    each := { k: int -> Count + k }
+    check := validate
+    next := Config(Name = Config.Name + "!")
+    println(each(1), check(), next.Name, max(Count, 3))
+}
+
+func Query.validate(): bool = Count >= 0
+
+func Query.Kind(): Kind = Kind.Round
+
+func main() {
+    q := &Query(Config = Config(Name = "q"), out = log.Default(), max = 2)
+    q.bump(2)
+    println(q.pageSize(), q.Kind())
+}

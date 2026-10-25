@@ -215,6 +215,10 @@
           "named": true
         },
         {
+          "type": "type_definition",
+          "named": true
+        },
+        {
           "type": "type_test",
           "named": true
         },
@@ -392,6 +396,10 @@
         },
         {
           "type": "type_alias",
+          "named": true
+        },
+        {
+          "type": "type_definition",
           "named": true
         },
         {
@@ -693,6 +701,60 @@
     "type": "enum_declaration",
     "named": true,
     "fields": {
+      "backing": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "array_type",
+            "named": true
+          },
+          {
+            "type": "channel_type",
+            "named": true
+          },
+          {
+            "type": "empty_struct_type",
+            "named": true
+          },
+          {
+            "type": "function_type",
+            "named": true
+          },
+          {
+            "type": "generic_type",
+            "named": true
+          },
+          {
+            "type": "map_type",
+            "named": true
+          },
+          {
+            "type": "nullable_type",
+            "named": true
+          },
+          {
+            "type": "pointer_type",
+            "named": true
+          },
+          {
+            "type": "primitive_type",
+            "named": true
+          },
+          {
+            "type": "qualified_type",
+            "named": true
+          },
+          {
+            "type": "slice_type",
+            "named": true
+          },
+          {
+            "type": "type_identifier",
+            "named": true
+          }
+        ]
+      },
       "body": {
         "multiple": false,
         "required": true,
@@ -725,6 +787,16 @@
         "types": [
           {
             "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "value": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "string",
             "named": true
           }
         ]
@@ -961,6 +1033,10 @@
         },
         {
           "type": "type_alias",
+          "named": true
+        },
+        {
+          "type": "type_definition",
           "named": true
         },
         {
@@ -1588,6 +1664,10 @@
           "named": true
         },
         {
+          "type": "type_definition",
+          "named": true
+        },
+        {
           "type": "type_identifier",
           "named": true
         },
@@ -1800,6 +1880,10 @@
         },
         {
           "type": "type_alias",
+          "named": true
+        },
+        {
+          "type": "type_definition",
           "named": true
         },
         {
@@ -2016,6 +2100,10 @@
         },
         {
           "type": "type_alias",
+          "named": true
+        },
+        {
+          "type": "type_definition",
           "named": true
         },
         {
@@ -2636,6 +2724,10 @@
           "named": true
         },
         {
+          "type": "type_definition",
+          "named": true
+        },
+        {
           "type": "type_test",
           "named": true
         },
@@ -2808,6 +2900,10 @@
         },
         {
           "type": "type_alias",
+          "named": true
+        },
+        {
+          "type": "type_definition",
           "named": true
         },
         {
@@ -3213,6 +3309,10 @@
           "named": true
         },
         {
+          "type": "type_definition",
+          "named": true
+        },
+        {
           "type": "type_test",
           "named": true
         },
@@ -3555,6 +3655,86 @@
     }
   },
   {
+    "type": "type_definition",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "type_identifier",
+            "named": true
+          }
+        ]
+      },
+      "type": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "array_type",
+            "named": true
+          },
+          {
+            "type": "channel_type",
+            "named": true
+          },
+          {
+            "type": "empty_struct_type",
+            "named": true
+          },
+          {
+            "type": "function_type",
+            "named": true
+          },
+          {
+            "type": "generic_type",
+            "named": true
+          },
+          {
+            "type": "map_type",
+            "named": true
+          },
+          {
+            "type": "nullable_type",
+            "named": true
+          },
+          {
+            "type": "pointer_type",
+            "named": true
+          },
+          {
+            "type": "primitive_type",
+            "named": true
+          },
+          {
+            "type": "qualified_type",
+            "named": true
+          },
+          {
+            "type": "slice_type",
+            "named": true
+          },
+          {
+            "type": "type_identifier",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": false,
+      "required": false,
+      "types": [
+        {
+          "type": "type_parameters",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "type_parameter",
     "named": true,
     "fields": {
@@ -3864,6 +4044,10 @@
         },
         {
           "type": "type_alias",
+          "named": true
+        },
+        {
+          "type": "type_definition",
           "named": true
         },
         {
@@ -4179,6 +4363,10 @@
         },
         {
           "type": "type_alias",
+          "named": true
+        },
+        {
+          "type": "type_definition",
           "named": true
         },
         {
@@ -4796,11 +4984,11 @@
   },
   {
     "type": "rune",
-    "named": true
+    "named": false
   },
   {
     "type": "rune",
-    "named": false
+    "named": true
   },
   {
     "type": "sealed",
@@ -4836,6 +5024,10 @@
   },
   {
     "type": "true",
+    "named": false
+  },
+  {
+    "type": "type",
     "named": false
   },
   {

@@ -1,0 +1,50 @@
+// An optional passed to a Go interface parameter (any, ...any) goes in as
+// its value, and null as a nil interface (ADR 0040): fmt, slog, and the
+// json encoder see the value, never the box. APIs that need a pointer to
+// write into still get one (&field), as in Go.
+import "database/sql"
+import "encoding/json"
+import "fmt"
+import "log/slog"
+import "os"
+
+struct User {
+    Email: string?
+    Age: int?
+    Next: *User?
+}
+
+func describe(v: any?): string = if v == null { "nil" } else { "${v}" }
+
+func email(u: User): string? = u.Email
+
+func main() throws {
+    u := User(Email = "ada@example.com", Age = 36)
+    none := User()
+    log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions(ReplaceAttr = { groups, a -> if a.Key == "time" { slog.Attr() } else { a } })))
+    log.Info("signup", "email", u.Email, "age", u.Age, "missing", none.Email)
+    fmt.Printf("email=%v age=%v missing=%v next=%v\n", u.Email, u.Age, none.Email, u.Next)
+    fmt.Println(u.Email, none.Age)
+    a := json.Marshal(u.Email)?
+    b := json.Marshal(none.Age)?
+    fmt.Println(string(a), string(b), describe(u.Age), describe(none.Age))
+
+    decoded: string? = null
+    json.Unmarshal([]byte(`"filled"`), &decoded)?
+    fmt.Println(decoded ?: "still null")
+
+    // What Go receives: the value, a genuinely nil interface, or the pointer.
+    linked := User(Next = &u)
+    fmt.Printf("%T %T %T %T %T\n", u.Email, none.Email, none.Next, linked.Next, email(none))
+    arg := sql.NamedArg(Name = "e", Value = none.Email)
+    fmt.Println(arg.Value == null, sql.NamedArg(Name = "e", Value = u.Age).Value)
+}
+
+// Output:
+// level=INFO msg=signup email=ada@example.com age=36 missing=<nil>
+// email=ada@example.com age=36 missing=<nil> next=<nil>
+// ada@example.com <nil>
+// "ada@example.com" null 36 nil
+// filled
+// string <nil> <nil> *main.User <nil>
+// true 36

@@ -10,7 +10,7 @@ struct Greeter {
 
 // ServeHTTP makes *Greeter an http.Handler.
 func *Greeter.ServeHTTP(w: http.ResponseWriter, r: *http.Request) {
-    _ = fmt.Fprintf(w, "%s, %s!", Greeting, r.URL.Query().Get("name"))
+    _ = fmt.Fprintf(w, "%s, %s!", self.Greeting, r.URL.Query().Get("name"))
 }
 
 func fetch(url: string): (int, string) throws {

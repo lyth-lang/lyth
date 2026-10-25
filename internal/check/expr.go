@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/lyth-lang/lyth/internal/diag"
 	"github.com/lyth-lang/lyth/internal/source"
@@ -144,6 +145,9 @@ func (c *Checker) expr0(e syntax.Expr, want types.Type) *operand {
 		return c.basicLit(e)
 	case *syntax.TemplateLit:
 		for _, p := range e.Parts {
+			if p.X == nil {
+				c.dollarNames(p.S)
+			}
 			if p.X != nil {
 				x := c.value(p.X, nil)
 				if x.mode != ModeInvalid {
@@ -268,7 +272,15 @@ func (c *Checker) ident(e *syntax.Ident) *operand {
 		c.errorf(diag.EInvalidUse, e.S, "_ cannot be used as a value")
 		return invalid(e)
 	}
-	sym := c.lookup(e.Name)
+	var sym Symbol
+	if m := c.implicitMember(e.Name); m != nil && !c.callsOther(e, m) {
+		if c.bareMember(e, m) {
+			return invalid(e)
+		}
+		sym = m
+	} else {
+		sym = c.lookup(e.Name)
+	}
 	if sym == nil {
 		d := c.errorf(diag.EUndefined, e.S, "undefined: %s", e.Name)
 		if path, ok := stdPackages[e.Name]; ok {
@@ -290,6 +302,9 @@ func (c *Checker) ident(e *syntax.Ident) *operand {
 	switch s := sym.(type) {
 	case *VarSym:
 		s.Used = true
+		if s.owner != nil && s.owner != c.fn {
+			s.captured = true // used by a lambda, go block, or defer block
+		}
 		t := s.Type
 		if s.Kind == GlobalVar {
 			t = c.globalType(s)
@@ -354,6 +369,50 @@ func (c *Checker) ident(e *syntax.Ident) *operand {
 	return invalid(e)
 }
 
+// dollarNames reports $name in the source text of a string, which prints
+// literally, when name is a variable or constant in scope: that is Kotlin's
+// template spelling, and Lyth's is ${name}. Any other $name is text, as in
+// MongoDB's "$set", JSON Schema's "$ref", or PostgreSQL's $body$ (ADR 0042).
+// The two possible edits mean different things, so neither is a fix.
+func (c *Checker) dollarNames(span source.Span) {
+	if span.File == nil || span.End > len(span.File.Content) {
+		return
+	}
+	src := span.File.Content[span.Start:span.End]
+	for i := 0; i < len(src); i++ {
+		if src[i] != '$' || i+1 >= len(src) {
+			continue
+		}
+		escapes := 0
+		for j := i - 1; j >= 0 && src[j] == '\\'; j-- {
+			escapes++
+		}
+		if escapes%2 == 1 {
+			continue // \$name keeps the dollar
+		}
+		end := i + 1
+		for end < len(src) {
+			r, size := utf8.DecodeRune(src[end:])
+			if !(r == '_' || unicode.IsLetter(r) || end > i+1 && unicode.IsDigit(r)) {
+				break
+			}
+			end += size
+		}
+		if end == i+1 {
+			continue // $1, $$, a lone $
+		}
+		name := string(src[i+1 : end])
+		switch sym := c.lookupSkippingMembers(name).(type) {
+		case *VarSym, *ConstSym:
+			at := source.Span{File: span.File, Start: span.Start + i, End: span.Start + end}
+			c.errorf(diag.EDollarTemplate, at, "\"$%s\" prints literally; templates are written ${%s}", name, name).
+				WithRelated(sym.DeclSpan(), "%s is declared here", name).
+				WithHint("write ${%s} to interpolate it, or \\$%s to keep the dollar sign", name, name)
+		}
+		i = end - 1
+	}
+}
+
 func (c *Checker) basicLit(e *syntax.BasicLit) *operand {
 	switch e.Kind {
 	case syntax.INT:
@@ -376,7 +435,10 @@ func (c *Checker) basicLit(e *syntax.BasicLit) *operand {
 			return invalid(e)
 		}
 		return &operand{mode: ModeValue, typ: types.UntypedRune, val: constant.MakeInt64(int64(r[0]))}
-	case syntax.STRING, syntax.RAWSTRING:
+	case syntax.STRING:
+		c.dollarNames(e.S)
+		return &operand{mode: ModeValue, typ: types.UntypedString, val: constant.MakeString(e.Value)}
+	case syntax.RAWSTRING:
 		return &operand{mode: ModeValue, typ: types.UntypedString, val: constant.MakeString(e.Value)}
 	}
 	return invalid(e)
@@ -1123,7 +1185,34 @@ func (c *Checker) assertable(x *operand, t types.Type, span source.Span) bool {
 		}
 		return false
 	}
+	c.warnErrorTypeTest(x, t, span)
 	return true
+}
+
+// warnErrorTypeTest reports a type test of an error type on an error value
+// (W0007, ADR 0041). A type test sees the value's dynamic type only, so it
+// misses the error wrapped inside (err.wrap, fmt.Errorf with %w), which is
+// how errors usually arrive; typed catch and errors.AsType look through the
+// chain. A value bound as any first (v: any = err) is tested on purpose.
+func (c *Checker) warnErrorTypeTest(x *operand, t types.Type, span source.Span) {
+	goErr, ok := types.GoError().Underlying().(*gotypes.Interface)
+	if !ok || types.IsInterface(t) {
+		return
+	}
+	if _, isAny := types.Base(x.typ).(*types.AnyType); isAny {
+		return
+	}
+	if !gotypes.Implements(types.Lower(types.Base(x.typ)), goErr) {
+		return
+	}
+	lt := types.Lower(t)
+	if !gotypes.Implements(lt, goErr) && !gotypes.Implements(gotypes.NewPointer(lt), goErr) {
+		return
+	}
+	value := x.expr.Span().Short()
+	c.warnf(diag.WErrorTypeTest, span, "a type test sees only the dynamic type of %s, so a wrapped %s does not match", value, t).
+		WithHint("to match through wrapping, handle the call with catch (e: %s) { ... }, or bind it: e, ok := errors.AsType[%s](%s)", t, t, value).
+		WithHint("to test the dynamic type on purpose, bind the error as any first: v: any = %s", value)
 }
 
 // nullableUse reports E0401 for using a nullable value as non-null.
@@ -1463,6 +1552,13 @@ func (c *Checker) mapLit0(e *syntax.MapLit, want types.Type) *operand {
 // name, as Go's gin.H{...} does.
 func namedCollection(want types.Type) types.Type {
 	n, ok := types.Base(want).(*types.Named)
+	if u := definedUnder(want); ok && u != nil {
+		switch types.Base(u).(type) {
+		case *types.Slice, *types.Array, *types.Map:
+			return n
+		}
+		return nil
+	}
 	if !ok || n.Go == nil {
 		return nil
 	}

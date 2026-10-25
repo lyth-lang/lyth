@@ -14,14 +14,14 @@ struct Started : Event {
     T: int
 }
 
-func Started.At(): int = T
+func Started.At(): int = self.T
 
 struct Failed : Event {
     T: int
     Reason: string
 }
 
-func Failed.At(): int = T
+func Failed.At(): int = self.T
 
 func describe(e: Event): string = when e {
     is Started -> "started at ${e.T}"

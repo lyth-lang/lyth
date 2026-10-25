@@ -10,13 +10,13 @@ struct Square : Shape { // ERROR E0212 "missing method Name: () -> string"
     Side: float64
 }
 
-func Square.Area(): float64 = Side * Side
+func Square.Area(): float64 = self.Side * self.Side
 
 struct Tri : Shape { // ERROR E0212 "method Area has type () -> int, but Shape needs () -> float64"
     Base: int
 }
 
-func Tri.Area(): int = Base
+func Tri.Area(): int = self.Base
 func Tri.Name(): string = "tri"
 
 struct Disc : fmt.Stringer { // ERROR E0212 "method string must be named String to implement fmt.Stringer"

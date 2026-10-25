@@ -25,28 +25,28 @@ func NewServer(store: todo.Store, tokens: map[string]string, log: *slog.Logger):
 // Handler returns the routes, wrapped in logging and panic recovery.
 func *Server.Handler(): http.Handler {
     mux := http.NewServeMux()
-    mux.HandleFunc("GET /healthz", healthz)
-    mux.Handle("GET /v1/todos", authed(list))
-    mux.Handle("POST /v1/todos", authed(create))
-    mux.Handle("GET /v1/todos/{id}", authed(get))
-    mux.Handle("PATCH /v1/todos/{id}", authed(update))
-    mux.Handle("DELETE /v1/todos/{id}", authed(remove))
-    return recoverer(log, logRequests(log, mux))
+    mux.HandleFunc("GET /healthz", self.healthz)
+    mux.Handle("GET /v1/todos", self.authed(self.list))
+    mux.Handle("POST /v1/todos", self.authed(self.create))
+    mux.Handle("GET /v1/todos/{id}", self.authed(self.get))
+    mux.Handle("PATCH /v1/todos/{id}", self.authed(self.update))
+    mux.Handle("DELETE /v1/todos/{id}", self.authed(self.remove))
+    return recoverer(self.log, logRequests(self.log, mux))
 }
 
 // apiHandler serves an authenticated request for user. A returned error
 // becomes a JSON error response.
-typealias apiHandler = (http.ResponseWriter, *http.Request, string) -> unit throws
+type apiHandler = (http.ResponseWriter, *http.Request, string) -> unit throws
 
 // authed requires a valid bearer token.
 func *Server.authed(h: apiHandler): http.Handler = http.HandlerFunc({ w, r ->
-    user := userFor(r)
+    user := self.userFor(r)
     if user == null {
         w.Header().Set("WWW-Authenticate", `Bearer realm="todo"`)
-        writeError(w, r, &apiError(status = http.StatusUnauthorized, code = "unauthorized", message = "missing or invalid bearer token"))
+        self.writeError(w, r, &apiError(status = http.StatusUnauthorized, code = "unauthorized", message = "missing or invalid bearer token"))
         return
     }
-    h(w, r, user) catch (err) { writeError(w, r, err) }
+    h(w, r, user) catch (err) { self.writeError(w, r, err) }
 })
 
 // userFor returns the user whose token authorizes r. Every token is
@@ -57,7 +57,7 @@ func *Server.userFor(r: *http.Request): string? {
         return null
     }
     user: string? = null
-    for t, u in tokens {
+    for t, u in self.tokens {
         if subtle.ConstantTimeCompare([]byte(t), []byte(token)) == 1 {
             user = u
         }
@@ -71,10 +71,10 @@ interface pinger {
 }
 
 func *Server.healthz(w: http.ResponseWriter, r: *http.Request) {
-    s := store
+    s := self.store
     if s is pinger {
         s.Ping(r.Context()) catch (err) {
-            log.WarnContext(r.Context(), "health check failed", "error", err)
+            self.log.WarnContext(r.Context(), "health check failed", "error", err)
             writeJSON(w, http.StatusServiceUnavailable, ["status": "unavailable"])
             return
         }
@@ -91,7 +91,7 @@ struct listResponse {
 
 func *Server.list(w: http.ResponseWriter, r: *http.Request, user: string) throws {
     filter := parseFilter(r.URL.Query())?
-    todos := store.List(r.Context(), user, filter)?
+    todos := self.store.List(r.Context(), user, filter)?
     resp := listResponse(Todos = todos)
     if len(todos) == filter.Limit {
         resp.Next = todos[len(todos) - 1].ID
@@ -100,14 +100,14 @@ func *Server.list(w: http.ResponseWriter, r: *http.Request, user: string) throws
 }
 
 func *Server.get(w: http.ResponseWriter, r: *http.Request, user: string) throws {
-    t := store.Get(r.Context(), user, pathID(r)?)?
+    t := self.store.Get(r.Context(), user, pathID(r)?)?
     writeJSON(w, http.StatusOK, t)
 }
 
 func *Server.create(w: http.ResponseWriter, r: *http.Request, user: string) throws {
     input := todo.NewTodo()
     decode(w, r, &input)?
-    t := store.Create(r.Context(), user, input.Normalize()?)?
+    t := self.store.Create(r.Context(), user, input.Normalize()?)?
     w.Header().Set("Location", "/v1/todos/${t.ID}")
     writeJSON(w, http.StatusCreated, t)
 }
@@ -116,12 +116,12 @@ func *Server.update(w: http.ResponseWriter, r: *http.Request, user: string) thro
     id := pathID(r)?
     patch := todo.Patch()
     decode(w, r, &patch)?
-    t := store.Update(r.Context(), user, id, patch.Normalize()?)?
+    t := self.store.Update(r.Context(), user, id, patch.Normalize()?)?
     writeJSON(w, http.StatusOK, t)
 }
 
 func *Server.remove(w: http.ResponseWriter, r: *http.Request, user: string) throws {
-    store.Remove(r.Context(), user, pathID(r)?)?
+    self.store.Remove(r.Context(), user, pathID(r)?)?
     w.WriteHeader(http.StatusNoContent)
 }
 

@@ -173,7 +173,7 @@ struct ValidationError {
     Field: string
 }
 
-func *ValidationError.Error(): string = "invalid ${Field}"
+func *ValidationError.Error(): string = "invalid ${self.Field}"
 
 func validate(name: string): *ValidationError? = if name == "" { &ValidationError(Field = "name") } else { null }
 
@@ -209,7 +209,7 @@ struct Problem {
     Reason: string
 }
 
-func Problem.Error(): string = "${Field}: ${Reason}"
+func Problem.Error(): string = "${self.Field}: ${self.Reason}"
 
 func main() {
     println(portOr("8080", 80), portOr("http", 80))
@@ -259,7 +259,7 @@ struct NotFound {
     ID: int
 }
 
-func *NotFound.Error(): string = "user ${ID} not found"
+func *NotFound.Error(): string = "user ${self.ID} not found"
 
 func find(id: int): string throws {
     if id < 0 {

@@ -1,0 +1,20 @@
+// Type aliases written before ADR 0037, which lyth fix rewrites to Go's
+// spelling. The alias keeps its meaning; defined types are written
+// type Name Underlying.
+import "net/http"
+
+typealias Middleware = (http.Handler) -> http.Handler
+
+typealias Millis = int64
+
+type UserID int64
+
+func logged(next: http.Handler): http.Handler = next
+
+func main() {
+    m: Middleware = logged
+    n: Millis = 5
+    id: UserID = 7
+    _ = m
+    println(n + 1, id)
+}
