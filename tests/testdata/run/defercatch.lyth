@@ -41,7 +41,24 @@ func f2(n: int): error? {
     println("f2", n)
     return null
 }
+struct W {
+    inner: T
+}
+
+// A value method's receiver is copied at the defer, also when it is a
+// field, and a smart-cast optional is read as it was.
+func copies() {
+    w := W(T(1, { f1(0) }))
+    defer w.inner.Show() catch {}
+    w.inner.n = 2
+    o: T? = T(3, { f1(0) })
+    if o != null {
+        defer o.Show() catch {}
+    }
+}
+
 func main() {
+    copies()
     pointers()
     s := S(1)
     defer s.Show() catch {}
@@ -56,6 +73,8 @@ func main() {
 }
 
 // Output:
+// T show 3
+// T show 1
 // f2 8
 // f1 9
 // T show 1

@@ -7,6 +7,7 @@ import (
 	"github.com/lyth-lang/lyth/internal/check"
 	"github.com/lyth-lang/lyth/internal/source"
 	"github.com/lyth-lang/lyth/internal/syntax"
+	"github.com/lyth-lang/lyth/internal/types"
 )
 
 // Membership tests lower to what Go code writes by hand:
@@ -86,6 +87,11 @@ func (fl *fnLower) membership(in *check.InInfo, elem ast.Expr, elemSyn syntax.Ex
 		if in.Rune {
 			fn = "ContainsRune"
 		}
+		// template.HTML is a string underneath; strings.Contains takes string.
+		y = asGoString(y, fl.info.TypeOf(container))
+		if elemSyn != nil && !in.Rune {
+			elem = asGoString(elem, fl.info.TypeOf(elemSyn))
+		}
 		test = &ast.CallExpr{Fun: sel(fl.l.useImport("strings", "strings"), fn), Args: []ast.Expr{y, elem}}
 	case check.InMap:
 		ok := fl.temp("ok")
@@ -160,4 +166,13 @@ func (fl *fnLower) ifMapTest(stmt *ast.IfStmt, cond syntax.Expr) string {
 		stmt.Cond = &ast.UnaryExpr{Op: token.NOT, X: stmt.Cond}
 	}
 	return ok
+}
+
+// asGoString converts x to string when its type t is a Go named string type
+// (template.HTML), which Go does not pass where a string is expected.
+func asGoString(x ast.Expr, t types.Type) ast.Expr {
+	if n, ok := types.Base(t).(*types.Named); ok && n.Go != nil {
+		return &ast.CallExpr{Fun: ast.NewIdent("string"), Args: []ast.Expr{x}}
+	}
+	return x
 }

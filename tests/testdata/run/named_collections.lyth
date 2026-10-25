@@ -6,6 +6,7 @@ import "encoding/json"
 import "fmt"
 import "net/http"
 import "net/url"
+import "html/template"
 import "sort"
 import "lyth/coll"
 
@@ -43,6 +44,7 @@ func main() {
     // lyth/coll extends them like their underlying slices and maps.
     names := sort.StringSlice(["b", "a", "c"])
     fmt.Println(names.Take(2), names.Filter { it != "a" }, q.SortedKeys())
+    fmt.Println("b" in template.HTML("<b>"))
 }
 
 // Output:
@@ -57,3 +59,4 @@ func main() {
 // 2
 // 7 { true
 // [b a] [b c] [q]
+// true

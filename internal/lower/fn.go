@@ -98,8 +98,14 @@ func (fl *fnLower) collectNames(n syntax.Node) {
 	syntax.Walk(n, func(x syntax.Node) {
 		switch x := x.(type) {
 		case *syntax.AssignStmt:
-			if sel, ok := syntax.Unparen(x.Lhs).(*syntax.SelectorExpr); ok {
-				fl.assignedFields[sel.Sel.Name] = true
+			targets := []syntax.Expr{x.Lhs}
+			if tup, ok := syntax.Unparen(x.Lhs).(*syntax.TupleExpr); ok {
+				targets = tup.Elems // a.Body, n = x, 1
+			}
+			for _, t := range targets {
+				if sel, ok := syntax.Unparen(t).(*syntax.SelectorExpr); ok {
+					fl.assignedFields[sel.Sel.Name] = true
+				}
 			}
 		case *syntax.Ident:
 			fl.taken[x.Name] = true
@@ -1423,8 +1429,13 @@ func (fl *fnLower) evalOperandsNow(e syntax.Expr) {
 		return
 	}
 	spill := func(x syntax.Expr, name string, copyValue bool) {
-		if fl.stableField(x) {
-			return // resp.Body: a field of a variable nothing assigns
+		if fl.info.Implicit[x] == check.ConvUnbox {
+			return // a smart-cast optional: its box never changes
+		}
+		if t := fl.info.TypeOf(x); fl.stableField(x) && (!copyValue || t == nil || types.IsNilable(t) || isScalar(t)) {
+			// resp.Body: a field of a variable nothing assigns. A struct
+			// value is still copied: its own fields may change.
+			return
 		}
 		g := fl.expr(x)
 		if id, ok := g.(*ast.Ident); ok && identOf(x) == nil {
@@ -1450,6 +1461,8 @@ func (fl *fnLower) evalOperandsNow(e syntax.Expr) {
 		_, ptr := types.Base(t).(*types.Pointer)
 		switch {
 		case t == nil || s == nil || fl.info.Types[f.X].Mode != check.ModeValue:
+		case fl.info.Implicit[f.X] == check.ConvUnbox:
+			// o.Show() on a smart-cast optional: the box never changes.
 		case s.Kind == check.SelMethod && ptr && !s.PtrRecv:
 			// p.Show() with a value method: Go copies *p at the defer.
 			g := fl.expr(f.X)
@@ -1682,16 +1695,9 @@ func (fl *fnLower) mutableVar(e syntax.Expr) bool {
 // isCollection reports whether t is a slice or map (also a Go named one),
 // which ?: treats as absent when nil.
 func isCollection(t types.Type) bool {
-	switch types.Base(t).(type) {
+	switch check.CollectionOf(t).(type) {
 	case *types.Slice, *types.Map:
 		return true
-	case *types.Named:
-		if n := types.Base(t).(*types.Named); n.Go != nil {
-			switch n.Go.Underlying().(type) {
-			case *gotypes.Slice, *gotypes.Map:
-				return true
-			}
-		}
 	}
 	return false
 }

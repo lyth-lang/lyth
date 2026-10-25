@@ -218,6 +218,9 @@ func collectionOf(t types.Type) types.Type {
 	return b
 }
 
+// CollectionOf is collectionOf for the lowering.
+func CollectionOf(t types.Type) types.Type { return collectionOf(t) }
+
 func underlyingOf(t types.Type) types.Type {
 	if n, ok := types.Base(t).(*types.Named); ok && n.Go != nil {
 		return types.Lift(n.Go.Underlying())
