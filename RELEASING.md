@@ -25,7 +25,9 @@ is not published anywhere yet.
 3. `.github/workflows/release.yml` runs the tests, creates the GitHub release, and commits the
    new formula to the Homebrew tap (repository secret `HOMEBREW_TAP_TOKEN`: a fine-grained
    token with read and write access to the contents of `lyth-lang/homebrew-tap`).
-4. Bump `devVersion` in `cmd/lyth/main.go` to the next `-dev` version.
+4. Bump `devVersion` in `cmd/lyth/main.go` to the next `-dev` version. The documentation site
+   reads it, and the newest `v*` tag, to say which version its specification pages describe
+   (`versions()` in `website/scripts/sync-docs.mjs`); nothing in `docs/` names a version.
 
 ## VS Code extension
 

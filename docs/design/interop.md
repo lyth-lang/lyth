@@ -144,7 +144,7 @@ A Lyth package compiles to a normal Go package:
 - Cross-compilation: `GOOS=linux GOARCH=arm64 lyth build` passes the environment
   through. Nothing in Lyth is host-specific.
 
-## 8. Known limitations (v0.1) and plans
+## 8. Known limitations and plans
 
 | Limitation | Diagnostic today | Plan |
 |---|---|---|

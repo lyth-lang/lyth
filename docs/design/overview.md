@@ -184,6 +184,6 @@ func Greeting(repo: *Repo, ctx: context.Context, id: int64): string throws {
 
 ## 8. Status
 
-Each section of the [specification](../spec/language.md) is tagged **[v0.1]**
-(implemented) or **[planned]**. Every implemented feature is backed by a test
+Sections of the [specification](../spec/language.md) that are designed but not
+implemented yet are tagged **[planned]**. Every implemented feature is backed by a test
 under `internal/**/testdata` or `tests/`.

@@ -212,7 +212,7 @@ Lyth's own interface types work differently. When a nullable pointer or
 optional value becomes an `error?`, `any?`, or other nullable interface in
 Lyth code, null becomes a nil interface, never Go's non-nil interface holding a
 nil pointer, and an optional value goes in unboxed
-([types](../spec/types.md#56-optional-values-int-string-user-v01)).
+([types](../spec/types.md#56-optional-values-int-string-user)).
 
 ## Lyth packages seen from Go
 

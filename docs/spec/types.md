@@ -1,7 +1,7 @@
-# Lyth Type System (v0.1 draft)
+# Lyth Type System
 
-Status tags as in [language.md](language.md): **[v0.1]** implemented and tested,
-**[planned]** designed only.
+As in [language.md](language.md), **[planned]** marks what is designed but not
+implemented yet; everything else is implemented and tested.
 
 ## 1. Two layers: Lyth types and Go representation types
 
@@ -55,7 +55,7 @@ is rejected, §5.1). A nullable channel is `(chan T)?`. A pointer to a
 nullable value needs parentheses: `*(User?)`. A nullable function type is
 `((A) -> R)?`.
 
-## 3. Basic types and constants **[v0.1]**
+## 3. Basic types and constants
 
 Basic types use Go's names and are listed in
 [language.md §8.1](language.md#81-types). `byte` is
@@ -75,16 +75,16 @@ conversion is visible.
 `unit` names the empty result in function types (`(int) -> unit`). It has no
 values. `nothing` is the type of diverging expressions (`return`, `throw`,
 `break`, `continue`, `panic(...)`, `!!` on `null`). It is a subtype of every type
-and appears only in diagnostics; it is not writable in v0.1.
+and appears only in diagnostics; it cannot be written in source.
 
-## 4. Composite types **[v0.1]**
+## 4. Composite types
 
 | Lyth | Meaning |
 |---|---|
 | `[]T` | Go slice. Indexing, slicing `xs[a:b]`, `len`, `append` as in Go; `[]byte(s)` and `make([]T, n, c)` take the type as an operand ([ADR 0023](../adr/0023-slice-types.md)). |
 | `map[K]V` | Go map. `m[k]` yields the zero value for absent keys if `V` has a zero value, otherwise `V?` (§6). `v, ok := m[k]` gives comma-ok. |
 | `[N]T` | Go array (value type). |
-| `chan T`, `chan<- T`, `<-chan T` | Go channels, made with `make(chan T, n)`. Operations are the methods `send`, `receive`, and `close`; `receive()` is `T?` when `T` has no zero value ([language.md §5.9](language.md#59-pointers-and-channels-v01)). |
+| `chan T`, `chan<- T`, `<-chan T` | Go channels, made with `make(chan T, n)`. Operations are the methods `send`, `receive`, and `close`; `receive()` is `T?` when `T` has no zero value ([language.md §5.9](language.md#59-pointers-and-channels)). |
 | `*T` | Go pointer. |
 | `(A, B) -> R` | Go `func(A, B) R`. |
 | `(A) -> R throws` | Go `func(A) (R, error)`. |
@@ -93,7 +93,7 @@ and appears only in diagnostics; it is not writable in v0.1.
 
 ## 5. Nullability
 
-### 5.1 Which types can be null **[v0.1]**
+### 5.1 Which types can be null
 
 A type is **nil-able** if Go allows `nil` for it: pointers, interfaces,
 functions, channels, slices, and maps. Lyth applies nullability to the first four:
@@ -109,13 +109,13 @@ functions, channels, slices, and maps. Lyth applies nullability to the first fou
 - Value types (numbers, `string`, `bool`, structs, arrays) have optional forms
   `T?` represented as `*T`: see §5.6.
 
-### 5.2 `null` **[v0.1]**
+### 5.2 `null`
 
 `null` has a special type of its own (printed `null` in diagnostics),
 assignable to any nullable or platform type and to slices and maps (as Go's
 nil). It lowers to `nil`.
 
-### 5.3 Using nullable values **[v0.1]**
+### 5.3 Using nullable values
 
 A value of type `T?` cannot be used where `T` is required (E0401). Not allowed
 on `T?`: member access with `.`, calls, dereference, indexing, and passing as a
@@ -147,7 +147,7 @@ E0401 then says why and suggests a copy that can be checked
 first. Type tests (`x is T`, language.md §5.10) smart-cast the same
 way, from an interface type to `T`.
 
-### 5.4 Platform types **[v0.1]**
+### 5.4 Platform types
 
 Values whose types come from Go have *platform nullability*, written `T!` in
 diagnostics (never in source). A platform value can be used as `T` (member
@@ -169,7 +169,7 @@ not an error. A function that can both fail and find nothing returns `T? throws`
 (Go: `(*T, error)`), and callers write `find(id)? ?: return notFound()`. See
 [errors.md §3.4](errors.md#34-errors-versus-null).
 
-### 5.6 Optional values (`int?`, `string?`, `User?`) **[v0.1]**
+### 5.6 Optional values (`int?`, `string?`, `User?`)
 
 For a value type `T`, `T?` is an *immutable optional value* represented as `*T`.
 This is the idiomatic Go representation for optional JSON fields (`*int` with
@@ -206,7 +206,7 @@ Performance note: optional values cost a pointer indirection and possibly an
 allocation, like `*T` in hand-written Go. Hot paths can use `(T, bool)` results
 or plain zero values instead.
 
-## 6. Zero values **[v0.1]**
+## 6. Zero values
 
 Go gives every type a zero value. In Lyth a type is **zeroable** when its Go zero
 value is a valid Lyth value: numbers, `string`, `bool`, nullable and platform
@@ -226,7 +226,7 @@ Rules that follow:
 
 ## 7. Mutability
 
-### 7.1 Bindings **[v0.1]**
+### 7.1 Bindings
 
 Local variables (declared with `:=` or `name: Type`) and package-level `var`s
 are mutable, as in Go. Parameters, `for` loop variables, `catch` bindings, and
@@ -254,7 +254,7 @@ func update(u: User, p: *User, xs: []int) {
 }
 ```
 
-### 7.2 Mutable paths **[v0.1]**
+### 7.2 Mutable paths
 
 An expression is a **mutable path** if it is a variable (a local or a
 package-level `var`), `*p` for any
@@ -263,7 +263,7 @@ index `a[i]` where `a` is a slice, a map (assignment only), or an array that is 
 mutable path. Assignments, `++`/`--`, and compound assignments require a mutable
 path.
 
-### 7.3 Addresses and pointer receivers **[v0.1]**
+### 7.3 Addresses and pointer receivers
 
 - `&x` requires `x` to be a mutable path (E0503), or a construction `&T(...)`.
   `json.Unmarshal(data, &v)` works on a local `v: T`; the address of a
@@ -279,7 +279,7 @@ Mutability is a compile-time property of Lyth bindings only. It adds no runtime
 cost and changes nothing in generated code. Go code receiving a pointer can of
 course mutate through it.
 
-## 8. Assignability and conversions **[v0.1]**
+## 8. Assignability and conversions
 
 A value of Lyth type `S` is assignable to Lyth type `D` if one of these holds:
 
@@ -314,7 +314,7 @@ value whose type it implements (`x == "zero"` for `x: any` is true when `x`
 holds the string `"zero"`). An untyped constant compared with an interface takes
 its default type. Both operands must be comparable.
 
-## 9. Type inference **[v0.1]**
+## 9. Type inference
 
 Lyth uses local, bidirectional inference. There is no global inference across
 function boundaries: an exported function's signature is always written out, so a
@@ -339,7 +339,7 @@ package's API is explicit and stable.
   first needs it, so declaration order does not matter. A result that depends
   on itself (`func f(n: int) = if n == 0 { 0 } else { f(n - 1) }`), a fallible body,
   and a body yielding several values must declare the result (E0208), and so
-  must every exported function ([language.md §3.2](language.md#32-functions-v01)).
+  must every exported function ([language.md §3.2](language.md#32-functions)).
 - **Generic calls**: type arguments of generic Go functions are inferred by
   unification of parameter types with argument types, then with the expected
   result type. Explicit type arguments are given in full
@@ -347,7 +347,7 @@ package's API is explicit and stable.
 
 ## 10. Generics
 
-**[v0.1]** Calling generic Go functions and using instantiated generic Go types
+Calling generic Go functions and using instantiated generic Go types
 (`slices.Contains(xs, x)`, `atomic.Pointer[Config]`). Instantiation and
 constraint satisfaction are delegated to `go/types` (`types.Instantiate` with
 validation). Type arguments are inferred from the arguments (and through a
@@ -362,7 +362,7 @@ The parser reads `x[A]` as an index expression; the checker decides, as
 or type (Lyth or Go), and then reads `A` as a type (`*E`, `pkg.T`, `T?`,
 `Page[int]`). `x[A, B]` is always an instantiation.
 
-**[v0.1]** Declaring generic functions, structs, and interfaces:
+Declaring generic functions, structs, and interfaces:
 `func maxOf[T: cmp.Ordered](a: T, b: T): T`, `struct Page[T] { Items: []T }`,
 `interface Container[T] { Get(): T }`. The constraint follows a colon, as in
 every Lyth name-and-type pair; Go's `[T cmp.Ordered]` is E0008 with the edit
@@ -396,7 +396,7 @@ and its limits. See [ADR 0028](../adr/0028-generic-declarations.md).
   values on generic functions (E0601), generic type aliases, and declaring
   type-set constraints.
 
-## 11. Interfaces and method sets **[v0.1]**
+## 11. Interfaces and method sets
 
 Method sets follow Go: the method set of `T` contains value-receiver methods,
 and `*T` contains both. A Lyth type satisfies an interface when its lowered Go
@@ -405,11 +405,11 @@ nullability and fallibility. A value used as an interface it does not satisfy
 is a type mismatch (E0201) whose note names the missing method and the reason:
 missing, wrong signature, pointer receiver, or a name that differs only in case. A struct can declare
 the interfaces it implements (`struct Circle : Shape`,
-[language.md §3.3](language.md#33-structs-v01)); a declaration that does not
+[language.md §3.3](language.md#33-structs)); a declaration that does not
 hold is E0212 at the declaration, naming the method and the signature the
 interface needs.
 
-## 12. Display of types in diagnostics **[v0.1]**
+## 12. Display of types in diagnostics
 
 Diagnostics always print Lyth types, which use Go's spelling wherever Go has
 the type: `int64`, `map[string]int`, `chan int`, `[]User`. Lyth's own forms

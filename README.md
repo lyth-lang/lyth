@@ -20,11 +20,12 @@ lambdas) is a small set of features familiar from modern languages.
 > In our evals with Claude Code, that help makes the first build succeed three times in four
 > instead of never. [Set it up in a minute](#ai-coding-agents).
 
-> **Status: early vertical slice (v0.1-dev).** The compiler works end to end:
-> it parses, type-checks, generates Go, validates it, builds it, and maps
-> errors and stack traces back to Lyth source. Large parts of the planned
-> language are not implemented yet. Each section of the
-> [specification](docs/spec/language.md) is tagged with its status.
+> **Status: before 1.0.** The compiler works end to end: it parses,
+> type-checks, generates Go, validates it, builds it, and maps errors and stack
+> traces back to Lyth source. The syntax can still change between releases
+> (`lyth fix` updates code written for an older one), and the sections of the
+> [specification](docs/spec/language.md) that are not implemented yet are
+> tagged **[planned]**.
 
 ```kotlin
 import "errors"

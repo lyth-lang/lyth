@@ -1,17 +1,17 @@
-# Lyth Language Specification (v0.1 draft)
+# Lyth Language Specification
 
 This is the normative description of Lyth's syntax and the semantics that are not
 about types. Types, inference, nullability, and mutability are specified in
-[types.md](types.md); error handling in [errors.md](errors.md). Each section is
-tagged **[v0.1]** (implemented in the current compiler, with tests) or
-**[planned]** (designed, not yet implemented).
+[types.md](types.md); error handling in [errors.md](errors.md). A section or rule tagged **[planned]**
+is designed but not implemented yet; everything else is implemented in the
+current compiler, with tests.
 
 Notation: EBNF as in the Go specification. `|` alternation, `()` grouping,
 `[]` option, `{}` repetition. Terminals are in double quotes.
 
 ## 1. Source files and lexical structure
 
-### 1.1 Files **[v0.1]**
+### 1.1 Files
 
 A source file is UTF-8 text with the extension `.lyth`. A byte order mark is
 rejected. All files in one directory belong to one package (as in Go).
@@ -20,7 +20,7 @@ File names follow Go's build-constraint conventions so generated files keep
 them: `foo_linux.lyth` compiles only for Linux, and `foo_test.lyth` is a test file.
 See [compiler.md §6.2](../design/compiler.md#62-generated-file-names).
 
-### 1.2 Comments **[v0.1]**
+### 1.2 Comments
 
 `// line comment` and `/* block comment */` (not nested). A run of line comments,
 each on a line of its own, immediately preceding a declaration, struct field, or
@@ -28,7 +28,7 @@ interface method is its doc comment and is copied to the generated Go declaratio
 so `go doc` works on Lyth packages. A comment after code on the same line is not a
 doc comment.
 
-### 1.3 Newlines and statement termination **[v0.1]**
+### 1.3 Newlines and statement termination
 
 Lyth is newline-sensitive. The lexer emits a `NEWLINE` token at each
 line break outside of `( )` and `[ ]`. A `NEWLINE` terminates a statement or
@@ -47,7 +47,7 @@ Semicolons may separate statements on one line. They are never required.
 > new statement. In the header of an `if`, `while`, `for`, or `when`, a `{`
 > always starts the body (§4.4).
 
-### 1.4 Identifiers **[v0.1]**
+### 1.4 Identifiers
 
 ```ebnf
 identifier = letter { letter | digit } .
@@ -61,7 +61,7 @@ code generator renames them when they would clash in Go (see §8.3). A Go
 identifier that is a Lyth keyword is referenced with backticks: `` obj.`is` ``
 **[planned]**.
 
-### 1.5 Keywords **[v0.1]**
+### 1.5 Keywords
 
 Hard keywords (cannot be identifiers):
 
@@ -79,7 +79,7 @@ the same reason: Lyth has no visibility keywords (§3.1). `fun` and `this` are
 not keywords; a declaration beginning with `fun` is E0008 with the edit
 `func`, and `this` is E0008 with the hint `self`.
 
-### 1.6 Operators and punctuation **[v0.1]**
+### 1.6 Operators and punctuation
 
 ```
 +  -  *  /  %  &  |  ^  <<  >>  &&  ||  !  ==  !=  <  <=  >  >=
@@ -92,7 +92,7 @@ not keywords; a declaration beginning with `fun` is E0008 with the edit
 appears only in the channel types `<-chan T` and `chan<- T`, and `<-ch` or
 `ch <- v` is E0008 with the method spelling (§5.9).
 
-### 1.7 Literals **[v0.1]**
+### 1.7 Literals
 
 ```ebnf
 int_lit    = decimal | "0x" hex_digits | "0o" octal_digits | "0b" binary_digits .
@@ -125,12 +125,12 @@ PackageClause = "package" identifier NEWLINE .
 ImportDecl    = "import" string_lit [ "as" ( identifier | "_" ) ] NEWLINE .
 ```
 
-**[v0.1]** A package is a directory. The package clause is optional. When it is
+A package is a directory. The package clause is optional. When it is
 omitted, the name is `main` if a file in the package declares a top-level
 `func main()`, otherwise the directory name (which must then be a valid
 identifier). External test packages (`package foo_test`) must be explicit.
 
-**[v0.1]** Import paths are Go import paths, resolved by the Go toolchain
+Import paths are Go import paths, resolved by the Go toolchain
 against the enclosing module's `go.mod`. An import may refer to a Go package or a
 Lyth package; the importer cannot tell the difference and does not need to. The
 default qualifier is the imported package's declared name (e.g. `pgx` for
@@ -147,7 +147,7 @@ TopLevelDecl = { Annotation } ( FuncDecl | StructDecl | InterfaceDecl | SealedDe
              | EnumDecl | VarDecl | ConstDecl | TypeAliasDecl ) .
 ```
 
-### 3.1 Visibility and Go names **[v0.1]**
+### 3.1 Visibility and Go names
 
 Visibility follows Go's rule. A top-level declaration, method, struct field, or
 interface method whose name starts with an uppercase letter is **exported**
@@ -167,7 +167,7 @@ one naming convention covers Go and Lyth APIs. Initialisms are written by the
 programmer, as in Go: `ID`, `UserID`, `ServeHTTP`
 ([ADR 0022](../adr/0022-capitalization-is-visibility.md)).
 
-### 3.2 Functions **[v0.1]**
+### 3.2 Functions
 
 ```ebnf
 FuncDecl    = "func" [ Receiver "." ] identifier [ TypeParams ]
@@ -218,7 +218,7 @@ FuncBody    = Block | "=" Expression .
   The Go signature is unchanged: Go callers pass every argument. Calls name
   arguments as described in §5.3 ([ADR 0019](../adr/0019-named-and-default-arguments.md)).
 
-**Methods [v0.1].** `func User.FullName(): string` declares a method with a
+**Methods.** `func User.FullName(): string` declares a method with a
 value receiver; `func *User.Rename(name: string)` a method with a pointer
 receiver. The `*` decides Go's method set and whether the method sees the
 caller's value or a copy, so it stays visible. Both lower to a Go receiver
@@ -245,7 +245,7 @@ A generic struct's methods name its type parameters in the receiver,
 declare type parameters of its own, because Go has no generic methods; a
 generic function or extension function takes that role.
 
-**Extension functions [v0.1].** The method syntax with any other receiver type
+**Extension functions.** The method syntax with any other receiver type
 declares an extension function: a type of another package, a type without
 methods of its own, or an interface (`func string.Shout(): string`,
 `func []T.Second[T](): T`, `func time.Duration.Halved()`,
@@ -274,14 +274,14 @@ parameter, `Shout("hi")`. The rules:
 
 See [ADR 0029](../adr/0029-extension-functions.md).
 
-**Generic functions [v0.1].** `func name[T: Constraint](...)` declares type
+**Generic functions.** `func name[T: Constraint](...)` declares type
 parameters, which map 1:1 to Go type parameters; `[T]` alone means
 `[T: any]`. The constraint follows a colon, as every Lyth name-and-type pair
 does; Go's `[T cmp.Ordered]` is E0008 with the edit that inserts it. Type
 arguments are inferred at calls or given as `name[int](...)`. The rules are in
 [types.md §10](types.md#10-generics).
 
-### 3.3 Structs **[v0.1]**
+### 3.3 Structs
 
 ```ebnf
 StructDecl = "struct" identifier [ TypeParams ] [ ":" Type { "," Type } ] "{" { FieldDecl } "}" .
@@ -310,7 +310,7 @@ struct User {
 - Struct embedding in Lyth-declared structs is **[planned]**. Embedded fields of
   Go structs work, because promotion is resolved by `go/types`.
 
-**Construction [v0.1].** A struct type is constructed by calling it:
+**Construction.** A struct type is constructed by calling it:
 
 ```kotlin
 u := User(ID = 1, Name = "Ada")          // named arguments, any order
@@ -325,11 +325,11 @@ names them (`Page[User]{...}`), as Go requires.
 
 Named and positional arguments cannot be mixed. Omitted fields take their zero
 value, which is an error for fields whose type has no zero value in Lyth (e.g. a
-non-nullable pointer, see [types.md §6](types.md#6-zero-values-v01)). Construction always
+non-nullable pointer, see [types.md §6](types.md#6-zero-values)). Construction always
 generates a keyed Go composite literal, so it is robust to field reordering and
 passes `go vet`'s composites check. `&T(...)` takes the address of a fresh value.
 
-**Declared conformance [v0.1].** `struct Circle : Shape, fmt.Stringer { ... }`
+**Declared conformance.** `struct Circle : Shape, fmt.Stringer { ... }`
 declares that `Circle` implements the listed interfaces. Interfaces stay
 structural: the declaration adds no behavior and is never required. It is a
 compile-time check, made once all methods of the package are known: `Circle` or
@@ -342,7 +342,7 @@ interface (pointer-receiver methods). Listing a type that is not an interface
 is E0201: Lyth has no inheritance
 ([ADR 0020](../adr/0020-declared-conformance.md)).
 
-### 3.4 Interfaces **[v0.1]**
+### 3.4 Interfaces
 
 ```ebnf
 InterfaceDecl = "interface" identifier [ TypeParams ] "{" { MethodSpec | Type NEWLINE } "}" .
@@ -360,7 +360,7 @@ interfaces it implements (§3.3). An interface may be generic,
 `interface Container[T] { Get(): T }`. Declaring type-set constraints
 (`~int | ~float64`) is **[planned]**; Go's (`cmp.Ordered`) work today.
 
-### 3.5 Variables and constants **[v0.1]**
+### 3.5 Variables and constants
 
 ```ebnf
 VarDecl   = "var" identifier [ ":" Type ] "=" Expression NEWLINE .
@@ -370,14 +370,14 @@ ConstDecl = "const" identifier [ ":" Type ] "=" Expression NEWLINE .
 A top-level `var` declares a Go package-level variable, with Go's dependency-
 ordered initialization. It is mutable: any code in the package (and, when it
 is exported, any importing package) may assign it, so it never smart-casts
-([types.md §5.3](types.md#53-using-nullable-values-v01)). A top-level `val` is
+([types.md §5.3](types.md#53-using-nullable-values)). A top-level `val` is
 E0008 with the edit `var`. `const` declares a Go constant: the initializer must
 be a constant expression, untyped unless a type is given
 (`const X: int64 = 5`); assigning one is E0501. Both are package-level only:
 inside a function, local variables are declared with `:=` (§4.1), and `const`
 is E0601.
 
-### 3.6 Type aliases **[v0.1]**
+### 3.6 Type aliases
 
 ```ebnf
 TypeAliasDecl = "typealias" identifier "=" Type NEWLINE .
@@ -392,7 +392,7 @@ defined type (`type Celsius float64`) is declared with `struct`/`interface` or
 is **[planned]** for other underlying types. An alias may refer to other
 aliases but not to itself (E0216). Generic aliases are **[planned]**.
 
-### 3.7 Enums and sealed interfaces **[v0.1]**
+### 3.7 Enums and sealed interfaces
 
 ```ebnf
 EnumDecl   = "enum" identifier "{" identifier { ( "," | NEWLINE ) identifier } [ "," ] "}" .
@@ -481,7 +481,7 @@ Statement  = ShortVarDecl | TypedVarDecl | Assignment | IncDec | Return | Throw
            | Break | Continue | Defer | Go | For | While | Select | Expression .
 ```
 
-### 4.1 Local declarations **[v0.1]**
+### 4.1 Local declarations
 
 ```ebnf
 ShortVarDecl = BindingName { "," BindingName } ":=" ExprList .
@@ -491,7 +491,7 @@ ExprList     = Expression { "," Expression } .
 ```
 
 - `x := e` declares a new variable in the current scope, with the type of `e`
-  (an untyped constant takes its default type, [types.md §9](types.md#9-type-inference-v01)).
+  (an untyped constant takes its default type, [types.md §9](types.md#9-type-inference)).
   `x: T = e` declares it with a type, and `x: T` with the zero value of `T`,
   which must have one (E0405). The zero-value form covers Go idioms like
   `wg: sync.WaitGroup` and `buf: bytes.Buffer`.
@@ -511,7 +511,7 @@ ExprList     = Expression { "," Expression } .
 - An unused local is warning W0001. Go would reject the generated code, so the
   generator emits `_ = x` to keep it valid.
 
-### 4.2 Destructuring **[v0.1]**
+### 4.2 Destructuring
 
 `a, b := f()` binds the results of a multi-result call, and
 `lo, hi := 0, len(xs)` binds several values at once. The number of names
@@ -524,7 +524,7 @@ to consume results and the way to access `(value, error)` pairs whose value is
 meaningful alongside the error (`io.Reader.Read`). See
 [errors.md §5](errors.md#5-raw-access-destructuring).
 
-### 4.3 Assignment **[v0.1]**
+### 4.3 Assignment
 
 ```ebnf
 Assignment = Target { "," Target } "=" ExprList
@@ -549,7 +549,7 @@ or `_`. The right side has one value per target or is a multi-result call
 edit that removes them, and a parenthesized list is not a value anywhere
 (E0216).
 
-### 4.4 Control flow **[v0.1]**
+### 4.4 Control flow
 
 ```ebnf
 If       = "if" Expression Block [ "else" ( If | Block ) ] .
@@ -599,7 +599,7 @@ Continue = "continue" [ "@" identifier ] .
   that is implemented ([errors.md §7](errors.md#7-defer-panic-and-recover)). A
   `go` call cannot return an unhandled error.
 
-### 4.5 Expression statements **[v0.1]**
+### 4.5 Expression statements
 
 Only calls (including the channel operations `ch.send(v)` and
 `ch.receive()`) and postfix `?`/`catch` forms may stand
@@ -633,7 +633,7 @@ Arithmetic and bitwise levels match Go, so generated expressions need no extra
 parentheses and Go readers' intuitions hold. Comparisons are split
 so that `a < b == c < d` means `(a < b) == (c < d)`.
 
-### 5.2 Primary expressions **[v0.1]**
+### 5.2 Primary expressions
 
 Identifiers, literals, `self`, parenthesized expressions, list literals
 `[a, b]`, map literals `[k: v]` (empty map `[:]`), lambdas, `if`, and `when`.
@@ -657,7 +657,7 @@ Go's struct literal `Point{X: 1}` is E0008 with the construction call
 slice literal `[]T{...}`, which is non-nil even when empty, so it serializes as
 `[]`, not `null`.
 
-### 5.3 Calls, construction, conversion **[v0.1]**
+### 5.3 Calls, construction, conversion
 
 `f(args)` is a function call, a struct construction (§3.3), or a conversion when
 `f` names a non-struct type (`int64(x)`, `float64(n)`, `time.Duration(n)`,
@@ -671,7 +671,7 @@ Explicit type arguments follow the name in brackets, `Max[int](xs)` or
 generic function or type, and an index otherwise
 ([types.md §10](types.md#10-generics)).
 
-**Named arguments [v0.1].** Calls to functions and methods declared in Lyth may
+**Named arguments.** Calls to functions and methods declared in Lyth may
 name arguments: `connect("db", timeout = time.Second)`. Positional arguments
 come first and fill parameters in order; named ones follow in any order, and
 parameters left out take their defaults (§3.2). Naming a parameter twice is
@@ -683,7 +683,7 @@ move into temporaries only when that order would otherwise change. Go
 functions take positional arguments only (E0216), because Go parameter names
 are not part of an API and change between versions.
 
-### 5.4 Member access **[v0.1]**
+### 5.4 Member access
 
 `x.name` selects a field or method. Pointers are dereferenced automatically and
 addresses are taken automatically for pointer-receiver calls, as in Go, subject
@@ -694,7 +694,7 @@ the member is accessed. When `x` is a *fallible result* (a call returning an
 error), `x?.name` means `(x?).name`: propagate the error, then access the
 member. See [errors.md §3.3](errors.md#33-chaining).
 
-### 5.5 Null-handling operators **[v0.1]**
+### 5.5 Null-handling operators
 
 `a ?: b` evaluates to `a` if it is non-null, otherwise to `b` (evaluated only
 when needed). `b` may be a diverging expression: `?: return x`, `?: throw e`,
@@ -702,12 +702,12 @@ when needed). `b` may be a diverging expression: `?: return x`, `?: throw e`,
 panics with a message naming the source position. Details are in
 [types.md §5](types.md#5-nullability).
 
-### 5.6 Error operators **[v0.1]**
+### 5.6 Error operators
 
 Postfix `e?` propagates an error. `e catch (err) { ... }` handles it locally. See
 [errors.md](errors.md).
 
-### 5.7 `if` and `when` expressions **[v0.1]**
+### 5.7 `if` and `when` expressions
 
 `if c { a } else { b }` is an expression when used as a value
 (`label := if n < 10 { "small" } else { "large" }`). The `else` branch is
@@ -726,7 +726,7 @@ tested in order, each condition is evaluated only if no earlier one matched, and
 there is no fallthrough. A `when` used as a value must have an `else` branch,
 unless it is exhaustive: a `when` over an enum or a sealed interface must
 cover every entry or member type or have an `else`
-([§3.7](#37-enums-and-sealed-interfaces-v01)).
+([§3.7](#37-enums-and-sealed-interfaces)).
 
 A `when` whose conditions are all `is` tests lowers to a Go type switch;
 `when r := f() { ... }` binds the subject for the branches. Other `when`s lower to a Go `switch`, or
@@ -734,7 +734,7 @@ to an `if`/`else` chain when a condition needs statements (a `?`, a mix of `is`
 and value conditions). When an `if` or `when` value is returned, each branch
 returns directly.
 
-### 5.8 Lambdas **[v0.1]**
+### 5.8 Lambdas
 
 ```ebnf
 Lambda      = "{" [ LambdaParams "->" ] { Statement } "}" .
@@ -754,7 +754,7 @@ LambdaParam = identifier [ ":" Type ] .
   A Lyth function type with an `error` result returns the error as a value
   (see [errors.md §6](errors.md#6-fallible-function-types-and-lambdas)).
 
-### 5.9 Pointers and channels **[v0.1]**
+### 5.9 Pointers and channels
 
 `&x` takes an address, only of mutable storage (a variable, or a field or
 element reached through a mutable path) or of a construction `&T(...)`; the
@@ -827,7 +827,7 @@ func main() {
 }
 ```
 
-### 5.10 Type tests and casts **[v0.1]**
+### 5.10 Type tests and casts
 
 ```ebnf
 TypeTest = Expression ( "is" | "!is" ) Type .
@@ -863,7 +863,7 @@ for an error anywhere in a wrapped chain, use a typed `catch`
 ([errors.md §4.1](errors.md#41-catch)), `errors.AsType[*NotFound](err)`
 (Go 1.26), or `errors.Is`.
 
-### 5.11 Membership tests **[v0.1]**
+### 5.11 Membership tests
 
 ```ebnf
 InTest = Expression ( "in" | "!in" ) Expression .
@@ -884,7 +884,7 @@ E0209). `x` is evaluated first, then `c`, each once. In a `when` with a subject,
 `in c` tests the subject: `when code { in 200..299 -> "ok" }`. Ranges exist
 only in `for` loops and membership tests.
 
-## 6. Evaluation order **[v0.1]**
+## 6. Evaluation order
 
 Lyth evaluates operands, arguments, and collection-literal elements left to
 right, completely. This is stricter than Go, which leaves the order of variable
@@ -893,7 +893,7 @@ expression into statements (e.g. for `?`, `catch`, `if`-expressions), it spills
 preceding operands with side effects into temporaries so that the order
 survives. Expressions that need no hoisting are emitted unchanged.
 
-## 7. Builtins and prelude **[v0.1]**
+## 7. Builtins and prelude
 
 Go's builtin functions keep their names and semantics: `len`, `cap`, `append`,
 `copy`, `delete`, `make`, `new`, `panic`, `recover`, `min`, `max`, `clear`,
@@ -904,8 +904,8 @@ library. Each one replaces a common multi-line Go idiom:
 
 | Lyth | Go | Since |
 |---|---|---|
-| `s.toInt()` / `s.toInt64()` / `s.toFloat64()` / `s.toBool()` (fallible) | `strconv.Atoi`/`ParseInt(s,10,64)`/`ParseFloat(s,64)`/`ParseBool` | v0.1 |
-| `err.wrap("context")` | `fmt.Errorf("context: %w", err)` | v0.1 |
+| `s.toInt()` / `s.toInt64()` / `s.toFloat64()` / `s.toBool()` (fallible) | `strconv.Atoi`/`ParseInt(s,10,64)`/`ParseFloat(s,64)`/`ParseBool` | 0.1.0 |
+| `err.wrap("context")` | `fmt.Errorf("context: %w", err)` | 0.1.0 |
 
 Everything else belongs in libraries. Lyth's standard library is imported as
 `lyth/<name>` and compiled with the program (ADR 0030); its first package,
@@ -953,7 +953,7 @@ local keeps its name in Go unless that would collide with a Go keyword, a Go
 predeclared identifier, an import qualifier, or a package-level name used in the
 same function. In those cases it gets a numeric suffix.
 
-## 9. Tests **[v0.1]**
+## 9. Tests
 
 Test code lives in files ending in `_test.lyth`, in the package under test
 (external test packages, `package foo_test`, are **[planned]**). They are

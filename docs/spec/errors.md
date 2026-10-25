@@ -1,4 +1,4 @@
-# Lyth Error Semantics (v0.1 draft)
+# Lyth Error Semantics
 
 This document specifies how errors are declared, propagated, handled, and
 represented in Lyth. It is normative for the checker and the code generator.
@@ -145,7 +145,7 @@ left to right: first "did it fail?", then "is anything there?".
 `?` may appear in any expression position. The generator hoists the call and its
 check into statements, spilling earlier operands with side effects into
 temporaries so that left-to-right order is preserved
-([language.md §6](language.md#6-evaluation-order-v01)). In conditionally evaluated
+([language.md §6](language.md#6-evaluation-order)). In conditionally evaluated
 positions, such as the right operand of `&&`/`||`/`?:`, an `if`/`when` branch,
 or a `while` condition, the hoisted code is placed inside the corresponding
 branch or loop iteration, never evaluated eagerly.
@@ -209,7 +209,7 @@ and likewise `a, b = pair()?`. The handler cannot supply several values, so it
 must exit (E0307). It lowers to `a, b, err := pair()` and
 `if err != nil { ... }`.
 
-**Typed handlers [v0.1].** `catch (e: T)` handles only errors of type `T`, a
+**Typed handlers.** `catch (e: T)` handles only errors of type `T`, a
 non-null type that implements `error`: usually a pointer to an error struct
 (`*NotFound`) or a Go error type (`*pgconn.PgError`). It matches like
 `errors.AsType[T]`, so it sees through wrapping, and binds `e` as a `T`. Clauses
@@ -277,7 +277,7 @@ _ = f.Close()          // explicit discard: lowered to `_ = f.Close()`
 Capturing the error in a variable (`err := f.Close()`) counts as handling: the
 error is a value. An unused binding then gets the usual warning (W0001).
 
-**Conventional exclusions [v0.1].** A small, fixed set of Go functions may be
+**Conventional exclusions.** A small, fixed set of Go functions may be
 called as statements without handling their error, because by Go convention
 their errors are not actionable: `fmt.Print`, `fmt.Printf`, `fmt.Println`;
 `fmt.Fprint*` when the writer is `os.Stdout`, `os.Stderr`, a `*bytes.Buffer`,
@@ -292,7 +292,7 @@ extend it.
 `v, err := f()` binds a fallible call's components directly, Go-style. The
 error component has type `error?`. Because a failing call returns zero values,
 each success value has type `Z(T)`: `T` itself when `T` is zeroable, otherwise
-`T?` ([types.md §6](types.md#6-zero-values-v01)). This keeps destructuring sound for
+`T?` ([types.md §6](types.md#6-zero-values)). This keeps destructuring sound for
 Lyth functions that return non-null pointers. Destructuring is meant for APIs whose
 values matter alongside the error (`io.Reader.Read`, `io.Copy`'s byte count),
 and for porting Go code. Day-to-day code uses `?` and `catch`.
@@ -336,7 +336,7 @@ g.Wait()?
     otherwise returning successfully and `Close` fails, the function returns
     `Close`'s error instead. If it is already failing, the original error is
     kept. Lowers to the idiomatic named-result deferred closure.
-  - `defer f.Close() catch (err) { log.Warn("close", "err", err) }` **[v0.1]**.
+  - `defer f.Close() catch (err) { log.Warn("close", "err", err) }`.
   - `defer { _ = f.Close() }` to discard explicitly.
 - Panics are Go panics. `?` does not catch panics, and `throw` never panics.
   `recover()` works in deferred calls as in Go. `x!!` on null panics with
@@ -344,7 +344,7 @@ g.Wait()?
   operational one.
 - A panic inside a `catch` handler or a deferred call behaves as in Go.
 
-## 8. Errors and generics **[v0.1]**
+## 8. Errors and generics
 
 `func retry[T](n: int, op: () -> T throws): T throws` lowers to
 `func retry[T any](n int, op func() (T, error)) (T, error)`. On `throw` and
@@ -358,7 +358,7 @@ abstraction. Every error is a Go `error`.
 
 - `func main() throws` lowers to a Go `main` that calls the body and on error
   prints `error: <message>` to stderr and exits with status 1.
-- Test functions **[v0.1]** may be `throws`. A thrown or propagated error
+- Test functions may be `throws`. A thrown or propagated error
   fails the test with its message, reported at the test's declaration line
   (language.md §9).
 

@@ -53,7 +53,7 @@ users.lyth:12:27: error[E0201]: type mismatch in argument id of repo.find
 - `-v` adds `Cause` blocks: the Go message, the generated file and position, and
   the mapping kind (exact, line-level, or unmapped).
 
-## 3. Code catalog (v0.1)
+## 3. Code catalog
 
 | Range | Area | Codes |
 |---|---|---|

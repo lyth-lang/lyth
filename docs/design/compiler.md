@@ -352,7 +352,7 @@ mapped position, E0904 for link errors without one.
 
 ## 8. Caching and incremental compilation
 
-v0.1 regenerates every Lyth package in the module on each build. Front-end and
+Lyth regenerates every Lyth package in the module on each build. Front-end and
 codegen cost is milliseconds per file, and the Go build cache makes the
 `go build` step incremental.
 

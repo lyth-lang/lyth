@@ -201,6 +201,46 @@ function convert(rest, srcDir, outputs) {
 	return body.join('\n');
 }
 
+/** The version the pages describe: devVersion in cmd/lyth/main.go (the version of this checkout),
+ * and the newest release tag when git has one. Computed on every build, so the pages never name
+ * a stale version; RELEASING.md bumps devVersion after each release. */
+function versions() {
+	const main = fs.readFileSync(path.join(repo, 'cmd/lyth/main.go'), 'utf8');
+	const dev = main.match(/^const devVersion = "([^"]+)"/m)?.[1];
+	if (!dev) throw new Error('cmd/lyth/main.go has no devVersion');
+	let release = '';
+	try {
+		release = execFileSync('git', ['describe', '--tags', '--abbrev=0', '--match', 'v[0-9]*'], { cwd: repo, stdio: ['ignore', 'pipe', 'ignore'] })
+			.toString()
+			.trim();
+	} catch {
+		// a clone without tags: name only the development version
+	}
+	return { dev, release };
+}
+
+/** The guide topic that prints a specification page, by slug (see guideTopics in cmd/lyth/agents.go). */
+const specTopics = { 'spec/language': 'language', 'spec/types': 'types', 'spec/errors': 'errors' };
+
+/** A note at the top of a specification page: the version it describes, and how to read the
+ * specification of a release, or of the version installed. */
+function versionNote(slug) {
+	const topic = specTopics[slug];
+	if (!topic) return '';
+	const { dev, release } = versions();
+	const guide = `With Lyth 0.3.0 or newer installed, \`lyth guide ${topic}\` prints this page for the installed version.`;
+	const lines = [`:::note[Lyth ${dev}]`];
+	if (dev.endsWith('-dev') && release) {
+		const r = release.slice(1);
+		const spec = repoUrl ? `[its specification](${repoUrl}/tree/${release}/docs/spec)` : `its specification at the tag \`${release}\``;
+		lines.push(`This page describes the development version on \`main\`, ahead of the latest release, ${r}; see ${spec} for that release. ${guide}`);
+	} else {
+		lines.push(guide);
+	}
+	lines.push(':::', '');
+	return lines.join('\n');
+}
+
 function page(srcFile, slug, outputs) {
 	const lines = fs.readFileSync(srcFile, 'utf8').split('\n');
 	const titleLine = lines.findIndex((l) => l.startsWith('# '));
@@ -211,7 +251,7 @@ function page(srcFile, slug, outputs) {
 	if (repoUrl) frontmatter.push(`editUrl: ${repoUrl}/edit/main/${rel}`);
 	frontmatter.push('---', '', `<!-- Generated from ${rel} by website/scripts/sync-docs.mjs. Edit that file instead. -->`);
 	const file = slug.includes('/') ? path.join(outDir, `${slug}.md`) : path.join(outDir, slug, 'index.md');
-	return { file, text: frontmatter.join('\n') + '\n' + convert(rest, path.dirname(srcFile), outputs) };
+	return { file, text: frontmatter.join('\n') + '\n' + versionNote(slug) + convert(rest, path.dirname(srcFile), outputs) };
 }
 
 /** A `## ` section of the README, for the home page. */
