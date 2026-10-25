@@ -117,10 +117,10 @@ Precisely, and only what has been demonstrated (tracked in
   (`func Find(id int64) (*User, error)`).
 - **Toolchain**: `go build/test/vet`, modules, build tags, cross-compilation,
   `-race`, pprof, and delve all work on Lyth output because it is plain Go.
-- **Documented limitations** (v0): defining new generic types with type-set
-  constraints, cgo inside Lyth files, struct embedding in Lyth-declared structs,
-  Go labels/goto, and mixing Go and Lyth files in a single package. Each has a
-  specific diagnostic today.
+- **Documented limitations**: declaring type-set constraints, cgo inside Lyth
+  files, struct embedding in Lyth-declared structs, `goto` and `fallthrough`,
+  external test packages, and mixing Go and Lyth files in one package. Each has
+  a specific diagnostic today.
 
 ## 6. A taste of Lyth
 
@@ -170,7 +170,7 @@ func Greeting(repo: *Repo, ctx: context.Context, id: int64): string throws {
 | Go types | Load imported packages with `go/packages` (export data); lift `go/types` faithfully | [ADR 0003](../adr/0003-go-type-information.md) |
 | Checking | Lyth checker first; in-process `go/types` validation of generated code as safety net | [ADR 0004](../adr/0004-two-level-type-checking.md) |
 | Source maps | Exact node-level map (print → reparse → lockstep) plus column-less `//line` directives | [ADR 0005](../adr/0005-source-maps-and-line-directives.md) |
-| Build layout | Generated files in `.lyth/gen`, injected with `go -overlay`; `lyth gen --in-tree` for publishing | [ADR 0006](../adr/0006-overlay-builds.md) |
+| Build layout | Generated files in `.lyth/gen`, injected with `go -overlay`; `lyth gen -in-tree` for publishing | [ADR 0006](../adr/0006-overlay-builds.md) |
 | Bindings | Locals `x := e` and `name: Type = e`, mutable as in Go; package-level `var` and `const`; parameters, loop variables, and value receivers read-only | [ADR 0031](../adr/0031-go-spelling.md) (supersedes [0007](../adr/0007-val-var-and-immutability.md) for locals) |
 | Errors | Errors stay Go `error` values; `throws`, postfix `?`, `catch`, `throw`; no exceptions | [ADR 0008](../adr/0008-error-handling.md) |
 | Nullability | `T?` with smart casts; platform types for Go values; value optionals boxed as `*T` | [ADR 0009](../adr/0009-nullability.md) |

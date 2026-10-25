@@ -27,7 +27,7 @@ go install ./cmd/lyth
 
 | Command | What it does |
 |---|---|
-| `lyth run file.lyth [-- args]` | Builds and runs a single file, inside or outside a module. Outside a module, Lyth creates a throwaway one in your user cache. |
+| `lyth run file.lyth [-- args]` | Builds and runs a single file. Outside a module, Lyth creates a throwaway one in your user cache; inside a module it currently builds the file's whole package. |
 | `lyth run ./cmd/api [-- args]` | Builds and runs a main package of the current module. |
 | `lyth build [-o out] [packages] [-- go build flags]` | Compiles packages with `go build`. With no packages, every directory containing `.lyth` files. |
 | `lyth check [packages]` | Parses and type-checks, test files included, without running the Go compiler on the result. The fastest feedback loop. |

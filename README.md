@@ -65,7 +65,7 @@ func main() throws {
   one inside an expression, `?:` supplies a fallback for a missing value, and
   lambdas, `when`, and string templates replace the statements Go needs around
   them. In the [benchmark suite](docs/design/benchmarks.md), where each workload
-  is written independently in both languages, the Lyth versions are about 20%
+  is written independently in both languages, the Lyth versions are 19%
   shorter overall (277 versus 344 lines) and 37% shorter in error-heavy code, and a
   collection pipeline takes less than half the lines of the equivalent loops.
 - **Easier to read and review.** Much of today's code is written with AI, often
@@ -198,7 +198,7 @@ internal/check      resolution and type checking
 internal/lower      typed AST -> go/ast
 internal/emit       printing, source maps, //line directives
 internal/build      orchestration, overlays, validation, go toolchain
-tests/              end-to-end suites (run, check, gen golden, fix, toolchain, interop)
+tests/              end-to-end suites (run, check, gen golden, fix, toolchain, docs, evals)
 skills/lyth/        Claude Code skill, which sends agents to `lyth guide`
 evals/              measures how well models write Lyth, with and without the skill
 examples/           hello, users, todoapi (REST API on PostgreSQL)

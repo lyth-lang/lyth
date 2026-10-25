@@ -71,13 +71,13 @@ where its meaning matches, and Go's where Go already has the operation:
 | `xs.Fold(initial) { acc, x -> ... }` | the accumulated value; `initial` for an empty slice | | ✅ |
 | `xs.Partition { cond }` | `(matching, rest)` | | ✅ |
 | `xs.Distinct()` | the elements without repeats, first occurrence kept | `T: comparable` | ✅ |
-| `xs.DistinctBy { key(it) }` | the first element for each key | `K: comparable` | ✅ new |
+| `xs.DistinctBy { key(it) }` | the first element for each key | `K: comparable` | ✅ |
 | `xs.SortedBy { key(it) }` | a copy, stably sorted by the key, ascending; the key runs once per element | `K: cmp.Ordered` | ✅ |
-| `xs.SortedWith { a, b -> cmp.Compare(...) }` | a copy, stably sorted by a comparison (several keys, descending); the comparison runs once per comparison | | ✅ new |
-| `xs.Take(n)` | a copy of the first `n` elements, or all of them; empty for `n <= 0` | | ✅ new |
+| `xs.SortedWith { a, b -> cmp.Compare(...) }` | a copy, stably sorted by a comparison (several keys, descending); the comparison runs once per comparison | | ✅ |
+| `xs.Take(n)` | a copy of the first `n` elements, or all of them; empty for `n <= 0` | | ✅ |
 | `xs.GroupBy { key(it) }` | `map[K][]T`, each group in input order | `K: comparable` | ✅ |
 | `xs.AssociateBy { key(it) }` | `map[K]T`; a later element replaces an earlier one with the same key | `K: comparable` | ✅ |
-| `xs.ToSet()` | `map[T]bool` holding every element, for `x in set` lookups | `T: comparable` | ✅ new |
+| `xs.ToSet()` | `map[T]bool` holding every element, for `x in set` lookups | `T: comparable` | ✅ |
 
 ### Operations on maps
 
@@ -252,7 +252,7 @@ joining two small result sets with `AssociateBy`.
 |---|---|---|
 | Lower-case built-in methods (`xs.filter`) | compiler intrinsics instead of readable library code; lower-case names are private in Lyth; Go callers would see different names | exported extensions in `lyth/coll` |
 | Importing `lyth/coll` implicitly | the generated Go imports `lyth/coll`, which needs the toolchain to build; an explicit import keeps that dependency visible | the import, and a diagnostic that names it when it is missing |
-| Lazy sequences or streams | less predictable (when does the callback run, how often), harder to debug, and Lyth's `for` cannot consume Go's `iter.Seq` yet | eager operations; reconsider with range-over-func |
+| Lazy sequences or streams | less predictable (when does the callback run, how often) and harder to debug | eager operations; `for x in seq` for Go iterators |
 | `Exclude` / `FilterNot` | a second name for `Filter` with `!` | `Filter { !cond }` |
 | `First` / `FirstOrNull` | `T?` does not work for type parameters yet; `First()` without a condition is `xs[0]` | `Find`, comma-ok |
 | `Contains` | duplicates the `in` operator | `x in xs`, `x in xs.ToSet()` for repeated tests |
@@ -283,5 +283,5 @@ joining two small result sets with `AssociateBy`.
   the compiler inlines a function and its lambda at the call site, which
   removes the closure calls but not the intermediate slices. Measure with a
   benchmark in `bench/` before and after.
-- **With range-over-func support.** Revisit lazy, iterator-based variants
-  that compose with Go's `iter.Seq`.
+- **Lazy variants.** Revisit iterator-based variants that compose with Go's
+  `iter.Seq`, which `for` already consumes.

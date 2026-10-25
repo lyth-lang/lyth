@@ -33,7 +33,7 @@ Type        = PrefixType [ "?" ] .
 PrefixType  = "*" PrefixType | "[" [ ConstExpr ] "]" Type
             | "map" "[" Type "]" Type | ChanType | PrimaryType .
 ChanType    = "chan" Type | "chan" "<-" Type | "<-" "chan" Type .
-PrimaryType = TypeName [ TypeArgs ] | FuncType | "(" Type ")" .
+PrimaryType = TypeName [ TypeArgs ] | FuncType | "(" Type ")" | "struct" "{" "}" .
 TypeName    = identifier [ "." identifier ] .
 TypeArgs    = "[" Type { "," Type } "]" .
 FuncType    = "(" [ Type { "," Type } ] ")" "->" ResultType [ "throws" ] .
@@ -86,6 +86,7 @@ and appears only in diagnostics; it cannot be written in source.
 | `[N]T` | Go array (value type). |
 | `chan T`, `chan<- T`, `<-chan T` | Go channels, made with `make(chan T, n)`. Operations are the methods `send`, `receive`, and `close`; `receive()` is `T?` when `T` has no zero value ([language.md §5.9](language.md#59-pointers-and-channels)). |
 | `*T` | Go pointer. |
+| `struct{}` | Go's empty struct, for values that carry no data: `chan struct{}`, sets as `map[K]struct{}`. Its value is `struct{}{}`. Other anonymous struct types are not supported; declare a struct. |
 | `(A, B) -> R` | Go `func(A, B) R`. |
 | `(A) -> R throws` | Go `func(A) (R, error)`. |
 | tuple `(A, B)` | multiple results only; not a first-class type. |
@@ -105,7 +106,10 @@ functions, channels, slices, and maps. Lyth applies nullability to the first fou
   and nil map are simply their empty zero values: `len` is 0, iteration does
   nothing, reads succeed. `([]T)?` is E0406 with a hint to use an empty slice.
   (Writing to a nil map panics in Go and in Lyth. Map literals and `make` always
-  produce non-nil maps.)
+  produce non-nil maps.) Go named slice and map types (`http.Header`,
+  `json.RawMessage`) follow the same rule. `xs == null` tests for the nil
+  slice or map, and `xs ?: fallback` uses the fallback when it is nil:
+  `m[k] ?: ["default"]`.
 - Value types (numbers, `string`, `bool`, structs, arrays) have optional forms
   `T?` represented as `*T`: see §5.6.
 
@@ -179,13 +183,16 @@ This is the idiomatic Go representation for optional JSON fields (`*int` with
 - Boxing `T → T?` lowers to Go 1.26 `new(expr)`, which allocates unless escape
   analysis proves otherwise. Unboxing (a smart cast or `!!`) copies the value out
   (`*p`). Optional values are never mutated through the pointer, so sharing the
-  box is unobservable from Lyth.
+  box is unobservable from Lyth: assigning a field of a smart-cast optional
+  (`o.X = 1` for `o: P?`) is E0502, and calling a pointer method on one
+  (`o.Inc()`, `o?.Inc()`) is E0504. Change a copy and store it back.
 - `*T?` (nullable pointer) and `T?` (optional value) are different Lyth types
   with the same Go type. `*T`/`*T?` converts implicitly to `T?`, which is a
   read-only view and safe. The reverse is rejected (E0201): it would allow writes
   into a shared box. Write `new(x!!)` for an explicit copy.
 - Equality `a == b` on two `T?` values compares contents with null handling, not
-  pointer identity.
+  pointer identity. Go would compare a struct or array that holds a `T?` by the
+  boxes' addresses, so `==` and `in` on one is E0209: compare the fields you need.
 - Converting a nullable value to a nullable interface type (`error?`, `any?`,
   `Shape?`) maps null to a nil interface, not to a non-nil interface holding a
   nil pointer (Go's typed-nil trap), and puts an optional value in unboxed: an

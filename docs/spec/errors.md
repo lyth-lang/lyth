@@ -129,11 +129,11 @@ exists. When the success value is itself nullable, write `x??.y`
 ```kotlin
 func *Repo.Find(ctx: context.Context, id: int64): User? throws  // Go: (*User, error)
 
-func handler(c: *web.Ctx) throws {
-    id := c.PathValue("id").toInt64()?             // bad input -> error
-    user := repo.Find(c.ctx(), id)?                // db failure -> error
-        ?: return c.notFound("no user ${id}")        // missing -> normal flow
-    c.json(200, user)
+func *Repo.NameOf(ctx: context.Context, idText: string): string throws {
+    id := idText.toInt64()?                     // bad input -> error
+    user := Find(ctx, id)?                      // db failure -> error
+        ?: return "nobody"                      // missing -> normal flow
+    return user.Name
 }
 ```
 
@@ -170,7 +170,10 @@ Values that would have to change on the way cannot pass through: boxing into
 of a failing call into a non-nil interface (Go's typed-nil trap). Interface
 values and identical types pass. Elsewhere write `return f()?`, which returns
 zero values on failure. Functions declaring a raw result tuple return exactly
-what is written anyway (§2.3).
+what is written anyway (§2.3); `return w.Write(p)` there returns the call's
+results when they have the function's result types. A lambda whose expected
+type is a Go callback returning `(T, error)` may likewise end with such a call:
+`sync.OnceValues[int, error]({ strconv.Atoi(s) })`.
 
 ## 4. Handling: `catch`, `throw`, `wrap`, and explicit discard
 
@@ -385,13 +388,13 @@ is chosen only where `err` would mean something else: a user variable named
 or a binder captured by a closure, which a later assignment would change. The
 generated code is what a careful Go programmer writes by hand, so performance
 is identical by construction. The
-benchmark suite verifies this (`bench/errors`).
+benchmark suite verifies this (`bench/errprop`).
 
 ## 11. Test matrix
 
 Positive (must compile and run with the expected output) and negative (must
 fail with exactly the listed code at the listed position). Files live in
-`tests/run/` and `tests/check/`.
+`tests/testdata/run/` and `tests/testdata/check/`.
 
 | Case | Expectation |
 |---|---|
@@ -417,4 +420,4 @@ fail with exactly the listed code at the listed position). Files live in
 | E0307: `catch` block neither yields a value nor diverges | error at the block end |
 | E0303: typed `catch` without `?` or a final `catch` | error at the expression |
 | E0301/E0304: `?` or `throw` in a lambda typed by a Lyth `(T) -> error?` | error with a hint to return the error or declare `throws` |
-| E0401: `?` confused with null handling (`nullable?`) | E0302 with `?:` hint |
+| `?` on a nullable value (`x?` with `x: int?`) | E0302 with a `?:` hint |

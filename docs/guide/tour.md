@@ -185,7 +185,8 @@ func main() {
 }
 ```
 
-`for` iterates over a collection, a channel, or a range, and `while c { }`
+`for` iterates over a collection, a channel, a range, or a Go iterator
+(`for k in maps.Keys(ages)`), and `while c { }`
 loops on a condition (`while true` forever). As in Go, conditions take no
 parentheses and bodies are always blocks. `a, b := 0, 1` declares several
 variables, and an assignment list evaluates all values on the right before

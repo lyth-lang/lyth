@@ -52,7 +52,7 @@ programmer writes instead, at 100 to 100,000 elements. It shows what a chain
 costs relative to a loop, not a difference in generated code, so it is
 reported separately ([Collection API §5](collections.md#5-mutation-ordering-and-cost),
 `bench/results/collections.txt`) and is not part of the summary in §1. A
-full `benchrun` run includes it.
+full `benchrun` run includes it. Its Lyth side is 22 lines and its Go side 49.
 
 ## 3. Method
 
@@ -165,9 +165,8 @@ Threats to validity:
   differ elsewhere; the Go/Lyth ratio is what we compare.
 - One author wrote both implementations. Equivalence tests make sure both
   compute the same thing, but neither side was tuned beyond idiomatic code.
-- The workloads cover today's language. Collection libraries, generics-heavy
-  code, and future features (sealed types, `select`) need their own pairs when
-  they land.
+- The workloads cover common backend code. Generics-heavy code, enums and
+  sealed interfaces, and `select` have no benchmark pairs yet.
 - PostgreSQL runs locally, so `pgapi` measures client-side cost plus a local
   round trip, not network latency.
 
