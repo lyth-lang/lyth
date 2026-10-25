@@ -159,3 +159,37 @@ Flags other than Lyth's own (`-tags`, `-diagnostics`, `-no-line-directives`, `-t
 `lyth build` and `lyth run` ignore test files; `lyth check`, `lyth vet`, and
 `lyth gen` include them. External test packages (`package foo_test`) are not
 supported yet.
+
+## Coverage
+
+`-cover`, `-covermode`, `-coverpkg`, and `-coverprofile` work as with `go test`.
+A profile written by `lyth test` describes your `.lyth` files: every block is a
+range of Lyth code, and Lyth files are named by absolute path.
+
+```bash
+lyth test -coverprofile=c.out ./...
+go tool cover -html=c.out             # Lyth source, highlighted
+lyth cover -func=c.out                # coverage of each function
+```
+
+```text
+calc/calc.lyth:5:       Add             100.0%
+calc/calc.lyth:8:       Parse           60.0%
+calc/calc.lyth:16:      Sign            50.0%
+total:                  (statements)    60.0%
+```
+
+Use `lyth cover -func` rather than `go tool cover -func`, which parses every file
+in the profile as Go and fails on `.lyth` files. `lyth cover -html=c.out` runs
+`go tool cover -html`. The error path of a postfix `?` is a block of its own,
+covered only when a test made the call fail, so an untested error path shows
+in the report. The percentages `lyth cover -func` prints can therefore differ
+slightly from the one `go test` prints, which counts the generated Go
+statements.
+
+The Go cover tool reads the files it instruments from disk and ignores the
+overlay, so for a run with coverage flags `lyth test` writes the generated
+`x.lyth.go` files beside their sources and deletes them when `go test` exits,
+also on Ctrl-C. This is the only time Lyth writes into the source tree. A file
+left by `lyth gen -in-tree` is restored afterwards, and a file with that name
+that Lyth did not generate stops the run.

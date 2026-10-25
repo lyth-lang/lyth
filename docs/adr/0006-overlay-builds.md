@@ -1,6 +1,6 @@
 # ADR 0006: Overlay builds; in-tree generation on request
 
-**Status:** Accepted
+**Status:** Accepted; coverage runs write into the tree, amended by [0034](0034-coverage-and-dense-line-directives.md)
 
 ## Context
 The build must not rewrite user files, but Go must compile generated files as

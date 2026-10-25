@@ -2,6 +2,7 @@ package tests
 
 import (
 	"bytes"
+	"fmt"
 	"go/format"
 	"io"
 	"os"
@@ -597,6 +598,126 @@ func TestID(t *testing.T) {
 	}
 	if code, out := testModule(t, root, "-v"); code != 0 || !strings.Contains(out, "--- PASS: TestAdd") || !strings.Contains(out, "--- PASS: TestID") {
 		t.Errorf("tests after lyth mod tidy (exit %d):\n%s", code, out)
+	}
+}
+
+// TestLythTestCover checks lyth test -cover and -coverprofile. The cover tool
+// reads generated files from disk (it ignores -overlay), so they exist
+// beside the sources only during the run; a file lyth gen -in-tree wrote
+// there is restored. The profile names .lyth files with Lyth positions, and
+// go tool cover -html and lyth cover -func (build.CoverFunc) read it.
+func TestLythTestCover(t *testing.T) {
+	root := writeModule(t, "covered", map[string]string{
+		"calc/calc.lyth": `import "strconv"
+
+func Add(a: int, b: int): int = a + b
+
+// Parse reads a number.
+func Parse(s: string): int throws {
+    n := strconv.Atoi(s)?
+    if n < 0 {
+        throw strconv.ErrRange
+    }
+    return n * 2
+}
+
+func Sign(n: int): string = when {
+    n < 0 -> "neg"
+    n == 0 -> "zero"
+    else -> "pos"
+}
+`,
+		"calc/calc_test.lyth": `import "testing"
+
+func TestCalc(t: *testing.T) throws {
+    if Add(1, 2) != 3 || Sign(1) != "pos" {
+        t.Fatal("wrong")
+    }
+    Parse("4")?
+}
+`,
+		"calc/calc_go_test.go": "package calc\n\nimport \"testing\"\n\nfunc TestFromGo(t *testing.T) { _ = Add(1, 1) }\n",
+		"util/util.lyth":       "func Twice(s: string): string = s + s\n",
+	})
+	// util has no tests and no in-tree file; calc has an in-tree file from
+	// lyth gen -in-tree, which must be left as it was.
+	s := compileModule(t, root, true)
+	if _, err := s.WriteInTree(); err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(filepath.Join(root, "util", "util.lyth.go"))
+	os.Remove(filepath.Join(root, "calc", "calc.lyth_test.go"))
+	inTree := filepath.Join(root, "calc", "calc.lyth.go")
+	before, err := os.ReadFile(inTree)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	code, out := testModule(t, root, "-cover", "-coverprofile=c.out")
+	if code != 0 || !strings.Contains(out, "coverage:") || strings.Contains(out, "build failed") {
+		t.Fatalf("lyth test -cover failed (exit %d):\n%s", code, out)
+	}
+	if after, _ := os.ReadFile(inTree); !bytes.Equal(before, after) {
+		t.Errorf("the in-tree file of lyth gen was not restored:\n%s", after)
+	}
+	if _, err := os.Stat(filepath.Join(root, "util", "util.lyth.go")); err == nil {
+		t.Errorf("the generated file written for the cover tool was not removed")
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, "c.out"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	calc := filepath.Join(root, "calc", "calc.lyth")
+	src, _ := os.ReadFile(calc)
+	lines := strings.Split(string(src), "\n")
+	text := func(sl, sc, el, ec int) string { // a block's Lyth text (single-line blocks)
+		if sl != el || sl > len(lines) || ec-1 > len(lines[sl-1]) {
+			return ""
+		}
+		return lines[sl-1][sc-1 : ec-1]
+	}
+	got := map[string]int{} // single-line block text -> count
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n")[1:] {
+		file, rest, _ := strings.Cut(line, ":")
+		if file == filepath.Join(root, "util", "util.lyth") {
+			continue // untested, listed with zero counts
+		}
+		if file != calc {
+			t.Errorf("profile names %s, want %s: %s", file, calc, line)
+			continue
+		}
+		var sl, sc, el, ec, stmts, count int
+		if _, err := fmt.Sscanf(rest, "%d.%d,%d.%d %d %d", &sl, &sc, &el, &ec, &stmts, &count); err != nil {
+			t.Fatalf("bad profile line %q: %v", line, err)
+		}
+		if sl < 1 || el > len(lines) || el < sl {
+			t.Errorf("block outside calc.lyth (%d lines): %s", len(lines), line)
+		}
+		got[text(sl, sc, el, ec)] = count
+	}
+	// The error path of ? is its own block, uncovered: Parse never failed.
+	for block, want := range map[string]int{"a + b": 1, "n := strconv.Atoi(s)": 1, "?": 0, "throw strconv.ErrRange": 0, "return n * 2": 1, `"neg"`: 0, `"pos"`: 1} {
+		if c, ok := got[block]; !ok || c != want {
+			t.Errorf("block %q: count %d (found %v), want %d\n%s", block, c, ok, want, data)
+		}
+	}
+
+	html := exec.Command("go", "tool", "cover", "-html=c.out", "-o", "c.html")
+	html.Dir = root
+	if out, err := html.CombinedOutput(); err != nil {
+		t.Errorf("go tool cover -html failed: %v\n%s", err, out)
+	} else if page, _ := os.ReadFile(filepath.Join(root, "c.html")); !strings.Contains(string(page), `<span class="cov0" title="0">?</span>`) {
+		t.Errorf("the HTML report does not mark the untested error path of ?:\n%s", page)
+	}
+	var funcs bytes.Buffer
+	if err := build.CoverFunc(root, filepath.Join(root, "c.out"), &funcs, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"calc/calc.lyth:3:", "Add", "100.0%", "calc/calc.lyth:6:", "Parse", "60.0%", "Sign", "total:"} {
+		if !strings.Contains(funcs.String(), want) {
+			t.Errorf("lyth cover -func output lacks %q:\n%s", want, funcs.String())
+		}
 	}
 }
 

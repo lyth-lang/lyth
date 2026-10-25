@@ -1,6 +1,6 @@
 # ADR 0005: Exact source maps plus column-less `//line` directives
 
-**Status:** Accepted
+**Status:** Accepted; directives in build output and coverage positions amended by [0034](0034-coverage-and-dense-line-directives.md)
 
 ## Context
 Users must see Lyth positions for errors from Lyth, from `go/types`, from `go

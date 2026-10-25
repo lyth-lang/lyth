@@ -12,7 +12,10 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"go/ast"
 	"go/format"
+	"go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,6 +27,7 @@ import (
 
 	"github.com/lyth-lang/lyth/internal/build"
 	"github.com/lyth-lang/lyth/internal/diag"
+	"github.com/lyth-lang/lyth/internal/emit"
 )
 
 var update = flag.Bool("update", false, "update golden files")
@@ -144,6 +148,7 @@ func TestRun(t *testing.T) {
 			} else if !bytes.Equal(formatted, g.Code) {
 				t.Errorf("%s/%s is not gofmt-clean:\n%s", p.Dir.Rel, g.Name, diffLines(string(g.Code), string(formatted)))
 			}
+			checkLineDirectives(t, p.Dir.Rel+"/"+g.Name, g)
 		}
 	}
 	for _, f := range files {
@@ -176,6 +181,42 @@ func TestRun(t *testing.T) {
 			}
 		})
 	}
+}
+
+// checkLineDirectives checks that, in build output, every generated line
+// that starts with Lyth code reports that code's Lyth line to the Go
+// toolchain (debuggers, profilers, vet, and coverage file names): //line
+// directives are emitted wherever the Lyth line changes.
+func checkLineDirectives(t *testing.T, name string, g *emit.Result) {
+	t.Helper()
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, g.Name, g.Code, parser.SkipObjectResolution)
+	if err != nil {
+		return // reported by the gofmt check
+	}
+	// Physical lines; token.File.Line applies the directives.
+	line := func(p token.Pos) int { return fset.PositionFor(p, false).Line }
+	inString := map[int]bool{} // continuation lines of multi-line strings
+	reported := map[int]bool{}
+	ast.Inspect(f, func(n ast.Node) bool {
+		if lit, ok := n.(*ast.BasicLit); ok && lit.Kind == token.STRING {
+			for l := line(lit.Pos()) + 1; l <= line(lit.End()); l++ {
+				inString[l] = true
+			}
+		}
+		if n == nil || !n.Pos().IsValid() {
+			return true
+		}
+		l := line(n.Pos())
+		if reported[l] || inString[l] || l >= len(g.Map.LineToSrc) || g.Map.LineToSrc[l] == 0 {
+			return true
+		}
+		reported[l] = true
+		if got := fset.PositionFor(n.Pos(), true).Line; got != g.Map.LineToSrc[l] {
+			t.Errorf("%s:%d reports Lyth line %d, want %d", name, l, got, g.Map.LineToSrc[l])
+		}
+		return true
+	})
 }
 
 // errorRE matches inline expectations: // ERROR E0201 "message substring".

@@ -16,10 +16,12 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
@@ -60,6 +62,7 @@ Usage:
   lyth gen [-stdout | -in-tree] [packages]                emit the generated Go code
   lyth vet [packages]                                     run go vet on generated code
   lyth test [packages] [go test flags]                    run tests (_test.lyth and _test.go files)
+  lyth cover -func=c.out | -html=c.out                    show a coverage profile of Lyth code
   lyth fix [packages]                                     rewrite older Lyth syntax and Kotlin and Go spellings
   lyth mod tidy                                           go mod tidy that sees imports in .lyth files
   lyth init [module-path]                                 create a Lyth module, with AGENTS.md for coding agents
@@ -144,6 +147,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdVet(rest, stdout, stderr)
 	case "test":
 		return cmdTest(rest, stdout, stderr)
+	case "cover":
+		return cmdCover(rest, stdout, stderr)
 	case "fix":
 		return cmdFix(rest, stdout, stderr)
 	case "init":
@@ -423,6 +428,7 @@ func cmdGen(args []string, stdout, stderr io.Writer) int {
 	c.parseDiag(fs)
 	cfg := c.config(stdout, stderr)
 	cfg.InTree = *inTree
+	cfg.SparseLineDirectives = true
 	s, err := build.Compile(cfg, target(fs.Args()))
 	if report(s, &c, stderr) {
 		if *force && *toStdout && s != nil {
@@ -564,6 +570,60 @@ func cmdTest(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return code
+}
+
+// cmdCover shows a coverage profile written by lyth test. go tool cover
+// -func parses every file of the profile as Go, so lyth computes -func
+// itself; other modes (-html) go to go tool cover, which reads .lyth files
+// as plain text.
+func cmdCover(args []string, stdout, stderr io.Writer) int {
+	var profile, output string
+	for i := 0; i < len(args); i++ {
+		name, value, hasValue := strings.Cut(strings.TrimLeft(args[i], "-"), "=")
+		if (name == "func" || name == "o") && !hasValue && i+1 < len(args) {
+			i++
+			value = args[i]
+		}
+		switch name {
+		case "func":
+			profile = value
+		case "o":
+			output = value
+		}
+	}
+	if profile == "" {
+		if len(args) == 0 {
+			fmt.Fprintln(stderr, "usage: lyth cover -func=c.out [-o file] | lyth cover -html=c.out [-o file]")
+			return 2
+		}
+		cmd := exec.Command("go", append([]string{"tool", "cover"}, args...)...)
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, stdout, stderr
+		if err := cmd.Run(); err != nil {
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) {
+				return exitErr.ExitCode()
+			}
+			fmt.Fprintf(stderr, "lyth: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	w := stdout
+	if output != "" {
+		f, err := os.Create(output)
+		if err != nil {
+			fmt.Fprintf(stderr, "lyth: %v\n", err)
+			return 1
+		}
+		defer f.Close()
+		w = f
+	}
+	wd, _ := os.Getwd()
+	if err := build.CoverFunc(wd, profile, w, nil); err != nil {
+		fmt.Fprintf(stderr, "lyth: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 // cmdLSP serves the Language Server Protocol on stdin and stdout for

@@ -37,11 +37,15 @@ type Config struct {
 	Verbose          bool
 	NoLineDirectives bool
 	InTree           bool // generate for in-tree output (bare file names in //line)
-	Timings          bool // record phase durations (lyth -timings)
-	Tests            bool // also compile the _test.lyth files of the target packages
-	Tags             []string
-	Env              []string
-	Stdout, Stderr   io.Writer
+	// SparseLineDirectives emits //line only before lines that can fail at
+	// run time (lyth gen: output meant for reading). Builds put one wherever
+	// the Lyth line changes; in-tree output is always sparse.
+	SparseLineDirectives bool
+	Timings              bool // record phase durations (lyth -timings)
+	Tests                bool // also compile the _test.lyth files of the target packages
+	Tags                 []string
+	Env                  []string
+	Stdout, Stderr       io.Writer
 	// Overlay replaces the contents of source files, by absolute path: an
 	// editor's unsaved buffers.
 	Overlay map[string][]byte
@@ -440,7 +444,11 @@ func (s *Session) check() {
 }
 
 func (s *Session) generate() error {
-	opts := emit.Options{LineDirectives: !s.cfg.NoLineDirectives, AbsPaths: !s.cfg.InTree}
+	opts := emit.Options{
+		LineDirectives: !s.cfg.NoLineDirectives,
+		AbsPaths:       !s.cfg.InTree,
+		DenseLines:     !s.cfg.InTree && !s.cfg.SparseLineDirectives,
+	}
 	for _, p := range s.Packages {
 		if p.Checked == nil {
 			continue
@@ -609,6 +617,9 @@ func (s *Session) GoFset() *token.FileSet {
 	}
 	return s.loader.Fset
 }
+
+// WorkDir returns the directory lyth was invoked from, where go test runs.
+func (s *Session) WorkDir() string { return s.cfg.WorkDir }
 
 // MainPackages returns the target packages named main.
 func (s *Session) MainPackages() []*Package {

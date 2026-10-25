@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/lyth-lang/lyth/internal/check"
@@ -243,7 +245,75 @@ func (s *Session) GoVet(pkgs []string) (bool, error) {
 // resolved from the directory lyth was invoked in, like go test itself.
 // Output streams to the configured writers; test failures already point at
 // .lyth lines through //line directives. It returns go test's exit status.
+//
+// With coverage flags, the generated files are written beside their sources
+// for the length of the run (the cover tool ignores the overlay), and the
+// profile is rewritten to Lyth positions afterwards (cover.go).
 func (s *Session) GoTest(patterns, flags []string) (int, error) {
+	coverage, profile := coverFlags(flags)
+	if !coverage {
+		return s.goTest(patterns, flags)
+	}
+	restore, err := s.WriteForCover()
+	if err != nil {
+		return 1, err
+	}
+	// An interrupt reaches go test too; lyth waits for it to exit and then
+	// removes the files.
+	interrupts := make(chan os.Signal, 1)
+	signal.Notify(interrupts, os.Interrupt, syscall.SIGTERM)
+	code, err := s.goTest(patterns, flags)
+	signal.Stop(interrupts)
+	if rerr := restore(); err == nil {
+		err = rerr
+	}
+	if err != nil || profile == "" {
+		return code, err
+	}
+	if !filepath.IsAbs(profile) {
+		profile = filepath.Join(s.cfg.WorkDir, profile)
+	}
+	if _, serr := os.Stat(profile); serr != nil {
+		return code, nil // the build failed before go test wrote it
+	}
+	if err := s.MapCoverProfile(profile); err != nil {
+		return code, fmt.Errorf("mapping %s to Lyth positions: %w", profile, err)
+	}
+	return code, nil
+}
+
+// coverFlags reports whether go test flags turn on coverage, and the profile
+// they write (joined with -outputdir, as go test does).
+func coverFlags(flags []string) (coverage bool, profile string) {
+	var outputDir string
+	for i := 0; i < len(flags); i++ {
+		if !strings.HasPrefix(flags[i], "-") {
+			continue
+		}
+		name, value, hasValue := strings.Cut(strings.TrimLeft(flags[i], "-"), "=")
+		takesValue := name == "coverprofile" || name == "coverpkg" || name == "covermode" || name == "outputdir"
+		if takesValue && !hasValue && i+1 < len(flags) {
+			i++
+			value = flags[i]
+		}
+		switch name {
+		case "cover":
+			coverage = !hasValue || value == "true"
+		case "coverpkg", "covermode":
+			coverage = true
+		case "coverprofile":
+			coverage, profile = true, value
+		case "outputdir":
+			outputDir = value
+		}
+	}
+	if profile != "" && outputDir != "" && !filepath.IsAbs(profile) {
+		profile = filepath.Join(outputDir, profile)
+	}
+	return coverage, profile
+}
+
+func (s *Session) goTest(patterns, flags []string) (int, error) {
 	args := append([]string{"test"}, s.overlayArgs()...)
 	if len(s.cfg.Tags) > 0 {
 		args = append(args, "-tags="+strings.Join(s.cfg.Tags, ","))
