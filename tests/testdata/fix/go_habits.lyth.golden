@@ -1,6 +1,7 @@
 // Go spellings that lyth fix rewrites.
 import "cmp"
 import "fmt"
+import "net/url"
 import "strings"
 
 struct Point {
@@ -31,6 +32,8 @@ func main() {
     for x in ([]int{1, 2}) {
         fmt.Println(strings.Repeat("*", x))
     }
+    q := url.Values(["q": ["lyth"], "page": ["2"]])
+    fmt.Println(q.Encode())
     b: strings.Builder
     b.WriteString("done")
     fmt.Println(b.String())

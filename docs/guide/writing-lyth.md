@@ -216,6 +216,7 @@ What Go programmers write by habit, and the Lyth for it:
 | `func (u *User) Rename(n string)` | `func *User.Rename(n: string)`, with `self` for the receiver |
 | `x int`, `func f() int` | `x: int`, `func f(): int` |
 | `Point{X: 1, Y: 2}` | `Point(X = 1, Y = 2)` |
+| `gin.H{"error": msg}`, `url.Values{"q": {"go"}}` | `gin.H(["error": msg])`, `url.Values(["q": ["go"]])` |
 | `for i, x := range xs` | `for i, x in xs` |
 | `for i := 0; i < n; i++` | `for i in 0..<n` |
 | `for { }`, `for cond { }` | `while true { }`, `while cond { }` |
@@ -277,6 +278,7 @@ The forms below were Lyth before 0.1.0, and most are also what Kotlin and Go hab
 | `when (val x = e)` | `when x := e` | yes |
 | `(a, b) = f()` | `a, b = f()` | yes |
 | `Point{X: 1}` | `Point(X = 1)` | yes |
+| `gin.H{"k": v}` | `gin.H(["k": v])` | yes |
 | `strings.split(s, ",")` | `strings.Split(s, ",")` | yes |
 | `func (p *T) M()` | `func *T.M()`, and `self` in the body | no |
 

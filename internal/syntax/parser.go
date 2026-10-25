@@ -692,7 +692,7 @@ func (p *parser) goCompositeLit(x Expr) Expr {
 		inner := body.Text()
 		repl := x.Span().Text() + "([" + strings.TrimSpace(inner[1:len(inner)-1]) + "])"
 		p.errorf(diag.EUnsupportedSyntax, span, "Lyth converts a literal to a named map type").
-			WithEdit(span, repl, "write %s", repl)
+			WithFix(span, repl, "write %s", repl)
 		p.pos = end + 1
 		return &BadExpr{S: span}
 	}
