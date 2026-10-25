@@ -61,7 +61,10 @@ type Package struct {
 	Syntax    []*syntax.File
 	Checked   *check.Package
 	Generated []*emit.Result
-	GoTypes   *gotypes.Package // types of the generated Go (validation)
+	// Lowered are the files Generated was printed from, in the same order,
+	// kept to print them again for coverage runs (cover.go).
+	Lowered []*lower.File
+	GoTypes *gotypes.Package // types of the generated Go (validation)
 }
 
 // Session holds the state of one compilation.
@@ -84,6 +87,9 @@ type Session struct {
 	// Maps from generated file (virtual path in the package directory, or
 	// physical path in single-file mode) to its source map.
 	Maps map[string]*emit.SourceMap
+	// coverGen holds, for a coverage run on Go 1.26, the generated file
+	// printed again without //line directives, by the file it replaces.
+	coverGen map[*emit.Result]*emit.Result
 	// Timings holds phase durations in order.
 	Timings []Timing
 	// Targets are the packages selected on the command line (all packages
@@ -466,6 +472,7 @@ func (s *Session) generate() error {
 				continue
 			}
 			p.Generated = append(p.Generated, res)
+			p.Lowered = append(p.Lowered, lf)
 		}
 	}
 	return nil

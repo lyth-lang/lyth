@@ -192,4 +192,9 @@ overlay, so for a run with coverage flags `lyth test` writes the generated
 `x.lyth.go` files beside their sources and deletes them when `go test` exits,
 also on Ctrl-C. This is the only time Lyth writes into the source tree. A file
 left by `lyth gen -in-tree` is restored afterwards, and a file with that name
-that Lyth did not generate stops the run.
+that Lyth did not generate stops the run. With Go 1.26, whose cover tool reads the
+`//line` directives (which have no columns) into the profile, these files are
+written without directives, so a panic in a package under test points at
+`x.lyth.go` lines during a coverage run; the profile still ends up in Lyth
+positions. Go 1.26 also counts some statements differently from Go 1.27, so
+the percentages can differ between the two.

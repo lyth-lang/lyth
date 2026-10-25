@@ -16,6 +16,7 @@ import (
 
 	"github.com/lyth-lang/lyth/internal/build"
 	"github.com/lyth-lang/lyth/internal/diag"
+	"github.com/lyth-lang/lyth/internal/golang"
 	"github.com/lyth-lang/lyth/internal/lower"
 )
 
@@ -753,7 +754,13 @@ func TestCalc(t: *testing.T) throws {
 	if err := build.CoverFunc(root, filepath.Join(root, "c.out"), &funcs, nil); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"calc/calc.lyth:3:", "Add", "100.0%", "calc/calc.lyth:6:", "Parse", "60.0%", "Sign", "total:"} {
+	// Go 1.26's cover tool counts n, err := ... and its error check as two
+	// statements, Go 1.27's as one, so Parse is 4 of 6 or 3 of 5.
+	parse := "60.0%"
+	if _, minor, err := golang.GoVersion(root); err == nil && minor < 27 {
+		parse = "66.7%"
+	}
+	for _, want := range []string{"calc/calc.lyth:3:", "Add", "100.0%", "calc/calc.lyth:6:", "Parse", parse, "Sign", "total:"} {
 		if !strings.Contains(funcs.String(), want) {
 			t.Errorf("lyth cover -func output lacks %q:\n%s", want, funcs.String())
 		}
