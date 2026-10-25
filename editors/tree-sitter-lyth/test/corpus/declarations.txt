@@ -203,3 +203,22 @@ func main() {
         (identifier)
         (block
           (number))))))
+
+================================================================================
+Grouped imports
+================================================================================
+
+import (
+    "fmt"
+    "net/http" as h
+)
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (import_declaration
+    (string
+      (string_content))
+    (string
+      (string_content))
+    (identifier)))

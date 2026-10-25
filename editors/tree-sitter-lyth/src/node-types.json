@@ -16,6 +16,10 @@
           "named": true
         },
         {
+          "type": "empty_struct_type",
+          "named": true
+        },
+        {
           "type": "function_type",
           "named": true
         },
@@ -92,6 +96,10 @@
         },
         {
           "type": "const_declaration",
+          "named": true
+        },
+        {
+          "type": "empty_struct",
           "named": true
         },
         {
@@ -268,6 +276,10 @@
         },
         {
           "type": "const_declaration",
+          "named": true
+        },
+        {
+          "type": "empty_struct",
           "named": true
         },
         {
@@ -480,6 +492,10 @@
             "named": true
           },
           {
+            "type": "empty_struct_type",
+            "named": true
+          },
+          {
             "type": "function_type",
             "named": true
           },
@@ -533,6 +549,10 @@
         },
         {
           "type": "channel_type",
+          "named": true
+        },
+        {
+          "type": "empty_struct_type",
           "named": true
         },
         {
@@ -601,6 +621,10 @@
             "named": true
           },
           {
+            "type": "empty_struct_type",
+            "named": true
+          },
+          {
             "type": "function_type",
             "named": true
           },
@@ -639,6 +663,16 @@
         ]
       }
     }
+  },
+  {
+    "type": "empty_struct",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "empty_struct_type",
+    "named": true,
+    "fields": {}
   },
   {
     "type": "enum_body",
@@ -734,6 +768,10 @@
             "named": true
           },
           {
+            "type": "empty_struct_type",
+            "named": true
+          },
+          {
             "type": "function_type",
             "named": true
           },
@@ -803,6 +841,10 @@
         },
         {
           "type": "const_declaration",
+          "named": true
+        },
+        {
+          "type": "empty_struct",
           "named": true
         },
         {
@@ -1095,6 +1137,10 @@
             "named": true
           },
           {
+            "type": "empty_struct_type",
+            "named": true
+          },
+          {
             "type": "function_type",
             "named": true
           },
@@ -1162,6 +1208,10 @@
         },
         {
           "type": "channel_type",
+          "named": true
+        },
+        {
+          "type": "empty_struct_type",
           "named": true
         },
         {
@@ -1332,7 +1382,7 @@
     "named": true,
     "fields": {
       "alias": {
-        "multiple": false,
+        "multiple": true,
         "required": false,
         "types": [
           {
@@ -1342,8 +1392,8 @@
         ]
       },
       "path": {
-        "multiple": false,
-        "required": true,
+        "multiple": true,
+        "required": false,
         "types": [
           {
             "type": "string",
@@ -1387,6 +1437,14 @@
         },
         {
           "type": "const_declaration",
+          "named": true
+        },
+        {
+          "type": "empty_struct",
+          "named": true
+        },
+        {
+          "type": "empty_struct_type",
           "named": true
         },
         {
@@ -1629,6 +1687,10 @@
           "named": true
         },
         {
+          "type": "empty_struct",
+          "named": true
+        },
+        {
           "type": "enum_declaration",
           "named": true
         },
@@ -1837,6 +1899,10 @@
           "named": true
         },
         {
+          "type": "empty_struct",
+          "named": true
+        },
+        {
           "type": "enum_declaration",
           "named": true
         },
@@ -2006,6 +2072,10 @@
             "named": true
           },
           {
+            "type": "empty_struct_type",
+            "named": true
+          },
+          {
             "type": "function_type",
             "named": true
           },
@@ -2074,6 +2144,10 @@
         },
         {
           "type": "channel_type",
+          "named": true
+        },
+        {
+          "type": "empty_struct_type",
           "named": true
         },
         {
@@ -2202,6 +2276,10 @@
             "named": true
           },
           {
+            "type": "empty_struct_type",
+            "named": true
+          },
+          {
             "type": "function_type",
             "named": true
           },
@@ -2269,6 +2347,10 @@
         },
         {
           "type": "channel_type",
+          "named": true
+        },
+        {
+          "type": "empty_struct_type",
           "named": true
         },
         {
@@ -2358,6 +2440,10 @@
             "named": true
           },
           {
+            "type": "empty_struct_type",
+            "named": true
+          },
+          {
             "type": "function_type",
             "named": true
           },
@@ -2427,6 +2513,10 @@
         },
         {
           "type": "const_declaration",
+          "named": true
+        },
+        {
+          "type": "empty_struct",
           "named": true
         },
         {
@@ -2605,6 +2695,10 @@
           "named": true
         },
         {
+          "type": "empty_struct",
+          "named": true
+        },
+        {
           "type": "enum_declaration",
           "named": true
         },
@@ -2757,6 +2851,10 @@
         },
         {
           "type": "channel_type",
+          "named": true
+        },
+        {
+          "type": "empty_struct_type",
           "named": true
         },
         {
@@ -2923,6 +3021,10 @@
           "named": true
         },
         {
+          "type": "empty_struct_type",
+          "named": true
+        },
+        {
           "type": "function_type",
           "named": true
         },
@@ -2992,6 +3094,10 @@
         },
         {
           "type": "const_declaration",
+          "named": true
+        },
+        {
+          "type": "empty_struct",
           "named": true
         },
         {
@@ -3208,6 +3314,10 @@
           "named": true
         },
         {
+          "type": "empty_struct_type",
+          "named": true
+        },
+        {
           "type": "function_type",
           "named": true
         },
@@ -3260,6 +3370,10 @@
         },
         {
           "type": "channel_type",
+          "named": true
+        },
+        {
+          "type": "empty_struct_type",
           "named": true
         },
         {
@@ -3325,6 +3439,10 @@
           },
           {
             "type": "channel_type",
+            "named": true
+          },
+          {
+            "type": "empty_struct_type",
             "named": true
           },
           {
@@ -3394,6 +3512,10 @@
           "named": true
         },
         {
+          "type": "empty_struct_type",
+          "named": true
+        },
+        {
           "type": "function_type",
           "named": true
         },
@@ -3446,6 +3568,10 @@
           },
           {
             "type": "channel_type",
+            "named": true
+          },
+          {
+            "type": "empty_struct_type",
             "named": true
           },
           {
@@ -3527,6 +3653,10 @@
           },
           {
             "type": "channel_type",
+            "named": true
+          },
+          {
+            "type": "empty_struct_type",
             "named": true
           },
           {
@@ -3618,6 +3748,10 @@
         },
         {
           "type": "const_declaration",
+          "named": true
+        },
+        {
+          "type": "empty_struct",
           "named": true
         },
         {
@@ -3786,6 +3920,10 @@
             "named": true
           },
           {
+            "type": "empty_struct_type",
+            "named": true
+          },
+          {
             "type": "function_type",
             "named": true
           },
@@ -3849,6 +3987,10 @@
           },
           {
             "type": "channel_type",
+            "named": true
+          },
+          {
+            "type": "empty_struct_type",
             "named": true
           },
           {
@@ -3921,6 +4063,10 @@
         },
         {
           "type": "const_declaration",
+          "named": true
+        },
+        {
+          "type": "empty_struct",
           "named": true
         },
         {
@@ -4295,6 +4441,10 @@
     "named": false
   },
   {
+    "type": "&^=",
+    "named": false
+  },
+  {
     "type": "(",
     "named": false
   },
@@ -4646,11 +4796,11 @@
   },
   {
     "type": "rune",
-    "named": false
+    "named": true
   },
   {
     "type": "rune",
-    "named": true
+    "named": false
   },
   {
     "type": "sealed",
