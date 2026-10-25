@@ -10,10 +10,12 @@ the [interop matrix](../design/interop.md#10-compatibility-matrix).
 ## Packages and names
 
 ```kotlin
-import "fmt"
-import "net/url"
-import "strings"
-import "crypto/sha256" as sha
+import (
+    "crypto/sha256" as sha
+    "fmt"
+    "net/url"
+    "strings"
+)
 
 func main() {
     u := url.Parse("https://example.com/a?b=1") catch { return }
@@ -26,6 +28,8 @@ func main() {
 
 Imports are Go import paths, resolved by the `go` command against your
 `go.mod`, and the qualifier is the package's declared name. `as` renames it.
+Imports can be grouped in parentheses, one per line, or written one per
+`import`; Go's `sha "crypto/sha256"` is an error that `lyth fix` rewrites.
 Go identifiers are used exactly as Go spells them (`u.Host`, `strings.Cut`):
 Lyth never translates names in that direction, and a wrong case gets a
 suggestion (`strings.cut` → "Go names are used verbatim: write strings.Cut").

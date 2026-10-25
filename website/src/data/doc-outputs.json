@@ -6,7 +6,7 @@
   },
   {
     "file": "docs/guide/go-interop.md",
-    "source": "import \"fmt\"\nimport \"net/url\"\nimport \"strings\"\nimport \"crypto/sha256\" as sha\n\nfunc main() {\n    u := url.Parse(\"https://example.com/a?b=1\") catch { return }\n    fmt.Println(u.Host, u.Query().Get(\"b\"))\n    user, domain, found := strings.Cut(\"ada@example.com\", \"@\")\n    println(user, domain, found)\n    println(len(sha.Sum256([]byte(\"lyth\"))))\n}\n",
+    "source": "import (\n    \"crypto/sha256\" as sha\n    \"fmt\"\n    \"net/url\"\n    \"strings\"\n)\n\nfunc main() {\n    u := url.Parse(\"https://example.com/a?b=1\") catch { return }\n    fmt.Println(u.Host, u.Query().Get(\"b\"))\n    user, domain, found := strings.Cut(\"ada@example.com\", \"@\")\n    println(user, domain, found)\n    println(len(sha.Sum256([]byte(\"lyth\"))))\n}\n",
     "output": "example.com 1\nada example.com true\n32\n"
   },
   {

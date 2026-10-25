@@ -116,6 +116,8 @@ func main() throws {
 
 ## Declarations
 
+- Imports: `import "fmt"`, or a group with one per line: `import ( "fmt"; "net/http" as h )`
+  written over several lines. Rename with `as` (`"net/http" as h`), never Go's `h "net/http"`.
 - Functions: `func add(a: int, b: int): int { return a + b }`, or with one expression,
   `func add(a: int, b: int): int = a + b`. Parameters and results are `name: Type` and `: Type`.
   An unexported expression-bodied function may omit its result type (`func sq(n: int) = n * n`).

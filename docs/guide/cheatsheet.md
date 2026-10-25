@@ -29,6 +29,7 @@ has the exact rules.
 | `enum Color { Red, Green }` | `type Color int`, `const ( ColorRed Color = iota; ColorGreen )`, and a `String` method |
 | `sealed interface Shape { ... }` and `struct Circle : Shape` | an interface with an unexported `isShape()` that only declared members have |
 | `import "net/http" as h` | `import h "net/http"` |
+| `import (` / `"fmt"` / `"net/http" as h` / `)` | `import (` / `"fmt"` / `h "net/http"` / `)` |
 
 ## Types
 
