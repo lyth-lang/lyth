@@ -547,6 +547,59 @@ func testHelper(x: int): int = x
 	}
 }
 
+// TestModTidyKeepsTestOnlyModules checks that lyth mod tidy keeps modules
+// imported only by tests: testify from a _test.lyth file and uuid from a Go
+// _test.go file beside the Lyth code. Before stubs covered _test.lyth files,
+// tidy removed testify and the tests stopped compiling. Modules come from the
+// local module cache (GOPROXY=off semantics); the test skips without them.
+func TestModTidyKeepsTestOnlyModules(t *testing.T) {
+	root := writeModule(t, "tidytest", map[string]string{
+		"calc.lyth": "package tidytest\n\nfunc Add(a: int, b: int): int = a + b\n",
+		"calc_test.lyth": `package tidytest
+
+import (
+    "testing"
+    "github.com/stretchr/testify/assert"
+)
+
+func TestAdd(t: *testing.T) {
+    assert.Equal(t, 3, Add(1, 2))
+}
+`,
+		"id_test.go": `package tidytest
+
+import (
+	"testing"
+
+	"github.com/google/uuid"
+)
+
+func TestID(t *testing.T) {
+	if uuid.Nil.String() == "" || Add(1, 1) != 2 {
+		t.Fatal("unexpected")
+	}
+}
+`,
+	})
+	// As after go get github.com/stretchr/testify/assert@v1.11.1.
+	os.WriteFile(filepath.Join(root, "go.mod"), []byte("module tidytest\n\ngo 1.26\n\nrequire github.com/stretchr/testify v1.11.1\n"), 0o644)
+	modCache, _ := exec.Command("go", "env", "GOMODCACHE").Output()
+	proxy := "GOPROXY=file://" + filepath.ToSlash(filepath.Join(strings.TrimSpace(string(modCache)), "cache", "download"))
+	var tidyOut bytes.Buffer
+	if _, err := build.ModTidy(&build.Config{WorkDir: root, Stdout: &tidyOut, Stderr: &tidyOut}, []string{proxy, "GOFLAGS=-mod=mod", "GOSUMDB=off"}); err != nil {
+		t.Skipf("testify or uuid not available offline: %v\n%s", err, tidyOut.String())
+	}
+	gomod, _ := os.ReadFile(filepath.Join(root, "go.mod"))
+	for _, want := range []string{"github.com/stretchr/testify v1.11.1", "github.com/google/uuid"} {
+		if !strings.Contains(string(gomod), want) {
+			t.Errorf("lyth mod tidy dropped %s:\n%s", want, gomod)
+		}
+	}
+	if code, out := testModule(t, root, "-v"); code != 0 || !strings.Contains(out, "--- PASS: TestAdd") || !strings.Contains(out, "--- PASS: TestID") {
+		t.Errorf("tests after lyth mod tidy (exit %d):\n%s", code, out)
+	}
+}
+
 // TestDefaultsAcrossPackages checks that a default value written in one
 // package expands correctly at a call site in another: its public names are
 // qualified and its imports are added.

@@ -292,9 +292,10 @@ requires this, because the module proxy serves only committed files.
 
 **Dependencies.** Plain `go mod tidy` cannot see imports that exist only in
 `.lyth` files, and removes their requirements. `lyth mod tidy` writes an
-overlay of import stubs (one Go file per `.lyth` file, with a blank import per
-import path, built by parsing alone so it works while dependencies are still
-missing) and runs `go mod tidy -overlay=...`. `go get` needs no wrapper.
+overlay of import stubs (one Go file per `.lyth` file, `_test.lyth` files
+included so test-only modules stay, with a blank import per import path, built
+by parsing alone so it works while dependencies are still missing) and runs
+`go mod tidy -overlay=...`. `go get` needs no wrapper.
 
 **Single files outside a module.** `lyth run hello.lyth` synthesizes a module in
 the user cache directory (`<UserCacheDir>/lyth/run/<hash of the path>`) so
