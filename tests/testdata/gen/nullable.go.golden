@@ -7,8 +7,8 @@ import "strconv"
 //line nullable.lyth:1
 type User struct {
 	Name    string  `json:"name"`
-	Email   *string `json:"email"`
-	Manager *User   `json:"manager"`
+	Email   *string `json:"email,omitzero"`
+	Manager *User   `json:"manager,omitzero"`
 }
 
 func Contact(u User) string {

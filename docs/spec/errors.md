@@ -131,7 +131,7 @@ func *Repo.Find(ctx: context.Context, id: int64): User? throws  // Go: (*User, e
 
 func *Repo.NameOf(ctx: context.Context, idText: string): string throws {
     id := idText.toInt64()?                     // bad input -> error
-    user := Find(ctx, id)?                      // db failure -> error
+    user := self.Find(ctx, id)?                 // db failure -> error
         ?: return "nobody"                      // missing -> normal flow
     return user.Name
 }

@@ -19,7 +19,7 @@ struct Pet {
     PetName: string
 }
 
-func Pet.Name(): string = PetName
+func Pet.Name(): string = self.PetName
 
 func maxOf[T: cmp.Ordered](a: T, b: T): T = if a > b { a } else { b }
 

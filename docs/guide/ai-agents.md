@@ -90,18 +90,24 @@ main.lyth:1:1: error[E0008]: functions are declared with func
   |
   = hint: write func
 
-main.lyth:2:23: error[E0006]: string templates use ${...}; "$name" would print literally
+main.lyth:2:23: error[E0006]: "$name" prints literally; templates are written ${name}
   |
 2 |     val msg = "hello, $name"
   |                       ^^^^^
+  ::: main.lyth:1:11
   |
-  = hint: write ${name} to interpolate, or \$name for a literal dollar sign
+1 | fun greet(name: String): String {
+  |           ---- name is declared here
+  |
+  = hint: write ${name} to interpolate it, or \$name to keep the dollar sign
 
 5 errors
-lyth fix rewrites 5 of them: they are older Lyth syntax, or Kotlin or Go spellings
+lyth fix rewrites 4 of them: they are older Lyth syntax, or Kotlin or Go spellings
 ```
 
-`lyth fix` applies all five, and the program builds:
+`lyth fix` applies the four respellings. The `$name` is left for the agent: it could mean the
+variable or a literal dollar sign, so the error names both edits and the agent picks `${name}`.
+Then the program builds:
 
 ```kotlin
 func greet(name: string): string {

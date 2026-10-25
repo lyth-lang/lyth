@@ -142,11 +142,14 @@ func (c *Checker) resolveType0(te syntax.TypeExpr) types.Type {
 		if tp, ok := gk.(*gotypes.TypeParam); ok && tp.Constraint() == nil {
 			return &types.Map{Key: key, Elem: elem}
 		}
-		if key != types.Invalid && !gotypes.Comparable(gk) {
-			c.errorf(diag.ETypeArgs, te.Key.Span(), "%s cannot be a map key: it is not comparable", key)
-		}
 		keySpan := te.Key.Span()
+		// A Lyth type of this package (an enum key in a struct field) is
+		// comparable or not only once the package's types are defined.
 		c.whenDeclared(func() {
+			if key != types.Invalid && !gotypes.Comparable(types.Lower(key)) {
+				c.errorf(diag.ETypeArgs, keySpan, "%s cannot be a map key: it is not comparable", key)
+				return
+			}
 			if path, ft := optionalPart(key); path != "" {
 				c.errorf(diag.ETypeArgs, keySpan, "%s cannot be a map key: %s has type %s, which Go would compare by address", key, path, ft)
 			}

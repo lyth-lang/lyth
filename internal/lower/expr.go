@@ -1173,8 +1173,8 @@ func (fl *fnLower) listLit(e *syntax.ListLit) ast.Expr {
 // collectionShape returns the slice, array, or map type of a literal of
 // type t, looking through a named type such as gin.H.
 func collectionShape(t types.Type) types.Type {
-	if n, ok := types.Base(t).(*types.Named); ok && n.Go != nil {
-		return types.Base(types.Lift(n.Go.Underlying()))
+	if n, ok := types.Base(t).(*types.Named); ok && (n.Go != nil || n.Decl != nil && n.Decl.Kind == types.DefinedDecl) {
+		return check.CollectionOf(t)
 	}
 	return types.Base(t)
 }

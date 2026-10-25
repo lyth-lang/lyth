@@ -121,6 +121,7 @@ const (
 	THROW
 	THROWS
 	TRUE
+	TYPE
 	TYPEALIAS
 	VAL
 	VAR
@@ -150,7 +151,7 @@ var keywords = map[string]Kind{
 	"else": ELSE, "false": FALSE, "for": FOR, "func": FUN, "go": GO, "if": IF, "import": IMPORT,
 	"in": IN, "interface": INTERFACE, "is": IS, "map": MAP, "null": NULL, "package": PACKAGE, "private": PRIVATE,
 	"pub": PUB, "return": RETURN, "sealed": SEALED, "select": SELECT, "struct": STRUCT, "self": THIS, "throw": THROW, "throws": THROWS,
-	"true": TRUE, "typealias": TYPEALIAS, "val": VAL, "var": VAR, "when": WHEN, "while": WHILE,
+	"true": TRUE, "type": TYPE, "typealias": TYPEALIAS, "val": VAL, "var": VAR, "when": WHEN, "while": WHILE,
 }
 
 func (k Kind) String() string {

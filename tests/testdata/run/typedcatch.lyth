@@ -7,13 +7,13 @@ struct NotFound {
     Key: string
 }
 
-func *NotFound.Error(): string = "not found: ${Key}"
+func *NotFound.Error(): string = "not found: ${self.Key}"
 
 struct Invalid {
     Reason: string
 }
 
-func *Invalid.Error(): string = "invalid: ${Reason}"
+func *Invalid.Error(): string = "invalid: ${self.Reason}"
 
 func lookup(key: string): int throws {
     when key {

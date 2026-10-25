@@ -1,0 +1,129 @@
+// Struct embedding (ADR 0043): a type alone on a line embeds it, as in Go.
+// Members are promoted with Go's rules, promoted methods count for
+// interfaces, an embedded struct is flattened into JSON unless tagged, and a
+// nil embedded interface panics when a promoted method is called, as in Go.
+import "encoding/json"
+import "fmt"
+import "net/http"
+import "net/http/httptest"
+import "sync"
+
+// A ResponseWriter that records the status and forwards everything else.
+struct statusRecorder {
+    http.ResponseWriter
+    status: int
+}
+
+func *statusRecorder.WriteHeader(code: int) {
+    self.status = code
+    self.ResponseWriter.WriteHeader(code)
+}
+
+struct Counter {
+    sync.Mutex
+    n: int
+}
+
+func *Counter.inc() {
+    self.Lock()
+    defer self.Unlock()
+    self.n++
+}
+
+struct Timestamps {
+    CreatedAt: string
+    UpdatedAt: string?
+}
+
+struct Base {
+    ID: int64
+}
+
+func Base.Describe(): string = "base ${self.ID}"
+func Base.Kind(): string = "base"
+
+struct User {
+    Base
+    Timestamps
+    Name: string
+}
+
+// A method of the outer type hides the promoted one.
+func User.Kind(): string = "user"
+
+// A tag on the embedding line nests the embedded struct under that key.
+struct Audit {
+    Timestamps `json:"ts"`
+    Action: string
+}
+
+struct Page[T] {
+    Items: []T
+}
+
+func Page[T].Count(): int = len(self.Items)
+
+struct Users {
+    Page[User]
+    Total: int
+}
+
+interface Store {
+    Get(id: int64): string throws
+    Delete(id: int64) throws
+}
+
+// A partial fake: Store stays null, so only Get may be called.
+struct fakeStore {
+    Store?
+    calls: int
+}
+
+func *fakeStore.Get(id: int64): string throws {
+    self.calls++
+    return "item ${id}"
+}
+
+func fetch(s: Store): string throws = s.Get(1)?
+
+func main() throws {
+    rec := httptest.NewRecorder()
+    w := &statusRecorder(ResponseWriter = rec)
+    w.Header().Set("X-Trace", "1")
+    w.WriteHeader(http.StatusNotFound)
+    rw: http.ResponseWriter = w
+    fmt.Println(w.status, rec.Code, rec.Header().Get("X-Trace"), rw != null)
+
+    c := &Counter()
+    c.inc()
+    c.inc()
+    fmt.Println(c.n)
+
+    u := User(Base = Base(ID = 7), Name = "ada")
+    u.CreatedAt = "today"
+    fmt.Println(u.ID, u.Describe(), u.Kind(), u.Base.Kind(), u.UpdatedAt ?: "-")
+    data := json.Marshal(u)?
+    fmt.Println(string(data))
+    a := Audit(Action = "login")
+    a.CreatedAt = "now"
+    nested := json.Marshal(a)?
+    fmt.Println(string(nested))
+
+    us := Users(Page = Page(Items = [u, User(Name = "bo")]), Total = 2)
+    fmt.Println(us.Count(), us.Items[1].Name, us.Total)
+
+    f := &fakeStore()
+    fmt.Println(fetch(f)?, f.calls)
+    s: Store = f
+    s.Delete(1) catch (err) { fmt.Println("not reached", err) }
+}
+
+// Output:
+// 404 404 1 true
+// 2
+// 7 base 7 user base -
+// {"id":7,"createdAt":"today","name":"ada"}
+// {"ts":{"createdAt":"now"},"action":"login"}
+// 2 bo 2
+// item 1 1
+// Exit: 2

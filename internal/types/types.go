@@ -182,6 +182,9 @@ const (
 	StructDecl DeclKind = iota
 	InterfaceDecl
 	EnumDecl // a named Int with one constant per entry (ADR 0025)
+	// DefinedDecl is type Name Underlying, a Go defined type over a basic,
+	// collection, function, channel, or pointer type (ADR 0037).
+	DefinedDecl
 )
 
 // TypeDecl describes a Lyth-declared named type.
@@ -201,6 +204,19 @@ type TypeDecl struct {
 	Shadow     *gotypes.Named // the shadow go/types object for Go-level questions
 
 	Entries []*EnumEntry // enum entries, in declaration order
+	// Backing is the type of a string-backed enum (ADR 0035), nil for a
+	// plain enum, whose values are ints. HasEmpty says one of its entries
+	// is "", which gives the enum a zero value.
+	Backing  Type
+	HasEmpty bool
+	// TextMethods says the compiler generates the enum's MarshalText and
+	// UnmarshalText (only UnmarshalText for a string-backed enum), which it
+	// does unless the enum declares them itself.
+	TextMethods bool
+
+	// Underlying is the declared underlying type of a DefinedDecl, in terms
+	// of its own type parameters.
+	Underlying Type
 
 	// Sealed interfaces: only types of the same package that declare the
 	// interface implement it, through the unexported Marker method; Members
@@ -216,8 +232,11 @@ type EnumEntry struct {
 	Name   string
 	GoName string
 	Value  int
-	Decl   *TypeDecl
-	Span   source.Span
+	// Wire is the entry's text on the wire: its name under the automatic
+	// json key rule for a plain enum, its value for a string-backed one.
+	Wire string
+	Decl *TypeDecl
+	Span source.Span
 }
 
 // LookupEntry returns the enum entry named name, or nil.
@@ -226,6 +245,26 @@ func (d *TypeDecl) LookupEntry(name string) *EnumEntry {
 		if e.Name == name {
 			return e
 		}
+	}
+	return nil
+}
+
+// DefinedUnder returns the underlying type of a Lyth defined type (ADR
+// 0037), following defined types declared over other defined types, or nil
+// for any other type. For a generic defined type the result is in terms of
+// the declaration's type parameters.
+func DefinedUnder(t Type) Type {
+	n, ok := Base(t).(*Named)
+	for i := 0; ok && n.Decl != nil && n.Decl.Kind == DefinedDecl && n.Decl.Underlying != nil && i < 100; i++ {
+		u := n.Decl.Underlying
+		next, more := Base(u).(*Named)
+		if !more || next.Decl == nil || next.Decl.Kind != DefinedDecl {
+			if more && next.Go != nil {
+				return Lift(next.Go.Underlying())
+			}
+			return u
+		}
+		n = next
 	}
 	return nil
 }
@@ -252,8 +291,11 @@ type Field struct {
 	GoName  string
 	Type    Type
 	Private bool
-	Tag     string // final Go tag (including automatic json key)
-	Span    source.Span
+	// Embedded is a field declared by its type alone (ADR 0043); its name
+	// is the type's name.
+	Embedded bool
+	Tag      string // final Go tag (including automatic json key)
+	Span     source.Span
 }
 
 // Method is a method of a Lyth type or interface.

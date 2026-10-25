@@ -15,12 +15,13 @@ func TestNewTodoValidation(t: *testing.T) {
         NewTodo(Title = strings.Repeat("x", MaxTitle + 1)),
     ]
     for input in cases {
-        got := input.Normalize() catch (err) {
-            if err !is *ValidationError {
-                t.Errorf("normalize(%+v): error %v, want *ValidationError", input, err)
-            } else if err.Fields["title"] == "" {
-                t.Errorf("normalize(%+v): fields %v, want a title problem", input, err.Fields)
+        got := input.Normalize() catch (e: *ValidationError) {
+            if e.Fields["title"] == "" {
+                t.Errorf("normalize(%+v): fields %v, want a title problem", input, e.Fields)
             }
+            continue
+        } catch (err) {
+            t.Errorf("normalize(%+v): error %v, want *ValidationError", input, err)
             continue
         }
         t.Errorf("normalize(%+v) = %+v, want an error", input, got)

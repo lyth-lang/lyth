@@ -9,7 +9,7 @@ struct NotFound {
     Key: string
 }
 
-func *NotFound.Error(): string = "not found: ${Key}"
+func *NotFound.Error(): string = "not found: ${self.Key}"
 
 func missing(key: string): *NotFound? = if key == "" { &NotFound(Key = "empty") } else { null }
 

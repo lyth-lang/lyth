@@ -8,13 +8,13 @@ struct Temp {
 }
 
 // String makes Temp a fmt.Stringer.
-func Temp.String(): string = "${Celsius}C"
+func Temp.String(): string = "${self.Celsius}C"
 
 struct NotFound {
     Key: string
 }
 
-func *NotFound.Error(): string = "not found: ${Key}"
+func *NotFound.Error(): string = "not found: ${self.Key}"
 
 func find(key: string): int throws {
     if key == "answer" {
@@ -32,7 +32,7 @@ struct Square {
     Side: float64
 }
 
-func Square.Area(): float64 = Side * Side
+func Square.Area(): float64 = self.Side * self.Side
 func Square.Name(): string = "square"
 
 struct Rect {
@@ -40,19 +40,19 @@ struct Rect {
     H: float64
 }
 
-func Rect.Area(): float64 = W * H
+func Rect.Area(): float64 = self.W * self.H
 func Rect.Name(): string = "rect"
 
 struct byArea {
     Shapes: []Shape
 }
 
-func byArea.Len(): int = len(Shapes)
-func byArea.Less(i: int, j: int): bool = Shapes[i].Area() < Shapes[j].Area()
+func byArea.Len(): int = len(self.Shapes)
+func byArea.Less(i: int, j: int): bool = self.Shapes[i].Area() < self.Shapes[j].Area()
 func byArea.Swap(i: int, j: int) {
-    tmp := Shapes[i]
-    Shapes[i] = Shapes[j]
-    Shapes[j] = tmp
+    tmp := self.Shapes[i]
+    self.Shapes[i] = self.Shapes[j]
+    self.Shapes[j] = tmp
 }
 
 func main() {

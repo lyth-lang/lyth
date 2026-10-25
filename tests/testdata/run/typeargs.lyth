@@ -30,7 +30,7 @@ struct NotFound {
     Key: string
 }
 
-func *NotFound.Error(): string = "no ${Key}"
+func *NotFound.Error(): string = "no ${self.Key}"
 
 func main() {
     numbers := [3, 8, 2]

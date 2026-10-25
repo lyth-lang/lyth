@@ -8,7 +8,7 @@ struct Sq {
     S: int
 }
 
-func *Sq.Area(): int = S * S
+func *Sq.Area(): int = self.S * self.S
 
 func isSquare(s: Shape): bool = s is Sq // ERROR E0209 "Area has a pointer receiver, so *Sq implements Shape"
 

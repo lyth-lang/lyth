@@ -1,0 +1,37 @@
+// String-backed enums and the generated text methods (ADR 0035).
+enum Plan: string {
+    Free = "free",
+    Pro = "pro",
+    Team = "pro", // ERROR E0102 "entries Pro and Team of enum Plan have the same value"
+    Gold, // ERROR E0216 "entry Gold of the string-backed enum Plan needs a value"
+}
+
+enum Code: int { A = "a" } // ERROR E0216 "an enum is backed only by string, not int"
+enum Grade: string { A = 1 } // ERROR E0216 "the value of Grade.A must be a string literal"
+enum Color { Red = "red", Green } // ERROR E0601 "entries of a plain enum have no values"
+enum Pair { Id, ID } // ERROR E0102 "entries Id and ID of enum Pair have the same wire name"
+
+enum Half { A, B }
+
+func Half.MarshalText(): []byte throws = []byte("x") // ERROR E0216 "enum Half declares MarshalText but not UnmarshalText"
+
+// Declaring both replaces the generated pair.
+enum Both { A, B }
+
+func Both.MarshalText(): []byte throws = []byte("x")
+func *Both.UnmarshalText(text: []byte) throws {}
+
+func Both.String(): string = "x" // ERROR E0102 "enum Both already has a String method"
+
+// A key that is not comparable is still reported in a struct field, where
+// the package's types are not all defined yet.
+struct Bag {
+    Items: []int
+}
+
+struct Index {
+    ByStatus: map[Half]int
+    ByBag: map[Bag]int // ERROR E0213 "Bag cannot be a map key: it is not comparable"
+}
+
+func main() {}

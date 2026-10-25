@@ -31,6 +31,34 @@ func (s Status) String() string {
 	return "Status(" + strconv.Itoa(int(s)) + ")"
 }
 
+// MarshalText returns the wire name of the Status entry.
+func (s Status) MarshalText() ([]byte, error) {
+	switch s {
+	case StatusQueued:
+		return []byte("queued"), nil
+	case StatusRunning:
+		return []byte("running"), nil
+	case StatusDone:
+		return []byte("done"), nil
+	}
+	return nil, fmt.Errorf("invalid Status %d", int(s))
+}
+
+// UnmarshalText sets s to the Status entry with the given wire name.
+func (s *Status) UnmarshalText(text []byte) error {
+	switch string(text) {
+	case "queued":
+		*s = StatusQueued
+	case "running":
+		*s = StatusRunning
+	case "done":
+		*s = StatusDone
+	default:
+		return fmt.Errorf("invalid Status %q", text)
+	}
+	return nil
+}
+
 //line enums.lyth:4
 func (s Status) active() bool {
 	switch s {

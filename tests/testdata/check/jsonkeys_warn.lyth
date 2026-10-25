@@ -1,0 +1,31 @@
+// An automatic json key that splits a run of capitals after its first
+// letter needs a tag (W0008, ADR 0036); a tag silences it. A key the rule
+// changed (IDs was iDs) gets a migration warning (W0009).
+struct Resource {
+    ETag: string // WARN W0008 "the automatic json key of ETag is"
+    OAuthToken: string // WARN W0008 "which splits OA after its first letter"
+    XCoord: int `json:"xCoord"`
+    IDs: []int // WARN W0009 "the json key of IDs is now"
+    IPv4: string // WARN W0009 "it was"
+    UserIDs: []int
+}
+
+// A tag without a name was used as written before ADR 0036, so Go's key was
+// the field name itself.
+struct Page {
+    Count: int `json:",string"` // WARN W0009 "the json key of Count is now"
+    IDs: []int `json:",omitempty"` // WARN W0009 "write the tag `json:"IDs,omitempty"`"
+    Name: string `json:",omitempty"` // WARN W0009 "the json key of Name is now"
+}
+
+// Keys that coincide make encoding/json leave both fields out.
+struct Twice {
+    IDs: []int // WARN W0009 "the json key of IDs"
+    Ids: []int // WARN W0008 "IDs and Ids have the same json key"
+    Tagged: int `json:"ids2"`
+    Other: int `json:"tagged"`
+}
+
+func main() {
+    println(Resource().IPv4)
+}

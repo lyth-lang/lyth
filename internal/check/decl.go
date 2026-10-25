@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/lyth-lang/lyth/internal/diag"
 	"github.com/lyth-lang/lyth/internal/source"
@@ -38,7 +39,7 @@ func (c *Checker) withScope(s *Scope, fn func()) {
 // ---------------------------------------------------------------------------
 // Type declarations
 
-// aliasType resolves a typealias on first use.
+// aliasType resolves a type alias (type Name = Type) on first use.
 func (c *Checker) aliasType(ts *TypeSym) types.Type {
 	if ts.Type != nil {
 		return ts.Type
@@ -76,6 +77,8 @@ func (c *Checker) resolveTypeDecls() {
 			tps, span = d.TypeParams, d.S
 		case *syntax.InterfaceDecl:
 			tps, span = d.TypeParams, d.S
+		case *syntax.TypeDefDecl:
+			tps, span = d.TypeParams, d.S
 		}
 		if len(tps) > 0 && ts.Decl != nil {
 			ts.tscope = c.typeParamScope(tps, ts.Decl.TypeParams, c.scopeFor(span))
@@ -100,6 +103,8 @@ func (c *Checker) resolveTypeDecls() {
 			c.withScope(scopeOf(d.S), func() { c.resolveInterface(ts.Decl, d) })
 		case *syntax.EnumDecl:
 			c.resolveEnum(ts.Decl, d)
+		case *syntax.TypeDefDecl:
+			c.withScope(scopeOf(d.S), func() { c.resolveDefined(ts.Decl, d) })
 		}
 	}
 	c.checkEmbedCycles()
@@ -111,7 +116,7 @@ func (c *Checker) resolveTypeDecls() {
 			fields := make([]*gotypes.Var, len(decl.Fields))
 			tags := make([]string, len(decl.Fields))
 			for i, f := range decl.Fields {
-				fields[i] = gotypes.NewField(token.NoPos, c.shadow, f.GoName, types.Lower(f.Type), false)
+				fields[i] = gotypes.NewField(token.NoPos, c.shadow, f.GoName, types.Lower(f.Type), f.Embedded)
 				tags[i] = f.Tag
 			}
 			decl.Shadow.SetUnderlying(gotypes.NewStruct(fields, tags))
@@ -134,11 +139,23 @@ func (c *Checker) resolveTypeDecls() {
 			decl.Shadow.SetUnderlying(iface)
 			ifaces = append(ifaces, iface)
 		case types.EnumDecl:
-			decl.Shadow.SetUnderlying(gotypes.Typ[gotypes.Int])
+			if decl.Backing != nil {
+				decl.Shadow.SetUnderlying(gotypes.Typ[gotypes.String])
+			} else {
+				decl.Shadow.SetUnderlying(gotypes.Typ[gotypes.Int])
+			}
 			recv := gotypes.NewVar(token.NoPos, c.shadow, "", decl.Shadow)
 			for _, m := range decl.Methods {
 				decl.Shadow.AddMethod(gotypes.NewFunc(token.NoPos, c.shadow, m.GoName, types.LowerSignature(m.Sig, recv)))
 			}
+		}
+	}
+	// Defined types last: type A B takes B's underlying type, which the loop
+	// above has set for structs and enums, and which a defined B gets here.
+	visiting := map[*types.TypeDecl]bool{}
+	for _, ts := range c.pkg.Types {
+		if ts.Decl.Kind == types.DefinedDecl {
+			c.setDefinedUnderlying(ts.Decl, visiting)
 		}
 	}
 	// An interface's method set includes its embedded interfaces', which may
@@ -189,27 +206,190 @@ func (c *Checker) undefined(t types.Type) bool {
 }
 
 // resolveEnum records the entries of an enum and its generated String
-// method. Entry i is the Go constant <Type><Entry> with value i.
+// method. Entry i of a plain enum is the Go constant <Type><Entry> with value
+// i; an entry of a string-backed enum has the string written for it (ADR
+// 0035). Each entry has one wire text, so no two entries may share it.
 func (c *Checker) resolveEnum(decl *types.TypeDecl, d *syntax.EnumDecl) {
 	if len(d.Entries) == 0 {
 		c.errorf(diag.EInvalidUse, d.Name.S, "enum %s has no entries", d.Name.Name)
 	}
+	if d.Backing != nil {
+		if t := c.resolveType(d.Backing); t != types.Invalid {
+			if !types.Identical(t, types.String) {
+				c.errorf(diag.EInvalidUse, d.Backing.Span(), "an enum is backed only by string, not %s", t).
+					WithHint("for numeric codes, declare a defined type and constants: type Code int")
+			}
+			decl.Backing = types.String
+		}
+	}
+	wires := map[string]*types.EnumEntry{}
 	for i, id := range d.Entries {
 		if old := decl.LookupEntry(id.Name); old != nil {
 			c.errorf(diag.EDuplicate, id.S, "enum %s already has an entry %s", decl.Name, id.Name).WithRelated(old.Span, "previous entry")
 			continue
 		}
 		e := &types.EnumEntry{Name: id.Name, GoName: decl.GoName + exportedName(id.Name), Value: i, Decl: decl, Span: id.S}
+		var value syntax.Expr
+		if i < len(d.Values) {
+			value = d.Values[i]
+		}
+		valid := true
+		switch {
+		case d.Backing == nil:
+			if value != nil {
+				c.errorf(diag.EUnsupported, value.Span(), "entries of a plain enum have no values").
+					WithHint("declare a string-backed enum to give entries values: enum %s: string { %s = \"...\" }", decl.Name, id.Name)
+			}
+			e.Wire = JSONName(id.Name)
+		case value == nil:
+			c.errorf(diag.EInvalidUse, id.S, "entry %s of the string-backed enum %s needs a value", id.Name, decl.Name).
+				WithHint("write %s = \"%s\"", id.Name, JSONName(id.Name))
+			valid = false
+		default:
+			lit, ok := value.(*syntax.BasicLit)
+			if !ok || lit.Kind != syntax.STRING {
+				c.errorf(diag.EInvalidUse, value.Span(), "the value of %s.%s must be a string literal", decl.Name, id.Name)
+				valid = false
+				break
+			}
+			e.Wire = lit.Value
+		}
+		if old := wires[e.Wire]; valid && old != nil {
+			if d.Backing != nil {
+				c.errorf(diag.EDuplicate, id.S, "entries %s and %s of enum %s have the same value %q", old.Name, id.Name, decl.Name, e.Wire).WithRelated(old.Span, "%s declared here", old.Name)
+			} else {
+				c.errorf(diag.EDuplicate, id.S, "entries %s and %s of enum %s have the same wire name %q", old.Name, id.Name, decl.Name, e.Wire).
+					WithRelated(old.Span, "%s declared here", old.Name).
+					WithHint("rename one entry, or declare MarshalText and UnmarshalText for %s", decl.Name)
+			}
+		} else if valid {
+			wires[e.Wire] = e
+			decl.HasEmpty = decl.HasEmpty || d.Backing != nil && e.Wire == ""
+		}
 		c.claimGoName(e.GoName, id.S, decl.Name+"."+id.Name)
 		decl.Entries = append(decl.Entries, e)
 	}
 	decl.Methods = append(decl.Methods, &types.Method{Name: "String", GoName: "String", Sig: &types.Signature{Results: []types.Type{types.String}}, Pub: true, Span: d.Name.S})
 }
 
+// finishEnums decides, once every method is declared, whether the compiler
+// generates an enum's MarshalText and UnmarshalText (ADR 0035): it does
+// unless the enum declares them itself. A plain enum declares both or
+// neither, since the generated half would not read what the other writes.
+func (c *Checker) finishEnums() {
+	for _, ts := range c.pkg.Types {
+		decl := ts.Decl
+		if decl.Kind != types.EnumDecl {
+			continue
+		}
+		marshal, unmarshal := decl.LookupMethod("MarshalText"), decl.LookupMethod("UnmarshalText")
+		if decl.Backing == nil && (marshal == nil) != (unmarshal == nil) {
+			have, missing := marshal, "UnmarshalText"
+			if have == nil {
+				have, missing = unmarshal, "MarshalText"
+			}
+			c.errorf(diag.EInvalidUse, have.Span, "enum %s declares %s but not %s", decl.Name, have.Name, missing).
+				WithNote("Lyth generates both methods for an enum that declares neither; one declared alone would not read what the generated other writes")
+			continue
+		}
+		if unmarshal != nil || marshal != nil && decl.Backing == nil {
+			continue
+		}
+		decl.TextMethods = true
+		bytes := &types.Slice{Elem: types.Byte}
+		recv := gotypes.NewVar(token.NoPos, c.shadow, "", decl.Shadow)
+		ptr := gotypes.NewVar(token.NoPos, c.shadow, "", gotypes.NewPointer(decl.Shadow))
+		var gen []*types.Method
+		if decl.Backing == nil {
+			gen = append(gen, &types.Method{Name: "MarshalText", GoName: "MarshalText", Sig: &types.Signature{Results: []types.Type{bytes}, Throws: true}, Pub: true, Span: decl.Span})
+		}
+		gen = append(gen, &types.Method{Name: "UnmarshalText", GoName: "UnmarshalText", Sig: &types.Signature{Params: []types.Type{bytes}, ParamNames: []string{"text"}, Throws: true}, PtrRecv: true, Pub: true, Span: decl.Span})
+		for _, m := range gen {
+			r := recv
+			if m.PtrRecv {
+				r = ptr
+			}
+			decl.Methods = append(decl.Methods, m)
+			decl.Shadow.AddMethod(gotypes.NewFunc(token.NoPos, c.shadow, m.GoName, types.LowerSignature(m.Sig, r)))
+		}
+	}
+}
+
+// entryConst is the constant value of an enum entry.
+func entryConst(e *types.EnumEntry) constant.Value {
+	if e.Decl.Backing != nil {
+		return constant.MakeString(e.Wire)
+	}
+	return constant.MakeInt64(int64(e.Value))
+}
+
+// resolveDefined resolves the underlying type of type Name Underlying (ADR
+// 0037). Structs and interfaces have their own declarations, which keep one
+// spelling for each and give them Lyth's field syntax.
+func (c *Checker) resolveDefined(decl *types.TypeDecl, d *syntax.TypeDefDecl) {
+	t := c.resolveType(d.Type)
+	switch {
+	case t == types.Invalid:
+	case t == types.Unit:
+		c.errorf(diag.EInvalidUse, d.Type.Span(), "unit cannot be the underlying type of %s", decl.Name)
+		t = types.Invalid
+	case types.IsNullable(t):
+		c.errorf(diag.EInvalidUse, d.Type.Span(), "a defined type cannot be nullable; declare %s over %s and write %s? where a value may be absent", decl.Name, types.Base(t), decl.Name)
+		t = types.Invalid
+	case types.IsInterface(t):
+		c.errorf(diag.EUnsupported, d.Type.Span(), "a defined type cannot be an interface; declare interface %s { ... }, or an alias: type %s = %s", decl.Name, decl.Name, t)
+		t = types.Invalid
+	case types.IsStruct(t):
+		c.errorf(diag.EUnsupported, d.Type.Span(), "a defined type cannot be a struct; declare struct %s { ... }, or an alias: type %s = %s", decl.Name, decl.Name, t)
+		t = types.Invalid
+	case types.EnumOf(t) != nil:
+		c.errorf(diag.EUnsupported, d.Type.Span(), "a defined type cannot be an enum; declare enum %s { ... }, or an alias: type %s = %s", decl.Name, decl.Name, t)
+		t = types.Invalid
+	}
+	decl.Underlying = t
+}
+
+// setDefinedUnderlying sets the shadow underlying type of a defined type,
+// first that of a defined type it is declared over.
+func (c *Checker) setDefinedUnderlying(decl *types.TypeDecl, visiting map[*types.TypeDecl]bool) {
+	if decl.Shadow.Underlying() != nil {
+		return
+	}
+	if visiting[decl] || decl.Underlying == nil || decl.Underlying == types.Invalid {
+		if visiting[decl] {
+			c.errorf(diag.EInvalidUse, decl.Span, "invalid recursive type %s: it is defined in terms of itself", decl.Name)
+		}
+		decl.Underlying = types.Invalid
+		decl.Shadow.SetUnderlying(gotypes.Typ[gotypes.Invalid])
+		return
+	}
+	visiting[decl] = true
+	if n, ok := types.Base(decl.Underlying).(*types.Named); ok && n.Decl != nil && n.Decl.Kind == types.DefinedDecl {
+		c.setDefinedUnderlying(n.Decl, visiting)
+		if n.Decl.Underlying == types.Invalid {
+			decl.Underlying = types.Invalid
+		}
+	}
+	delete(visiting, decl)
+	if decl.Shadow.Underlying() != nil {
+		return // set through a cycle
+	}
+	if decl.Underlying == types.Invalid {
+		decl.Shadow.SetUnderlying(gotypes.Typ[gotypes.Invalid])
+		return
+	}
+	decl.Shadow.SetUnderlying(types.Lower(decl.Underlying).Underlying())
+}
+
 func (c *Checker) resolveStruct(decl *types.TypeDecl, d *syntax.StructDecl) {
 	seen := map[string]source.Span{}
 	goSeen := map[string]source.Span{}
 	for _, sf := range d.Fields {
+		if sf.Embedded && sf.Name == nil {
+			c.errorf(diag.EInvalidUse, sf.Type.Span(), "only a type name can be embedded, as in Go").
+				WithHint("give the field a name: name: Type")
+			continue
+		}
 		if sf.Name == nil {
 			continue
 		}
@@ -230,8 +410,11 @@ func (c *Checker) resolveStruct(decl *types.TypeDecl, d *syntax.StructDecl) {
 			c.errorf(diag.EInvalidUse, sf.Type.Span(), "unit cannot be used as a field type")
 			t = types.Invalid
 		}
-		f := &types.Field{Name: name, Type: t, Private: !Exported(name), Span: sf.Name.S}
+		f := &types.Field{Name: name, Type: t, Private: !Exported(name), Span: sf.Name.S, Embedded: sf.Embedded}
 		f.GoName = GoName(name)
+		if sf.Embedded && !c.embeddable(t, sf.Type.Span()) {
+			t, f.Type = types.Invalid, types.Invalid
+		}
 		if old, ok := goSeen[f.GoName]; ok {
 			c.errorf(diag.EDuplicate, sf.Name.S, "field %s would be named %s in Go, which another field already uses", name, f.GoName).
 				WithRelated(old, "conflicting field")
@@ -241,10 +424,78 @@ func (c *Checker) resolveStruct(decl *types.TypeDecl, d *syntax.StructDecl) {
 		f.Tag = c.fieldTag(sf, f)
 		decl.Fields = append(decl.Fields, f)
 	}
+	c.warnDuplicateKeys(decl)
 }
 
-// fieldTag computes the Go struct tag, adding the automatic json key for
-// exported fields whose tag does not mention json (ADR 0013, ADR 0022).
+// warnDuplicateKeys reports two fields of a struct with the same json key
+// (IDs and Ids are both ids): encoding/json then drops both, silently, as
+// go vet's structtag check says (W0008).
+func (c *Checker) warnDuplicateKeys(decl *types.TypeDecl) {
+	keys := map[string]*types.Field{}
+	for _, f := range decl.Fields {
+		if f.Private || f.Embedded {
+			continue
+		}
+		value, ok := reflect.StructTag(f.Tag).Lookup("json")
+		key, _, _ := strings.Cut(value, ",")
+		if !ok || key == "" || value == "-" {
+			continue
+		}
+		if old := keys[key]; old != nil {
+			c.warnf(diag.WJSONKey, f.Span, "%s and %s have the same json key %q, so encoding/json leaves both out", old.Name, f.Name, key).
+				WithRelated(old.Span, "%s declared here", old.Name).
+				WithHint("give one of them another key with a tag, such as `json:\"%s2\"`", key)
+			continue
+		}
+		keys[key] = f
+	}
+}
+
+// embeddable reports whether t may be embedded in a struct, as Go allows: a
+// type name, or a pointer to a type name that is not a pointer or an
+// interface, possibly nullable (ADR 0043).
+func (c *Checker) embeddable(t types.Type, span source.Span) bool {
+	if t == types.Invalid {
+		return true
+	}
+	b := types.Base(t)
+	if p, ok := b.(*types.Pointer); ok {
+		e := types.Base(p.Elem)
+		if _, named := e.(*types.Named); !named || types.IsInterface(e) {
+			c.errorf(diag.EInvalidUse, span, "%s cannot be embedded: an embedded pointer points to a type name that is not an interface", t)
+			return false
+		}
+		// The Lyth types of this package are still being defined: ask the
+		// Lyth declaration, and go/types only for a Go type.
+		n := e.(*types.Named)
+		var isPtr bool
+		if n.Decl != nil {
+			_, isPtr = types.Base(types.DefinedUnder(n)).(*types.Pointer)
+		} else if n.Go != nil {
+			_, isPtr = n.Go.Underlying().(*gotypes.Pointer)
+		}
+		if isPtr {
+			c.errorf(diag.EInvalidUse, span, "%s cannot be embedded: an embedded pointer points to a type name that is not a pointer", t)
+			return false
+		}
+		return true
+	}
+	switch b.(type) {
+	case *types.Named:
+		return true
+	case *types.TypeParam:
+		c.errorf(diag.EInvalidUse, span, "a type parameter cannot be embedded, as in Go")
+		return false
+	}
+	c.errorf(diag.EInvalidUse, span, "only a type name can be embedded, as in Go, not %s", t).
+		WithHint("give the field a name: name: %s", t)
+	return false
+}
+
+// fieldTag computes the Go struct tag of an exported field (ADR 0013, ADR
+// 0022, ADR 0036): a tag without a json key gets the automatic key, with
+// omitzero for a nullable field, and a json key written without a name
+// (json:",omitempty") gets the automatic name.
 func (c *Checker) fieldTag(sf *syntax.Field, f *types.Field) string {
 	tag := sf.Tag
 	if sf.HasTag {
@@ -252,24 +503,59 @@ func (c *Checker) fieldTag(sf *syntax.Field, f *types.Field) string {
 			c.warnf(diag.WUnnecessary, sf.TagSpan, "struct tag is not in the conventional key:\"value\" format")
 		}
 	}
-	if f.Private {
+	if f.Private || f.Embedded {
+		// An embedded struct without a tag is flattened into its outer
+		// struct's JSON, as in Go (ADR 0043).
 		return tag
 	}
-	if _, ok := reflect.StructTag(tag).Lookup("json"); ok {
+	if value, ok := reflect.StructTag(tag).Lookup("json"); ok {
+		if name, opts, _ := strings.Cut(value, ","); name == "" && value != "" {
+			// json:",omitempty" keeps the automatic name, which Go would
+			// replace with the field name (NextCursor next to items). A T?
+			// field also keeps omitzero unless the tag says how to omit it.
+			c.warnSplitKey(sf, f)
+			// Before ADR 0036 such a tag was used as written, so Go's key
+			// was the field name.
+			c.warnKeyChange(sf, f, f.GoName, value)
+			key := JSONName(f.Name) + value
+			if types.MayBeNull(f.Type) && !types.IsPlatform(f.Type) && !slices.ContainsFunc(strings.Split(opts, ","), func(o string) bool { return o == "omitempty" || o == "omitzero" }) {
+				key += ",omitzero"
+			}
+			return strings.Replace(tag, `json:"`+value+`"`, `json:"`+key+`"`, 1)
+		}
 		return tag
 	}
-	auto := "json:" + strconv.Quote(JSONName(f.Name))
+	c.warnSplitKey(sf, f)
+	c.warnKeyChange(sf, f, jsonNameBefore0036(f.Name), "")
+	key := JSONName(f.Name)
+	if types.MayBeNull(f.Type) && !types.IsPlatform(f.Type) {
+		key += ",omitzero" // T? may be absent: left out when null, in json v1 and v2
+	}
+	auto := "json:" + strconv.Quote(key)
 	if tag == "" {
 		return auto
 	}
 	return auto + " " + tag
 }
 
-// JSONName is the automatic json key of an exported field: the name with its
-// leading uppercase run lowered, keeping the last letter of an initialism
-// that starts the next word (Name -> name, ID -> id, UserID -> userID,
-// HTTPServer -> httpServer).
-func JSONName(name string) string {
+// warnKeyChange reports a field whose json key differs from the key it had
+// before ADR 0036 (old): IDs was iDs, and a tag without a name, such as
+// json:",string", used the field name itself. The wire format changed under
+// the field. It is a migration notice for the releases right after the
+// change (W0009); opts are the tag's options, kept in the hint.
+func (c *Checker) warnKeyChange(sf *syntax.Field, f *types.Field, old, opts string) {
+	now := JSONName(f.Name)
+	if old == now {
+		return
+	}
+	c.warnf(diag.WJSONKeyChange, sf.Name.S, "the json key of %s is now %q; it was %q before Lyth 0.4.0", f.Name, now, old).
+		WithHint("to keep the old key on the wire, write the tag `json:\"%s%s\"`", old, opts)
+}
+
+// jsonNameBefore0036 is JSONName before ADR 0036, kept unchanged for
+// warnKeyChange: the leading uppercase run lowered, keeping its last letter
+// when a lowercase letter follows (IDs -> iDs).
+func jsonNameBefore0036(name string) string {
 	rs := []rune(name)
 	n := 0
 	for n < len(rs) && unicode.IsUpper(rs[n]) {
@@ -285,6 +571,99 @@ func JSONName(name string) string {
 		rs[i] = unicode.ToLower(rs[i])
 	}
 	return string(rs)
+}
+
+// warnSplitKey reports a field whose automatic json key splits its leading
+// run of capitals after one letter (ETag -> eTag, OAuthToken -> oAuthToken):
+// the name may be one mixed-case word or two, so the key needs a tag (W0008).
+func (c *Checker) warnSplitKey(sf *syntax.Field, f *types.Field) {
+	if !JSONKeySplitsRun(f.Name) {
+		return
+	}
+	key := JSONName(f.Name)
+	run := leadingRun(f.Name)
+	// Read as one word, the run and the lowercase letters after it: ETag ->
+	// etag, OAuthToken -> oauthToken.
+	end := len(run)
+	for end < len(f.Name) {
+		r, size := utf8.DecodeRuneInString(f.Name[end:])
+		if !unicode.IsLower(r) {
+			break
+		}
+		end += size
+	}
+	oneWord := strings.ToLower(f.Name[:end]) + f.Name[end:]
+	c.warnf(diag.WJSONKey, sf.Name.S, "the automatic json key of %s is %q, which splits %s after its first letter", f.Name, key, run).
+		WithHint("if %s is one word, write the tag `json:\"%s\"`; to keep %q, write `json:\"%s\"`", f.Name[:end], oneWord, key, key)
+}
+
+// commonInitialisms is Go's canonical list of initialisms (golint's
+// commonInitialisms, the list Go style checkers enforce). JSONName uses it
+// only to keep a listed run whole before a lowercase letter (IPv4 -> ipv4).
+var commonInitialisms = map[string]bool{
+	"ACL": true, "API": true, "ASCII": true, "CPU": true, "CSS": true, "DNS": true, "EOF": true,
+	"GUID": true, "HTML": true, "HTTP": true, "HTTPS": true, "ID": true, "IP": true, "JSON": true,
+	"LHS": true, "QPS": true, "RAM": true, "RHS": true, "RPC": true, "SLA": true, "SMTP": true,
+	"SQL": true, "SSH": true, "TCP": true, "TLS": true, "TTL": true, "UDP": true, "UI": true,
+	"UID": true, "UUID": true, "URI": true, "URL": true, "UTF8": true, "VM": true, "XML": true,
+	"XMPP": true, "XSRF": true, "XSS": true,
+}
+
+// leadingRun returns the leading run of uppercase letters of name.
+func leadingRun(name string) string {
+	n := 0
+	for n < len(name) {
+		r, size := utf8.DecodeRuneInString(name[n:])
+		if !unicode.IsUpper(r) {
+			break
+		}
+		n += size
+	}
+	return name[:n]
+}
+
+// jsonFirstWord returns the length in bytes of the first word of an
+// exported name, the part the automatic json key lowers (ADR 0036).
+func jsonFirstWord(name string) int {
+	r := leadingRun(name)
+	n := len(r)
+	letters := utf8.RuneCountInString(r)
+	next, nextSize := utf8.DecodeRuneInString(name[n:])
+	after, _ := utf8.DecodeRuneInString(name[min(n+nextSize, len(name)):])
+	switch {
+	case n == 0:
+		_, size := utf8.DecodeRuneInString(name)
+		return size
+	case n == len(name) || unicode.IsDigit(next):
+		return n // ID, URL, UTF8Name
+	case next == 's' && letters >= 2 && (n+1 == len(name) || unicode.IsDigit(after) || unicode.IsUpper(after)):
+		return n + 1 // IDs, URLs: the plural of an initialism
+	case letters >= 2:
+		_, lastSize := utf8.DecodeLastRuneInString(r)
+		if commonInitialisms[r] && !commonInitialisms[r[:n-lastSize]] {
+			return n // IPv4: a listed initialism keeps its letters
+		}
+		return n - lastSize // HTTPServer: the run's last letter starts a word
+	}
+	return n // Name
+}
+
+// JSONName is the automatic json key of an exported field, and the wire name
+// of an enum entry: the name with its first word lowered (ADR 0036). ID ->
+// id, UserID -> userID, IDs -> ids, HTTPServer -> httpServer, IPv4 -> ipv4,
+// ETag -> eTag (an exception, see JSONKeySplitsRun).
+func JSONName(name string) string {
+	n := jsonFirstWord(name)
+	return strings.ToLower(name[:n]) + name[n:]
+}
+
+// JSONKeySplitsRun reports whether the automatic key of name splits its
+// leading run of capitals after one letter, as in ETag, OAuthToken, and
+// XCoord: one mixed-case word or two, which a tag must say (W0008).
+func JSONKeySplitsRun(name string) bool {
+	r := leadingRun(name)
+	_, first := utf8.DecodeRuneInString(r)
+	return utf8.RuneCountInString(r) == 2 && jsonFirstWord(name) == first
 }
 
 // validTag reports whether tag follows the key:"value" convention.
@@ -700,7 +1079,7 @@ func (c *Checker) resolveMethod(d *syntax.FunDecl) {
 		ts, _ = c.lookup(d.Recv.Name.Name).(*TypeSym)
 	}
 	if ts != nil && ts.Alias != nil && len(d.Recv.TypeArgs) == 0 {
-		// typealias Point = Pt: a method of Point is a method of Pt, as in Go.
+		// type Point = Pt: a method of Point is a method of Pt, as in Go.
 		if n, ok := c.aliasType(ts).(*types.Named); ok && n.Decl != nil && len(n.Args) == 0 {
 			if target, ok := c.pkgScope.LookupLocal(n.Decl.Name).(*TypeSym); ok && target.Decl == n.Decl {
 				ts = target
@@ -714,6 +1093,13 @@ func (c *Checker) resolveMethod(d *syntax.FunDecl) {
 	recvName := d.Recv.Name.Name
 	c.info.Uses[d.Recv.Name] = ts
 	decl := ts.Decl
+	if decl.Kind == types.DefinedDecl {
+		if _, ok := types.Base(decl.Underlying).(*types.Pointer); ok {
+			c.errorf(diag.EInvalidUse, d.Recv.S, "%s is a pointer type, which cannot have methods (Go's rule)", recvName).
+				WithHint("declare the methods on the type it points to")
+			return
+		}
+	}
 	if len(d.TypeParams) > 0 {
 		span := d.TypeParams[0].S.Join(d.TypeParams[len(d.TypeParams)-1].S)
 		if len(decl.TypeParams) > 0 {
@@ -1172,7 +1558,7 @@ func (c *Checker) funcBody(sym *FuncSym) {
 		info.Recv = rv
 	}
 	for i, p := range d.Params {
-		pv := &VarSym{name: p.Name.Name, Type: sym.Sig.Params[i], Kind: ParamVar, Span: p.Name.S, Used: true}
+		pv := &VarSym{name: p.Name.Name, Type: sym.Sig.Params[i], Kind: ParamVar, Span: p.Name.S, Used: true, owner: fn}
 		if p.Name.Name != "_" {
 			c.declare(scope, pv, p.Name.S)
 		}

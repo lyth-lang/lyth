@@ -4,7 +4,7 @@ struct UnknownItem {
     Item: string
 }
 
-func *UnknownItem.Error(): string = "unknown item ${Item}"
+func *UnknownItem.Error(): string = "unknown item ${self.Item}"
 
 struct OutOfStock {
     Item: string
@@ -12,7 +12,7 @@ struct OutOfStock {
     Have: int
 }
 
-func *OutOfStock.Error(): string = "not enough ${Item}: wanted ${Wanted}, have ${Have}"
+func *OutOfStock.Error(): string = "not enough ${self.Item}: wanted ${self.Wanted}, have ${self.Have}"
 
 func take(stock: map[string]int, item: string, qty: int): int throws {
     have, ok := stock[item]

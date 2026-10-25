@@ -1076,6 +1076,91 @@ func main() {}
 	}
 }
 
+// TestEmbeddingAcrossPackages embeds a Go struct shaped like gRPC's
+// generated Unimplemented server, whose interface has an unexported method
+// only embedding can provide, and a Lyth struct of another package whose
+// promoted members keep their Lyth types (ADR 0043).
+func TestEmbeddingAcrossPackages(t *testing.T) {
+	files := map[string]string{
+		"pb/pb.go": `package pb
+
+import (
+	"context"
+	"errors"
+)
+
+type HelloRequest struct{ Name string }
+
+type HelloReply struct{ Message string }
+
+type GreeterServer interface {
+	SayHello(context.Context, *HelloRequest) (*HelloReply, error)
+	SayBye(context.Context, *HelloRequest) (*HelloReply, error)
+	mustEmbedUnimplementedGreeterServer()
+}
+
+type UnimplementedGreeterServer struct{}
+
+func (UnimplementedGreeterServer) SayHello(context.Context, *HelloRequest) (*HelloReply, error) {
+	return nil, errors.New("method SayHello not implemented")
+}
+
+func (UnimplementedGreeterServer) SayBye(context.Context, *HelloRequest) (*HelloReply, error) {
+	return nil, errors.New("method SayBye not implemented")
+}
+
+func (UnimplementedGreeterServer) mustEmbedUnimplementedGreeterServer() {}
+
+func Register(s GreeterServer) GreeterServer { return s }
+`,
+		"models/models.lyth": `struct Base {
+    ID: int64
+    Note: string?
+}
+
+func Base.Label(): string = "#${self.ID}"
+`,
+		"main.lyth": `import "context"
+import "fmt"
+import "emb/models"
+import "emb/pb"
+
+struct server {
+    pb.UnimplementedGreeterServer
+    greeting: string
+}
+
+func *server.SayHello(ctx: context.Context, r: *pb.HelloRequest): *pb.HelloReply throws =
+    &pb.HelloReply(Message = "${self.greeting}, ${r.Name}")
+
+struct Item {
+    models.Base
+    Name: string
+}
+
+func main() throws {
+    s := pb.Register(&server(greeting = "hi"))
+    reply := s.SayHello(context.Background(), &pb.HelloRequest(Name = "ada"))?
+    fmt.Println(reply.Message)
+    s.SayBye(context.Background(), &pb.HelloRequest(Name = "ada")) catch (err) { fmt.Println(err) }
+    it := Item(Base = models.Base(ID = 3), Name = "pen")
+    fmt.Println(it.Label(), it.ID, it.Note ?: "no note")
+}
+`,
+	}
+	root := writeModule(t, "emb", files)
+	s := compileModule(t, root, false)
+	bin := filepath.Join(root, "app.bin")
+	if ok, err := s.GoBuild(bin, []string{"emb"}, nil); err != nil || !ok {
+		t.Fatalf("build failed: %v\n%s", err, render(s.Sink.All()))
+	}
+	out, err := exec.Command(bin).Output()
+	want := "hi, ada\nmethod SayBye not implemented\n#3 3 no note"
+	if err != nil || strings.TrimSpace(string(out)) != want {
+		t.Fatalf("output %q, want %q, err %v", out, want, err)
+	}
+}
+
 // TestGenericConstraintsAcrossPackages instantiates the generic types of a
 // Lyth package and of a Go package, constrained by their own interfaces, in
 // fields, aliases, and signatures written before the types and methods the
@@ -1139,11 +1224,11 @@ struct App {
     earlyGo: golib.Cache[early]
 }
 
-typealias WrapLate = Wrap[late]
+type WrapLate = Wrap[late]
 
-typealias LateCache = lib.Cache[late]
+type LateCache = lib.Cache[late]
 
-typealias LateGoCache = golib.Cache[late]
+type LateGoCache = golib.Cache[late]
 
 interface Maker {
     Make(): lib.Cache[late]
@@ -1262,9 +1347,9 @@ struct App {
     ptr: lib.Cache[ptrOnly]
 }
 
-typealias BadCache = lib.Cache[bad]
+type BadCache = lib.Cache[bad]
 
-typealias BadGoCache = golib.Cache[bad]
+type BadGoCache = golib.Cache[bad]
 
 struct Wrap[S: lib.Store[int]] {
     s: S

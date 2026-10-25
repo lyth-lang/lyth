@@ -203,11 +203,14 @@ This is the idiomatic Go representation for optional JSON fields (`*int` with
   nullability (`*T!`). The conversion costs one nil check
   (`var e error; if p != nil { e = p }`; a returned value becomes
   `if p == nil { return nil }`), see
-  [ADR 0026](../adr/0026-null-is-a-nil-interface.md). Go parameters are the
-  exception: they receive the Go representation, as
-  [ADR 0017](../adr/0017-nullable-values-into-go.md) specifies, so drivers
-  still read a nil `*T` as NULL. An assignment list from one call cannot check
-  its values, so it rejects such a conversion (E0201).
+  [ADR 0026](../adr/0026-null-is-a-nil-interface.md). Go parameters of
+  interface type (`any`, `...any`) get the same conversion
+  ([ADR 0040](../adr/0040-optionals-into-any.md)): `fmt.Println(user.Email)`
+  prints the email, not a pointer, and drivers read the nil
+  interface as NULL. A Go parameter of pointer type receives the Go
+  representation, as [ADR 0017](../adr/0017-nullable-values-into-go.md)
+  specifies. An assignment list from one call cannot check its values, so it
+  rejects such a conversion (E0201).
 - `T?` where `T` is a type parameter is **[planned]**. It needs a uniform
   representation that does not depend on the instantiation.
 
@@ -219,9 +222,9 @@ or plain zero values instead.
 
 Go gives every type a zero value. In Lyth a type is **zeroable** when its Go zero
 value is a valid Lyth value: numbers, `string`, `bool`, nullable and platform
-types, slices, maps, arrays of zeroable types, and structs whose fields are all
-zeroable. Non-null pointers, interfaces, functions, and channels are not
-zeroable.
+types, slices, maps, arrays of zeroable types, structs whose fields are all
+zeroable, and enums. Non-null pointers, interfaces, functions, channels, and
+string-backed enums without a `""` entry are not zeroable.
 
 Rules that follow:
 
@@ -239,8 +242,9 @@ Rules that follow:
 
 Local variables (declared with `:=` or `name: Type`) and package-level `var`s
 are mutable, as in Go. Parameters, `for` loop variables, `catch` bindings, and
-`self` are **read-only bindings**: assigning one is E0501, and a `:=` list
-cannot reuse a parameter. A value receiver's `self` is a copy of the caller's
+`self` are **read-only bindings**: assigning one is E0501. A `:=` may declare
+a new local of the same type over a parameter, as in
+`ctx, cancel := context.WithTimeout(ctx, d)` (language.md §3.2). A value receiver's `self` is a copy of the caller's
 value and is read-only in the same way. Constants are not variables;
 assigning one is E0501 too.
 

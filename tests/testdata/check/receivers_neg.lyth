@@ -15,7 +15,7 @@ interface Setter {
 // A value receiver is a copy: assigning its fields would change only the copy.
 func Box.mutate() {
     self.n = 3 // ERROR E0502 "the method has a value receiver, so this is a copy"
-    n = 4 // ERROR E0502 "func *Box.mutate(...)"
+    self.n = 4 // ERROR E0502 "func *Box.mutate(...)"
     self.SetN(4) // ERROR E0504 "cannot call SetN on self"
     f := { -> self.n = 5 } // ERROR E0502 "value receiver"
     f()

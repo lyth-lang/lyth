@@ -47,7 +47,7 @@ struct Square {
     Side: float64
 }
 
-func Square.Area(): float64 = Side * Side
+func Square.Area(): float64 = self.Side * self.Side
 
 // A member wins over an extension of the same name.
 func time.Duration.String(): string = "never used"

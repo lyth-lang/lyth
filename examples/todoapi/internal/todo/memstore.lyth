@@ -16,11 +16,11 @@ struct MemStore {
 func NewMemStore(now: () -> time.Time): *MemStore = &MemStore(todos = [:], now = now)
 
 func *MemStore.List(ctx: context.Context, owner: string, filter: Filter): []Todo throws {
-    mu.Lock()
-    defer mu.Unlock()
+    self.mu.Lock()
+    defer self.mu.Unlock()
     done := filter.Done
     out: []Todo = []
-    for _, t in todos {
+    for _, t in self.todos {
         if t.Owner == owner && t.ID > filter.After && (done == null || done == t.Done) {
             out = append(out, t)
         }
@@ -33,25 +33,25 @@ func *MemStore.List(ctx: context.Context, owner: string, filter: Filter): []Todo
 }
 
 func *MemStore.Get(ctx: context.Context, owner: string, id: int64): Todo throws {
-    mu.Lock()
-    defer mu.Unlock()
-    return find(owner, id)?
+    self.mu.Lock()
+    defer self.mu.Unlock()
+    return self.find(owner, id)?
 }
 
 func *MemStore.Create(ctx: context.Context, owner: string, input: NewTodo): Todo throws {
-    mu.Lock()
-    defer mu.Unlock()
-    lastID++
-    ts := now()
-    t := Todo(ID = lastID, Owner = owner, Title = input.Title ?: "", Due = input.Due, CreatedAt = ts, UpdatedAt = ts)
-    todos[t.ID] = t
+    self.mu.Lock()
+    defer self.mu.Unlock()
+    self.lastID++
+    ts := self.now()
+    t := Todo(ID = self.lastID, Owner = owner, Title = input.Title ?: "", Due = input.Due, CreatedAt = ts, UpdatedAt = ts)
+    self.todos[t.ID] = t
     return t
 }
 
 func *MemStore.Update(ctx: context.Context, owner: string, id: int64, patch: Patch): Todo throws {
-    mu.Lock()
-    defer mu.Unlock()
-    t := find(owner, id)?
+    self.mu.Lock()
+    defer self.mu.Unlock()
+    t := self.find(owner, id)?
     title := patch.Title
     if title != null {
         t.Title = title
@@ -63,21 +63,21 @@ func *MemStore.Update(ctx: context.Context, owner: string, id: int64, patch: Pat
     if patch.Due != null {
         t.Due = patch.Due
     }
-    t.UpdatedAt = now()
-    todos[id] = t
+    t.UpdatedAt = self.now()
+    self.todos[id] = t
     return t
 }
 
 func *MemStore.Remove(ctx: context.Context, owner: string, id: int64) throws {
-    mu.Lock()
-    defer mu.Unlock()
-    find(owner, id)?
-    delete(todos, id)
+    self.mu.Lock()
+    defer self.mu.Unlock()
+    self.find(owner, id)?
+    delete(self.todos, id)
 }
 
 // find returns the owner's todo; the caller holds mu.
 func *MemStore.find(owner: string, id: int64): Todo throws {
-    t, ok := todos[id]
+    t, ok := self.todos[id]
     if !ok || t.Owner != owner {
         throw ErrNotFound
     }

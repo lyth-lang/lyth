@@ -1,0 +1,26 @@
+import "context"
+import "os"
+import "testing"
+
+import "github.com/jackc/pgx/v5/pgxpool"
+
+enum Level: string { Low = "low", High = "high" }
+
+// TestEnumColumn checks that a string-backed enum is written to and scanned
+// from a text column by pgx with no methods of its own (ADR 0035). It runs
+// only when DATABASE_URL is set.
+func TestEnumColumn(t: *testing.T) throws {
+    url := os.Getenv("DATABASE_URL")
+    if url == "" {
+        t.Skip("DATABASE_URL is not set")
+    }
+    ctx := context.Background()
+    pool := pgxpool.New(ctx, url)?
+    defer pool.Close()
+
+    level: Level = Level.Low
+    pool.QueryRow(ctx, "SELECT $1::text || ''", Level.High).Scan(&level)?
+    if level != Level.High {
+        t.Fatalf("scanned %q, want %q", level, Level.High)
+    }
+}

@@ -11,7 +11,7 @@ struct T {
 }
 
 func T.Show(): error? {
-    println("T show", n)
+    println("T show", self.n)
     return null
 }
 
@@ -26,11 +26,11 @@ func pointers() {
     p.n = 2
 }
 func S.Show(): error? {
-    println("show val", n)
+    println("show val", self.n)
     return null
 }
 func *S.Bump(): error? {
-    println("bump ptr", n)
+    println("bump ptr", self.n)
     return null
 }
 func f1(n: int): error? {

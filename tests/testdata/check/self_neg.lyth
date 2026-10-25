@@ -8,7 +8,7 @@ func Box.area(self: int): int = Size // ERROR E0003 "self is the method receiver
 
 func Box.twice(): int {
     self := 2 // ERROR E0003 "self is the method receiver"
-    return Size * 2
+    return self.Size * 2
 }
 
 func Box.each(xs: []int) {

@@ -142,7 +142,7 @@ and how agents stay current when Lyth changes.
 | `if`/`when` expressions, string templates `"${x}"` | statements, `+` with `strconv` |
 | type tests `x is T`, `as`, `as?`, `when x { is T -> }` | type assertions and type switches |
 | struct construction `User(Name = "a")`, automatic `json` tags | keyed composite literals, lower-camel `json` keys |
-| `typealias Handler = (Ctx) -> unit throws` | `type Handler = func(Ctx) error` |
+| `type Handler = (Ctx) -> unit throws`, `type UserID int64` | `type Handler = func(Ctx) error`, `type UserID int64` |
 | default and named arguments `connect("db", timeout = 5 * time.Second)` | plain positional calls |
 | `x in xs`, `code in 200..299`, `for x in xs`, `while c`, `break@outer` | `slices.Contains`, comparisons, `for range` loops, labels |
 | declared conformance `struct Circle : Shape` | `var _ Shape = Circle{}` |

@@ -67,14 +67,24 @@ Hard keywords (cannot be identifiers):
 
 ```
 as break catch chan const continue defer else enum false for func go if
-import in interface is map null package return sealed select self struct
-throw throws true typealias var when while
+import interface is map null package return sealed select self struct
+throw throws true type typealias var when while
 ```
+
+`in` is a contextual keyword ([ADR 0044](../adr/0044-remaining-spellings.md)).
+After an operand it is the membership operator (`x in xs`, `x !in xs`), in a
+`for` header it separates the bindings from the iterated value
+(`for x in xs`), and at the start of a `when` branch it is a membership
+condition (`in 200..299 ->`). Everywhere else it is an ordinary name: a
+field, parameter, local, loop variable, lambda parameter, or named argument
+(`func stage(in: <-chan int)`, `tc.in`, `parseCase(in = "x")`). A variable
+named `in` at the start of a `when` branch condition must be parenthesized.
 
 `var` declares package-level variables only (§3.5). `self` is the receiver of
 a method or extension function (§3.2) and can never be declared. `val` is
 reserved only so that code in the old syntax gets a precise error (E0008, with
-the `:=` or `var` form that replaces it). `pub` and `private` are reserved for
+the `:=` or `var` form that replaces it), and so is `typealias` (E0008, with
+the edit to `type`, §3.6). `pub` and `private` are reserved for
 the same reason: Lyth has no visibility keywords (§3.1). `fun` and `this` are
 not keywords; a declaration beginning with `fun` is E0008 with the edit
 `func`, and `this` is E0008 with the hint `self`.
@@ -107,11 +117,16 @@ raw_string = "`" { any char except "`" } "`" .
   (no `.5`).
 - Escapes: `\n \r \t \\ \" \' \$ \0 \uXXXX \U00XXXXXX \xHH`.
 - **String templates.** `${expr}` inside a `"..."` literal interpolates. There is
-  exactly one template syntax. `$` followed by an identifier character without
-  braces is a compile error (E0006, "did you mean `${name}`?"). This catches the
-  habit `"$name"` from other languages, which would otherwise print literally. A `$` followed by
-  anything else (`"$1"`, `"US$ 5"`) is a literal dollar, so SQL placeholders need
-  no escaping. Write `\$` for a literal `$` before an identifier character.
+  exactly one template syntax. Any other `$` is text: `"$1"`, `"US$ 5"`, and
+  `$name` itself, so MongoDB's `"$set"`, JSON Schema's `"$ref"`, and
+  PostgreSQL's dollar quotes (`$body$`) need no escaping. The one exception
+  catches the habit `"$name"` from other languages: when `name` is a variable,
+  parameter, or constant in scope where the string is written, `$name` is a
+  compile error (E0006), whose hints give both `${name}` (interpolate it) and
+  `\$name` (keep the dollar). Neither edit is applied by `lyth fix`, because
+  they mean different things ([ADR 0042](../adr/0042-dollar-names-in-strings.md)).
+  So declaring a variable can turn a literal `$name` that matches it into an
+  error; write `\$name` there. `\$` is a literal `$` everywhere.
 - **Raw strings** use backticks, exactly as in Go: no escapes, no templates, may
   span lines. They are also the syntax for struct tags.
 - Integer and float literals are *untyped constants* (Go semantics).
@@ -123,7 +138,7 @@ raw_string = "`" { any char except "`" } "`" .
 SourceFile    = [ PackageClause ] { ImportDecl } { TopLevelDecl } .
 PackageClause = "package" identifier NEWLINE .
 ImportDecl    = "import" ( ImportSpec | "(" { ImportSpec NEWLINE } ")" ) NEWLINE .
-ImportSpec    = string_lit [ "as" ( identifier | "_" ) ] .
+ImportSpec    = [ identifier | "_" ] string_lit .
 ```
 
 A package is a directory. The package clause is optional. When it is
@@ -135,11 +150,13 @@ Import paths are Go import paths, resolved by the Go toolchain
 against the enclosing module's `go.mod`. An import may refer to a Go package or a
 Lyth package; the importer cannot tell the difference and does not need to. The
 default qualifier is the imported package's declared name (e.g. `pgx` for
-`github.com/jackc/pgx/v5`), not the last path element. `as name` renames the
-qualifier; `as _` imports for side effects (database drivers). Dot-imports do not
-exist. Imports can be grouped as in Go, one per line:
-`import ( "fmt"; "net/http" as h )` written over several lines. Go's renamed form
-`h "net/http"` is E0003, with the edit to `"net/http" as h`.
+`github.com/jackc/pgx/v5`), not the last path element. A name before the path
+renames the qualifier, and `_` imports for side effects (database drivers), as in
+Go: `import h "net/http"`, `import _ "github.com/jackc/pgx/v5/stdlib"`.
+Dot-imports do not exist. Imports can be grouped as in Go, one per line:
+`import ( "fmt"; h "net/http" )` written over several lines. The spelling before
+[ADR 0044](../adr/0044-remaining-spellings.md), `"net/http" as h`, is E0008 with
+the edit to `h "net/http"`.
 
 Unused imports are a warning (W0002); the generated Go simply omits them.
 
@@ -196,9 +213,19 @@ FuncBody    = Block | "=" Expression .
   fallible body: `func port(s: string): int throws = s.toInt()` (E0208).
   [ADR 0021](../adr/0021-inferred-results-and-pass-through.md) has the
   rationale.
-- Parameters are read-only: assigning one is E0501, taking its address is
-  E0503, and a `:=` list cannot reuse one (E0501). Copy a parameter into a
-  local to change it. `xs: ...int` declares a variadic
+- Parameters are read-only: assigning one is E0501 and taking its address is
+  E0503. A `:=` declaration (single or list) may name a parameter when its
+  right side reads that parameter: `ctx, cancel := context.WithTimeout(ctx, d)`
+  declares a new `ctx` that hides the parameter for the rest of the block,
+  and the parameter itself is never assigned
+  ([ADR 0039](../adr/0039-rebinding-parameters.md)). The new variable has the
+  parameter's type (a different type is E0201: choose a new name), and no
+  W0006 is reported. The generated line is Go's own; in the function's
+  outermost block it assigns the parameter, unless a closure created before
+  it captured the parameter, in which case the new variable gets a Go name of
+  its own so the closure keeps seeing the parameter. A `:=` that names a
+  parameter without reading it is E0005 (it would ignore the argument). Copy
+  a parameter into a local to change it otherwise. `xs: ...int` declares a variadic
   parameter whose type inside the body is `[]int`; callers spread a slice
   with `xs...` (Go syntax).
 - `throws` makes the function fallible: its Go signature gets a trailing
@@ -227,10 +254,21 @@ receiver. The `*` decides Go's method set and whether the method sees the
 caller's value or a copy, so it stays visible. Both lower to a Go receiver
 named after the type (`func (u *User) Rename(name string)`). The receiver type
 must be declared in the same package (Go rule). Inside the body, the keyword
-`self` is the receiver, and members are also in scope by bare name (`Name`
-means `self.Name` unless a local or parameter hides it). A local that hides a
-field draws warning W0006 ("x hides the field x of self"); `self.x` still
-reaches the field.
+`self` is the receiver, and the receiver's fields and methods are reached only
+through it: `self.Name`, `self.validate()`. A bare name in a method resolves as
+it would outside the method, so a field may share its name with a local, a
+type, an import, or a package-level declaration. A bare name that is a member
+of `self` and nothing else in scope is E0101 ("Name is a field of self; write
+self.Name"), and so is one that before ADR 0038 meant the member, even where it
+now also names something else, so no meaning changes silently. `lyth fix`
+inserts `self.` where the name can mean only the member; where it also names
+something valid in that position (a package-level variable, constant, or
+function, an import before a dot, a type or builtin that is called), the
+error says so and the edit is a hint for the author
+([ADR 0038](../adr/0038-members-through-self.md)). A call of a field that is
+not a function, which never compiled, means the other name:
+`Config(Name = "x")` constructs the type, `max(a, b)` calls the builtin, and
+`strings.Join(...)` calls the package when the field has no member `Join`.
 
 - `self` cannot be assigned (E0501). Because it is a keyword, nothing can
   declare it: a parameter, local, loop variable, or lambda parameter named
@@ -288,14 +326,15 @@ arguments are inferred at calls or given as `name[int](...)`. The rules are in
 
 ```ebnf
 StructDecl = "struct" identifier [ TypeParams ] [ ":" Type { "," Type } ] "{" { FieldDecl } "}" .
-FieldDecl  = identifier ":" Type [ raw_string ] NEWLINE .
+FieldDecl  = ( identifier ":" Type | EmbeddedField ) [ raw_string ] NEWLINE .
+EmbeddedField = [ "*" ] TypeName [ TypeArgs ] [ "?" ] .
 ```
 
 ```kotlin
 struct User {
     ID: int64
     Name: string
-    Email: string?               `json:"email,omitempty"`
+    Email: string?
     passwordHash: string
 }
 ```
@@ -303,15 +342,75 @@ struct User {
 - Field visibility follows §3.1: `Name` is exported, `passwordHash` is not.
   Reflection-based Go libraries (`encoding/json`, database scanners) see only
   exported fields.
-- A raw-string tag is emitted verbatim. If the tag has no `json` key, Lyth
-  prepends one for exported fields, in lower camel case: the leading uppercase
-  run is lowered, keeping the last letter of an initialism that starts the next
-  word (`Name` → `name`, `ID` → `id`, `UserID` → `userID`, `HTTPPort` →
-  `httpPort`). Unexported fields get no tags
+- A raw-string tag is emitted verbatim, except that a `json` tag without a
+  name (`json:",string"`, `json:",omitempty"`) gets the automatic name, and on
+  a `T?` field also `omitzero` unless it says `omitempty` or `omitzero`. If the
+  tag has no `json` key, Lyth prepends one for exported fields, and a field of
+  a nullable type (`T?`) also gets `,omitzero`, so a null optional is left out
+  of the output rather than written as `null`. Unexported fields get no tags
   ([ADR 0013](../adr/0013-struct-fields-and-json.md),
-  [ADR 0022](../adr/0022-capitalization-is-visibility.md)).
-- Struct embedding in Lyth-declared structs is **[planned]**. Embedded fields of
-  Go structs work, because promotion is resolved by `go/types`.
+  [ADR 0022](../adr/0022-capitalization-is-visibility.md),
+  [ADR 0036](../adr/0036-automatic-json-tags.md)).
+- The automatic key is the field name in lower camel case: its first word is
+  lowered and the rest is kept. The first word is the leading run of capitals
+  without its last letter when a lowercase letter follows (`HTTPServer` →
+  `httpServer`), the whole run when it is followed by `s` and the end of the
+  name or another capital (`IDs` → `ids`, `UserIDs` → `userIDs`), a listed
+  initialism that the run starts with when a lowercase letter or digit follows
+  it (`IPv4` → `ipv4`, `UTF8Name` → `utf8Name`), and otherwise the leading
+  capital (`Name` → `name`). The list is golint's common initialisms (ACL,
+  API, ASCII, CPU, CSS, DNS, EOF, GUID, HTML, HTTP, HTTPS, ID, IP, JSON, LHS,
+  QPS, RAM, RHS, RPC, SLA, SMTP, SQL, SSH, TCP, TLS, TTL, UDP, UI, UID, UUID,
+  URI, URL, UTF8, VM, XML, XMPP, XSRF, XSS).
+- When the rule splits a run of capitals after its first letter (`ETag` →
+  `eTag`, `OAuthToken` → `oAuthToken`), the name may be one mixed-case word or
+  two, so the field warns (W0008) until it has a tag: `json:"etag"`, or
+  `json:"eTag"` to keep the automatic key.
+- Two fields with the same json key (`IDs` and `Ids` are both `ids`) warn
+  (W0008): `encoding/json` would leave both out.
+
+**Embedding.** A type alone on a line of the struct body embeds it, as in Go
+([ADR 0043](../adr/0043-struct-embedding.md)):
+
+```kotlin
+import "net/http"
+
+struct statusRecorder {
+    http.ResponseWriter
+    status: int
+}
+
+func *statusRecorder.WriteHeader(code: int) {
+    self.status = code
+    self.ResponseWriter.WriteHeader(code)
+}
+```
+
+- The embedded type is a type name, optionally qualified or instantiated
+  (`T`, `pkg.T`, `Page[int]`), a pointer to one (`*T`), or a nullable one
+  (`T?`). A type parameter, a pointer to an interface, and any other type are
+  errors (E0216).
+- The field's name is the type's name without package, `*`, or type
+  arguments (`ResponseWriter`). It is exported when that name is, and it is
+  constructed by that name (`statusRecorder(ResponseWriter = w)`) or in its
+  place among positional arguments.
+- Promotion follows Go exactly (depth, ambiguity, method sets): promoted
+  fields and methods are reached through a value or through `self`
+  (`self.Header()`), keep their Lyth types, and count when the struct is used
+  as an interface. A method declared on the outer type hides a promoted one.
+  An ambiguous selector is E0205.
+- An embedded pointer, interface, function, or channel type has no zero
+  value, so it must be given at construction. A nullable embedded type
+  (`Store?`, for partial test fakes) may be left null: its promoted methods
+  still make the struct implement interfaces, and a call through an interface
+  reaches the null value and panics, as in Go. A direct access in Lyth code
+  is E0401 ("Delete is promoted through the nullable field Store").
+- An embedded field gets no automatic `json` tag, so `encoding/json` flattens
+  an embedded struct as in Go; a tag on the embedding line
+  (``Timestamps `json:"ts"` ``) nests it under that key.
+- Embedding a member of a sealed interface does not make the outer struct a
+  member (§3.7): converting it to the interface is E0201.
+- Go's `Name Type` field spelling is E0008, with the edit that inserts `:`.
 
 **Construction.** A struct type is constructed by calling it:
 
@@ -381,25 +480,49 @@ inside a function, local variables are declared with `:=` (§4.1). `const` may
 also appear in a function body, as in Go; a local constant is in scope from its
 declaration to the end of the block and may refer to earlier constants.
 
-### 3.6 Type aliases
+### 3.6 Defined types and type aliases
 
 ```ebnf
-TypeAliasDecl = "typealias" identifier "=" Type NEWLINE .
+TypeDefDecl   = "type" identifier [ TypeParams ] Type NEWLINE .
+TypeAliasDecl = "type" identifier "=" Type NEWLINE .
 ```
 
-A type alias gives an existing type a second name; it does not create a new
-type, so values convert freely and the alias has the methods of the aliased
-type. It lowers to a Go alias declaration (`typealias Handler = (Ctx) -> unit
-throws` becomes `type Handler = func(Ctx) error`). Aliases are how Lyth names
-function types and long instantiations without the cost of a new type. A Go
-defined type (`type Celsius float64`) is declared with `struct`/`interface` or
-is **[planned]** for other underlying types. An alias may refer to other
-aliases but not to itself (E0216). Generic aliases are **[planned]**.
+Both use Go's spelling ([ADR 0037](../adr/0037-type-declarations.md)).
+
+**Defined types.** `type UserID int64` declares a new type with the
+underlying type `int64`, as in Go: a value of another type (`OrderID`,
+`int64`) needs an explicit conversion (`UserID(n)`, `int64(id)`), untyped
+constants are assignable (`id: UserID = 5`, `const Admin: Role = "admin"`),
+and the operators of the underlying type apply (`price * 2`, `tags[0]`,
+`for t in tags`). Methods are declared as on structs (`func Cents.Euros()`,
+`func *Tags.Add(t: string)`), except on a defined pointer type, where Go
+forbids them. A defined type may be generic: `type Set[T: comparable]
+map[T]struct{}` (the bracket must follow the name directly; with a space,
+`type Grid [3]int` is an array type). A defined type takes the nullability
+and zero-value rules of its underlying type: one over a function, pointer, or
+channel type is non-null and has no zero value, and `T?` is its nullable form;
+one over a slice or map is never null. The underlying type cannot be a
+struct, interface, enum, or nullable type: structs and interfaces have their
+own declarations (`struct User { ... }`), and Go's `type User struct { ... }`
+is E0008 with the edit to `struct User`. A defined type declared over itself
+is E0216. Go's named function types follow the same rule as Lyth's: a field
+of type `context.CancelFunc` must be given at construction, or declared
+`context.CancelFunc?`.
+
+**Type aliases.** `type Handler = (Ctx) -> unit throws` gives an existing
+type a second name; it does not create a new type, so values convert freely
+and the alias has the methods of the aliased type. It lowers to a Go alias
+declaration (`type Handler = func(Ctx) error`). Aliases are how Lyth names
+function types and long instantiations without the cost of a new type. An
+alias may refer to other aliases but not to itself (E0216). Generic aliases
+are **[planned]**. The spelling before ADR 0037, `typealias Handler = ...`,
+is E0008 with the edit to `type Handler = ...`.
 
 ### 3.7 Enums and sealed interfaces
 
 ```ebnf
-EnumDecl   = "enum" identifier "{" identifier { ( "," | NEWLINE ) identifier } [ "," ] "}" .
+EnumDecl   = "enum" identifier [ ":" Type ] "{" Entry { ( "," | NEWLINE ) Entry } [ "," ] "}" .
+Entry      = identifier [ "=" string_lit ] .
 SealedDecl = "sealed" InterfaceDecl .
 ```
 
@@ -415,10 +538,41 @@ values or bodies (E0601), since data belongs in a sealed interface's members.
   where a Go name differs from the Lyth spelling (§3.1).
 - Visibility follows the type's name. The zero value is the first entry.
 - Enums support `==` and `!=`, not ordering (E0209). `int(c)` gives the
-  value and `Color(n)` converts back, as in Go. `encoding/json` encodes an
-  enum as its number.
+  value and `Color(n)` converts back, as in Go.
 - An enum may have methods (`func Color.hex(): string`) but not one named
   `String`, which is generated (E0102).
+
+**Enums on the wire.** An enum travels by name: Lyth generates `MarshalText`
+and `UnmarshalText`, which write an entry's name under the automatic `json`
+key rule (§3.3: `Active` → `active`, `PendingReview` → `pendingReview`) and
+accept only those names. `encoding/json` (v1 and v2), `flag.TextVar`, and
+`log/slog` use them, so `{"status":"pendingReview"}` is the JSON form, and
+decoding `7` or `"Gold"` is an error rather than a value outside the set.
+`fmt` and string templates keep `String()`, the entry's name as written. Two
+entries with the same wire name (`Id`, `ID`) are E0102
+([ADR 0035](../adr/0035-enums-on-the-wire.md)).
+
+- An enum that declares `MarshalText` and `UnmarshalText` itself gets neither
+  generated; declaring only one is E0216. To keep numbers in JSON, declare
+  `MarshalJSON` and `UnmarshalJSON`, which `encoding/json` prefers.
+- Databases store a plain enum's number in an integer column. Text columns
+  use a string-backed enum.
+
+**String-backed enums.** `enum Plan: string { Free = "free", Pro = "pro" }`
+gives every entry a string value and lowers to Go's own idiom: `type Plan
+string`, typed constants `PlanFree Plan = "free"`, a `String()` that returns
+the value, and an `UnmarshalText` that accepts exactly the declared values.
+`encoding/json`, pgx, and `database/sql` read and write the value with no
+other methods, and `string(p)` gives it.
+
+- Every entry needs a distinct string literal (E0216, E0102). `string` is the
+  only backing type; numeric codes are a defined type with constants (§3.6).
+- The zero value is `""`, which is a value of the enum only when an entry
+  declares it. Without such an entry the enum has no zero value in Lyth
+  (types.md §6): a field of the type must be given at construction, and
+  `p: Plan` needs an initializer (E0405). Reflection can still produce `""`
+  (a JSON field left out), which an exhaustive `when` rejects with its panic;
+  declare input fields `Plan?` when they are optional.
 
 **Sealed interfaces.** `sealed interface Shape { ... }` is an interface that
 only types declared in the same package can implement, by declaring it
@@ -881,7 +1035,13 @@ when s { is Circle -> s.R; else -> 0.0 }    // switch s := s.(type) { case Circl
 Type tests see a value's dynamic type only; they do not unwrap errors. To test
 for an error anywhere in a wrapped chain, use a typed `catch`
 ([errors.md §4.1](errors.md#41-catch)), `errors.AsType[*NotFound](err)`
-(Go 1.26), or `errors.Is`.
+(Go 1.26), or `errors.Is`. Because errors usually arrive wrapped, a type test
+(`is`, `!is`, `as`, `as?`, or a `when` branch) of a type that implements
+`error` on a value whose static type is `error` draws warning W0007, whose
+hints give the typed `catch` and `errors.AsType` forms
+([ADR 0041](../adr/0041-type-tests-on-errors.md)). To test the dynamic type on
+purpose (in an `Unwrap` or `Is` method), bind the value as `any` first
+(`v: any = err`); interface targets (`err is io.Reader`) do not warn.
 
 ### 5.11 Membership tests
 
@@ -961,7 +1121,8 @@ Everything else belongs in libraries. Lyth's standard library is imported as
 | `var x = 1` (top level) | `var x = 1` |
 | `x := 1`, `x: T` (local) | `x := 1`, `var x T` |
 | `const N = 10` | `const N = 10` |
-| `typealias H = (int) -> int` | `type H = func(int) int` |
+| `type H = (int) -> int` | `type H = func(int) int` |
+| `type UserID int64` | `type UserID int64` |
 | `struct S : I { ... }` | `type S struct { ... }` and `var _ I = S{}` |
 | `func f(n: int = 1)`, called `f()` | `func f(n int)`, called `f(1)` |
 

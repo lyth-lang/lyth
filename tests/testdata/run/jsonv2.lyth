@@ -1,0 +1,42 @@
+// Optional fields round-trip through encoding/json and encoding/json/v2
+// alike (ADR 0036): a null optional is left out, a set one keeps its value
+// even when it is the zero value, and a missing key reads back as null.
+import "encoding/json"
+import jsonv2 "encoding/json/v2"
+import "fmt"
+
+struct Profile {
+    Name: string
+    Email: string?
+    Age: int?
+    Tags: []string
+}
+
+func show(p: Profile) {
+    fmt.Println(p.Name, p.Email ?: "<null>", p.Age ?: -1, len(p.Tags))
+}
+
+func main() throws {
+    for p in [Profile(Name = "ann"), Profile(Name = "bo", Email = "", Age = 0, Tags = ["x"])] {
+        v1 := json.Marshal(p)?
+        v2 := jsonv2.Marshal(p)?
+        fmt.Println(string(v1))
+        fmt.Println(string(v2))
+        back := Profile()
+        json.Unmarshal(v1, &back)?
+        show(back)
+        back2 := Profile()
+        jsonv2.Unmarshal(v2, &back2)?
+        show(back2)
+    }
+}
+
+// Output:
+// {"name":"ann","tags":null}
+// {"name":"ann","tags":[]}
+// ann <null> -1 0
+// ann <null> -1 0
+// {"name":"bo","email":"","age":0,"tags":["x"]}
+// {"name":"bo","email":"","age":0,"tags":["x"]}
+// bo  0 1
+// bo  0 1

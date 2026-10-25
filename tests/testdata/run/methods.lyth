@@ -18,7 +18,7 @@ func *Counter.Inc() {
 
 // Fields are also in scope by name; self.Count and Count are the same field.
 func *Counter.Add(n: int) {
-    Count += n
+    self.Count += n
 }
 
 func Counter.String(): string = "Counter(${self.Count})"

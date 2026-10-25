@@ -14,7 +14,7 @@ struct Res {
 }
 
 func *Res.Shut(): error? {
-    fmt.Println("shut", Name)
+    fmt.Println("shut", self.Name)
     return null
 }
 
@@ -49,7 +49,7 @@ struct Invalid {
     Field: string
 }
 
-func *Invalid.Error(): string = "invalid ${Field}"
+func *Invalid.Error(): string = "invalid ${self.Field}"
 
 // Any error value wraps, not only one of type error.
 func validate(): int throws {
@@ -81,7 +81,7 @@ struct prefixed {
 
 // Write returns the call's results as they are, as in Go.
 func prefixed.Write(p: []byte): (int, error?) {
-    return w.Write(p)
+    return self.w.Write(p)
 }
 
 func main() {

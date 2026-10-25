@@ -7,7 +7,7 @@ struct Box {
 }
 
 func Box.grow(): int {
-    Size := 2 // WARN W0006 "Size hides the field Size of self"
+    Size := 2 // a local may share a field's name: fields are reached through self
     return Size
 }
 

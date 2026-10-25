@@ -4,6 +4,7 @@ import (
 	"go/constant"
 	gotypes "go/types"
 	"math"
+	"slices"
 	"strings"
 
 	"github.com/lyth-lang/lyth/internal/diag"
@@ -124,7 +125,9 @@ func (c *Checker) reportMismatch(x *operand, target types.Type, context string) 
 
 func (c *Checker) reportMismatchReason(x *operand, target types.Type, context, reason string) {
 	span := x.expr.Span()
-	if x.val != nil && types.IsNumeric(x.typ) && types.IsNumeric(types.Base(target)) {
+	if x.val != nil && types.IsUntyped(x.typ) && types.IsNumeric(x.typ) && types.IsNumeric(types.Base(target)) {
+		// Only an untyped constant can fail by not fitting: a typed one
+		// (UserID(3), time.Second) has the wrong type.
 		c.errorf(diag.EOverflow, span, "constant %s cannot be represented as %s", x.val, target).
 			WithLabel("does not fit in %s", target)
 		return
@@ -159,6 +162,9 @@ func (c *Checker) mismatchHints(d *diag.Diagnostic, x *operand, target types.Typ
 		d.WithHint("convert explicitly: %s.%s()? (parsing can fail)", text, fn)
 	case types.IsString(src) && types.IsFloat(dst):
 		d.WithHint("convert explicitly: %s.toFloat64()? (parsing can fail)", text)
+	case definedUnder(src) != nil && definedUnder(dst) != nil:
+		// UserID and OrderID: distinct types on purpose (ADR 0037).
+		d.WithNote("%s and %s are different defined types; convert explicitly only if the value really is a %s", src, dst, dst)
 	case types.IsNumeric(src) && types.IsNumeric(dst):
 		d.WithEdit(x.expr.Span(), dst.String()+"("+x.expr.Span().Text()+")", "Lyth never converts numbers implicitly; write %s(%s)", dst, text)
 	case types.IsNumeric(src) && types.IsString(dst):
@@ -217,10 +223,18 @@ func (c *Checker) assignable(src, dst types.Type) (bool, ConversionKind, string)
 	if dp, ok := dst.(*types.Platform); ok {
 		if sn, ok := src.(*types.Nullable); ok {
 			// Go APIs do not declare nullability, so a nullable value may be
-			// passed to them (Kotlin's platform-type rule). It goes in its Go
-			// representation, as Go code would pass it: *T for an optional
-			// value, which database drivers and encoding/json read as NULL
-			// or null when nil.
+			// passed to them (Kotlin's platform-type rule).
+			if ok, _, _ := c.assignable(sn.Elem, dp.Elem); ok && nilInterface(sn.Elem, dp.Elem) {
+				// To an interface parameter (any, ...any, fmt.Stringer) it
+				// goes in as Lyth converts to its own interfaces: null as a
+				// nil interface, an optional value unboxed (ADR 0040). fmt,
+				// slog, and testify print the value, and drivers and
+				// encoders read a nil interface as NULL or null, as they read
+				// a nil *T.
+				return true, ConvNilIface, ""
+			}
+			// To a pointer parameter it goes in its Go representation, as Go
+			// code passes it: *T for an optional value.
 			if ok, _, _ := c.assignable(sn.Elem, dp.Elem); ok && gotypes.AssignableTo(types.Lower(sn), types.Lower(dp.Elem)) {
 				return true, ConvNone, ""
 			}
@@ -254,6 +268,14 @@ func (c *Checker) assignable(src, dst types.Type) (bool, ConversionKind, string)
 		return false, ConvNone, ""
 	}
 	gs, gd := types.Lower(src), types.Lower(dst)
+	if gs == nil || gd == nil || gs.Underlying() == nil || gd.Underlying() == nil {
+		// A type still being defined, reached from an expression inside a
+		// declaration's own type (an array length); errors were reported.
+		return false, ConvNone, ""
+	}
+	if reason := embeddedSealed(src, dst); reason != "" {
+		return false, ConvNone, reason
+	}
 	if gotypes.AssignableTo(gs, gd) {
 		return true, ConvNone, ""
 	}
@@ -263,6 +285,37 @@ func (c *Checker) assignable(src, dst types.Type) (bool, ConversionKind, string)
 		}
 	}
 	return false, ConvNone, ""
+}
+
+// embeddedSealed explains why a Lyth struct that embeds a member of a sealed
+// interface is not a member itself: in Go the marker method is promoted,
+// but membership is declared (ADR 0025, ADR 0043). It is "" otherwise.
+func embeddedSealed(src, dst types.Type) string {
+	sd := types.SealedOf(dst)
+	if sd == nil {
+		return ""
+	}
+	n, ok := types.Base(src).(*types.Named)
+	if p, isPtr := types.Base(src).(*types.Pointer); isPtr {
+		n, ok = types.Base(p.Elem).(*types.Named)
+	}
+	if !ok || n.Decl == nil || n.Decl.Kind != types.StructDecl || n.Decl.PkgPath != sd.PkgPath {
+		return ""
+	}
+	for _, m := range sd.Members {
+		if mn, ok := types.Base(m).(*types.Named); ok && mn.Decl == n.Decl {
+			return ""
+		}
+		if mp, ok := types.Base(m).(*types.Pointer); ok {
+			if mn, ok := types.Base(mp.Elem).(*types.Named); ok && mn.Decl == n.Decl {
+				return ""
+			}
+		}
+	}
+	if !slices.ContainsFunc(n.Decl.Fields, func(f *types.Field) bool { return f.Embedded }) {
+		return "" // go/types explains the missing marker
+	}
+	return dst.String() + " is sealed: embedding one of its members does not make " + n.Decl.Name + " a member; declare it (struct " + n.Decl.Name + " : " + types.Base(dst).String() + ")"
 }
 
 func missingMethodReason(src, dst types.Type, m *gotypes.Func, wrong bool) string {
@@ -623,7 +676,8 @@ func (c *Checker) immutableBinding(id *syntax.Ident, v *VarSym, verb string, cod
 	switch v.Kind {
 	case ParamVar:
 		c.errorf(diag.EReassignVal, id.S, "cannot %s parameter %s: parameters are read-only", verb, id.Name).
-			WithHint("copy it into a local: %sNew := %s", id.Name, id.Name)
+			WithHint("to replace it for the rest of the block with a value derived from it, declare it again: %s := f(%s)", id.Name, id.Name).
+			WithHint("or copy it into a local: %sNew := %s", id.Name, id.Name)
 	case LoopVar:
 		c.errorf(diag.EReassignVal, id.S, "cannot %s loop variable %s", verb, id.Name)
 	case CatchVar:

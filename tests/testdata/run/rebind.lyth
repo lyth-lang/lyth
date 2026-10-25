@@ -1,0 +1,58 @@
+// := may replace a parameter with a value derived from it (ADR 0039):
+// ctx, cancel := context.WithTimeout(ctx, d) is Go's line, and the
+// parameter itself is never assigned.
+import "context"
+import "strings"
+import "time"
+
+func deadline(ctx: context.Context): string {
+    ctx, cancel := context.WithTimeout(ctx, time.Second)
+    defer cancel()
+    _, ok := ctx.Deadline()
+    return "deadline ${ok}"
+}
+
+func normalize(name: string): string {
+    name := strings.TrimSpace(name)
+    return strings.ToUpper(name)
+}
+
+// A closure created before the rebinding keeps the parameter.
+func captured(ctx: context.Context): (string, string) {
+    before := { -> if ctx.Value("k") == null { "parent" } else { "child" } }
+    ctx := context.WithValue(ctx, "k", "v")
+    after := { -> if ctx.Value("k") == null { "parent" } else { "child" } }
+    return before(), after()
+}
+
+// In an inner block the rebinding hides the parameter there only.
+func inner(s: string, upper: bool): string {
+    if upper {
+        s := strings.ToUpper(s)
+        return s
+    }
+    return s
+}
+
+func both(a: int, b: int): (int, int) {
+    a, b := b, a
+    return a, b
+}
+
+func main() {
+    ctx := context.Background()
+    println(deadline(ctx), normalize("  ada "))
+    b, a := captured(ctx)
+    println(b, a, inner("x", true), inner("y", false))
+    each := { s: string ->
+        s := s + "!"
+        s
+    }
+    x, y := both(1, 2)
+    println(each("hi"), x, y)
+}
+
+// Output:
+// deadline true ADA
+// parent child X y
+// hi! 2 1

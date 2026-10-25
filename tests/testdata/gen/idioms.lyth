@@ -5,7 +5,7 @@ struct NotFound {
     ID: int
 }
 
-func *NotFound.Error(): string = "user ${ID} not found"
+func *NotFound.Error(): string = "user ${self.ID} not found"
 
 interface Store {
     Name(id: int): string throws
@@ -17,10 +17,10 @@ struct memStore : Store {
 }
 
 func memStore.Name(id: int): string throws {
-    if id !in Names {
+    if id !in self.Names {
         throw &NotFound(ID = id)
     }
-    return Names[id]
+    return self.Names[id]
 }
 
 // A typed catch handles one error type and propagates the rest.

@@ -47,7 +47,7 @@ func Package(pkg *check.Package) []*File {
 						pkgNames[sym.GoName] = true
 					}
 				}
-			case *syntax.StructDecl, *syntax.InterfaceDecl, *syntax.PropDecl, *syntax.ConstDecl, *syntax.TypeAliasDecl:
+			case *syntax.StructDecl, *syntax.InterfaceDecl, *syntax.PropDecl, *syntax.ConstDecl, *syntax.TypeAliasDecl, *syntax.TypeDefDecl:
 				name := declName(d)
 				if sym := pkg.Scope.LookupLocal(name); sym != nil {
 					pkgNames[goNameOf(sym)] = true
@@ -73,6 +73,8 @@ func declName(d syntax.Decl) string {
 	case *syntax.ConstDecl:
 		return d.Name.Name
 	case *syntax.TypeAliasDecl:
+		return d.Name.Name
+	case *syntax.TypeDefDecl:
 		return d.Name.Name
 	}
 	return ""
@@ -501,7 +503,25 @@ func (l *fileLowerer) decl(d syntax.Decl) {
 		l.constDecl(d)
 	case *syntax.TypeAliasDecl:
 		l.aliasDecl(d)
+	case *syntax.TypeDefDecl:
+		l.definedDecl(d)
 	}
+}
+
+// definedDecl lowers type Name Underlying to the same Go declaration.
+func (l *fileLowerer) definedDecl(d *syntax.TypeDefDecl) {
+	ts := l.typeSym(d.Name.Name)
+	if ts == nil || ts.Decl == nil || ts.Decl.Underlying == nil {
+		return
+	}
+	spec := &ast.TypeSpec{Name: ast.NewIdent(ts.Decl.GoName), Type: l.typeExpr(ts.Decl.Underlying)}
+	if len(ts.Decl.TypeParams) > 0 {
+		spec.TypeParams = l.typeParamList(ts.Decl.TypeParams)
+	}
+	l.mark(spec.Name, d.Name.S)
+	gd := &ast.GenDecl{Doc: docGroup(d.Doc), Tok: token.TYPE, TokPos: l.pos(d.S), Specs: []ast.Spec{spec}}
+	l.mark(gd, d.S)
+	l.decls = append(l.decls, gd)
 }
 
 func (l *fileLowerer) aliasDecl(d *syntax.TypeAliasDecl) {
@@ -537,6 +557,10 @@ func (l *fileLowerer) structDecl(d *syntax.StructDecl) {
 			fld.Names[0].NamePos = l.pos(d.Fields[i].S)
 			l.mark(fld, d.Fields[i].S)
 			l.mark(fld.Names[0], f.Span)
+		}
+		if f.Embedded {
+			// Go names an embedded field after its type (ADR 0043).
+			fld.Names = nil
 		}
 		st.Fields.List = append(st.Fields.List, fld)
 	}
@@ -608,14 +632,21 @@ func (l *fileLowerer) entryRef(e *types.EnumEntry) ast.Expr {
 //		ColorGreen
 //	)
 //
-// and a String method that returns the entry's name.
+// and a String method that returns the entry's name. A string-backed enum
+// lowers to type Plan string with a typed constant per entry. Unless the enum
+// declares them, MarshalText and UnmarshalText carry the entries' wire texts
+// (ADR 0035); a string-backed enum needs only UnmarshalText.
 func (l *fileLowerer) enumDecl(d *syntax.EnumDecl) {
 	ts := l.typeSym(d.Name.Name)
 	if ts == nil || ts.Decl == nil {
 		return
 	}
 	decl := ts.Decl
-	spec := &ast.TypeSpec{Name: ast.NewIdent(decl.GoName), Type: ast.NewIdent("int")}
+	under := "int"
+	if decl.Backing != nil {
+		under = "string"
+	}
+	spec := &ast.TypeSpec{Name: ast.NewIdent(decl.GoName), Type: ast.NewIdent(under)}
 	l.mark(spec.Name, d.Name.S)
 	gd := &ast.GenDecl{Doc: docGroup(d.Doc), Tok: token.TYPE, TokPos: l.pos(d.S), Specs: []ast.Spec{spec}}
 	l.mark(gd, d.S)
@@ -627,36 +658,113 @@ func (l *fileLowerer) enumDecl(d *syntax.EnumDecl) {
 	consts := &ast.GenDecl{Tok: token.CONST, TokPos: l.pos(d.S), Lparen: l.pos(d.S), Rparen: l.endPos(d.S)}
 	for i, e := range decl.Entries {
 		vs := &ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(e.GoName)}}
-		if i == 0 {
+		switch {
+		case decl.Backing != nil:
+			vs.Type, vs.Values = ast.NewIdent(decl.GoName), []ast.Expr{strLit(e.Wire)}
+		case i == 0:
 			vs.Type, vs.Values = ast.NewIdent(decl.GoName), []ast.Expr{ast.NewIdent("iota")}
 		}
 		consts.Specs = append(consts.Specs, vs)
 	}
-	markTree(l, consts, d.S)
+	// The entries stay unmapped: a //line directive between two of them
+	// (one per line where Lyth has them on one line) would break gofmt's
+	// alignment of the block.
+	l.markSynth(consts, d.S)
 	l.decls = append(l.decls, consts)
 
 	recv := strings.ToLower(decl.GoName[:1])
+	method := func(doc string, ptr bool, name string, params, results []*ast.Field, body ...ast.Stmt) {
+		var rt ast.Expr = ast.NewIdent(decl.GoName)
+		if ptr {
+			rt = &ast.StarExpr{X: rt}
+		}
+		fd := &ast.FuncDecl{
+			Doc:  &ast.CommentGroup{List: []*ast.Comment{{Text: "// " + doc}}},
+			Recv: &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{ast.NewIdent(recv)}, Type: rt}}},
+			Name: ast.NewIdent(name),
+			Type: &ast.FuncType{Params: &ast.FieldList{List: params}, Results: &ast.FieldList{List: results}},
+			Body: &ast.BlockStmt{List: body},
+		}
+		markTree(l, fd, d.S)
+		l.decls = append(l.decls, fd)
+	}
+	call := func(fun ast.Expr, args ...ast.Expr) *ast.CallExpr { return &ast.CallExpr{Fun: fun, Args: args} }
+	sel := func(pkg, name string) ast.Expr {
+		return &ast.SelectorExpr{X: ast.NewIdent(pkg), Sel: ast.NewIdent(name)}
+	}
+	ret := func(xs ...ast.Expr) ast.Stmt { return &ast.ReturnStmt{Results: xs} }
+	field := func(name string, t ast.Expr) *ast.Field {
+		f := &ast.Field{Type: t}
+		if name != "" {
+			f.Names = []*ast.Ident{ast.NewIdent(name)}
+		}
+		return f
+	}
+	bytesType := func() ast.Expr { return &ast.ArrayType{Elt: ast.NewIdent("byte")} }
+	stringResult := []*ast.Field{field("", ast.NewIdent("string"))}
+
+	if decl.Backing != nil {
+		method("String returns the value of the "+decl.Name+" entry.", false, "String", nil, stringResult,
+			ret(call(ast.NewIdent("string"), ast.NewIdent(recv))))
+		if decl.TextMethods {
+			// The value switch accepts exactly the declared entries.
+			fmtPkg := l.useImport("fmt", "fmt")
+			var list []ast.Expr
+			for _, e := range decl.Entries {
+				list = append(list, ast.NewIdent(e.GoName))
+			}
+			v := "v"
+			if recv == v {
+				v = "x"
+			}
+			sw := &ast.SwitchStmt{
+				Init: &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(v)}, Tok: token.DEFINE, Rhs: []ast.Expr{call(ast.NewIdent(decl.GoName), ast.NewIdent("text"))}},
+				Tag:  ast.NewIdent(v),
+				Body: &ast.BlockStmt{List: []ast.Stmt{&ast.CaseClause{List: list, Body: []ast.Stmt{
+					&ast.AssignStmt{Lhs: []ast.Expr{&ast.StarExpr{X: ast.NewIdent(recv)}}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(v)}},
+					ret(ast.NewIdent("nil")),
+				}}}},
+			}
+			method("UnmarshalText sets "+recv+" to the "+decl.Name+" entry with the given value.", true, "UnmarshalText",
+				[]*ast.Field{field("text", bytesType())}, []*ast.Field{field("", ast.NewIdent("error"))},
+				sw, ret(call(sel(fmtPkg, "Errorf"), strLit("invalid "+decl.Name+" %q"), ast.NewIdent("text"))))
+		}
+		return
+	}
+
 	sw := &ast.SwitchStmt{Tag: ast.NewIdent(recv), Body: &ast.BlockStmt{}}
 	for _, e := range decl.Entries {
 		sw.Body.List = append(sw.Body.List, &ast.CaseClause{List: []ast.Expr{ast.NewIdent(e.GoName)},
-			Body: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{strLit(e.Name)}}}})
+			Body: []ast.Stmt{ret(strLit(e.Name))}})
 	}
 	strconvPkg := l.useImport("strconv", "strconv")
+	asInt := call(ast.NewIdent("int"), ast.NewIdent(recv))
 	// Color(7) for a value that is not an entry, as Go's stringer prints.
 	other := &ast.BinaryExpr{Op: token.ADD,
-		X: &ast.BinaryExpr{Op: token.ADD, X: strLit(decl.Name + "("),
-			Y: &ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(strconvPkg), Sel: ast.NewIdent("Itoa")},
-				Args: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent("int"), Args: []ast.Expr{ast.NewIdent(recv)}}}}},
+		X: &ast.BinaryExpr{Op: token.ADD, X: strLit(decl.Name + "("), Y: call(sel(strconvPkg, "Itoa"), asInt)},
 		Y: strLit(")")}
-	fd := &ast.FuncDecl{
-		Doc:  &ast.CommentGroup{List: []*ast.Comment{{Text: "// String returns the name of the " + decl.Name + " entry."}}},
-		Recv: &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{ast.NewIdent(recv)}, Type: ast.NewIdent(decl.GoName)}}},
-		Name: ast.NewIdent("String"),
-		Type: &ast.FuncType{Params: &ast.FieldList{}, Results: &ast.FieldList{List: []*ast.Field{{Type: ast.NewIdent("string")}}}},
-		Body: &ast.BlockStmt{List: []ast.Stmt{sw, &ast.ReturnStmt{Results: []ast.Expr{other}}}},
+	method("String returns the name of the "+decl.Name+" entry.", false, "String", nil, stringResult, sw, ret(other))
+	if !decl.TextMethods {
+		return
 	}
-	markTree(l, fd, d.S)
-	l.decls = append(l.decls, fd)
+
+	fmtPkg := l.useImport("fmt", "fmt")
+	marshal := &ast.SwitchStmt{Tag: ast.NewIdent(recv), Body: &ast.BlockStmt{}}
+	unmarshal := &ast.SwitchStmt{Tag: call(ast.NewIdent("string"), ast.NewIdent("text")), Body: &ast.BlockStmt{}}
+	for _, e := range decl.Entries {
+		marshal.Body.List = append(marshal.Body.List, &ast.CaseClause{List: []ast.Expr{ast.NewIdent(e.GoName)},
+			Body: []ast.Stmt{ret(call(bytesType(), strLit(e.Wire)), ast.NewIdent("nil"))}})
+		unmarshal.Body.List = append(unmarshal.Body.List, &ast.CaseClause{List: []ast.Expr{strLit(e.Wire)},
+			Body: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{&ast.StarExpr{X: ast.NewIdent(recv)}}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(e.GoName)}}}})
+	}
+	unmarshal.Body.List = append(unmarshal.Body.List, &ast.CaseClause{
+		Body: []ast.Stmt{ret(call(sel(fmtPkg, "Errorf"), strLit("invalid "+decl.Name+" %q"), ast.NewIdent("text")))}})
+	method("MarshalText returns the wire name of the "+decl.Name+" entry.", false, "MarshalText",
+		nil, []*ast.Field{field("", bytesType()), field("", ast.NewIdent("error"))},
+		marshal, ret(ast.NewIdent("nil"), call(sel(fmtPkg, "Errorf"), strLit("invalid "+decl.Name+" %d"), call(ast.NewIdent("int"), ast.NewIdent(recv)))))
+	method("UnmarshalText sets "+recv+" to the "+decl.Name+" entry with the given wire name.", true, "UnmarshalText",
+		[]*ast.Field{field("text", bytesType())}, []*ast.Field{field("", ast.NewIdent("error"))},
+		unmarshal, ret(ast.NewIdent("nil")))
 }
 
 func (l *fileLowerer) interfaceDecl(d *syntax.InterfaceDecl) {

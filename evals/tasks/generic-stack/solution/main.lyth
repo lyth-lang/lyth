@@ -9,16 +9,16 @@ func *Stack[T].Push(v: T) {
 }
 
 func *Stack[T].Pop(): (T, bool) {
-    if len(items) == 0 {
+    if len(self.items) == 0 {
         zero: T
         return zero, false
     }
-    v := items[len(items) - 1]
-    self.items = items[:len(items) - 1]
+    v := self.items[len(self.items) - 1]
+    self.items = self.items[:len(self.items) - 1]
     return v, true
 }
 
-func Stack[T].Len(): int = len(items)
+func Stack[T].Len(): int = len(self.items)
 
 func reversed[T](xs: []T): []T {
     s := Stack[T]()

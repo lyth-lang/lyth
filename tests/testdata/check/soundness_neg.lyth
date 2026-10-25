@@ -59,7 +59,7 @@ struct P {
 }
 
 func *P.Inc() {
-    X++
+    self.X++
 }
 
 func optionalsAreValues() {

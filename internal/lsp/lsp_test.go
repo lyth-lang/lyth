@@ -141,7 +141,7 @@ struct User {
     Name: string
 }
 
-func User.Label(): string = "${ID}:${Name}"
+func User.Label(): string = "${self.ID}:${self.Name}"
 
 func Zero[T](): T {
     z: T

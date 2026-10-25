@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("struct User}\nstruct Page[0]0}\nfun Page[A].Count)=0\nstruct User* Page[*00000000000000000000000000000000000")

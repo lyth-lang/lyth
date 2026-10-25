@@ -119,20 +119,26 @@ type StructDecl struct {
 
 // Field is a struct field.
 type Field struct {
-	Doc     string
-	Name    *Ident
-	Type    TypeExpr
-	Tag     string // raw tag text without backticks
-	HasTag  bool
-	TagSpan source.Span
-	S       source.Span
+	Doc  string
+	Name *Ident
+	// Embedded is a type alone on its line (ADR 0043): Name is then the
+	// type's name, with the span of that name in the type.
+	Embedded bool
+	Type     TypeExpr
+	Tag      string // raw tag text without backticks
+	HasTag   bool
+	TagSpan  source.Span
+	S        source.Span
 }
 
-// EnumDecl is `enum Color { Red, Green, Blue }`.
+// EnumDecl is `enum Color { Red, Green, Blue }`, or a string-backed
+// `enum Plan: string { Free = "free" }` (ADR 0035).
 type EnumDecl struct {
 	Doc     string
 	Name    *Ident
+	Backing TypeExpr // nil for a plain enum
 	Entries []*Ident
+	Values  []Expr // the value of each entry, nil where none is written
 	S       source.Span
 }
 
@@ -177,12 +183,23 @@ type ConstDecl struct {
 	S     source.Span
 }
 
-// TypeAliasDecl is `typealias Name = Type`.
+// TypeAliasDecl is `type Name = Type` (spelled `typealias Name = Type`
+// before ADR 0037).
 type TypeAliasDecl struct {
 	Doc  string
 	Name *Ident
 	Type TypeExpr
 	S    source.Span
+}
+
+// TypeDefDecl is `type Name[T] Underlying`, a Go defined type whose
+// underlying type is not a struct or interface body (ADR 0037).
+type TypeDefDecl struct {
+	Doc        string
+	Name       *Ident
+	TypeParams []*TypeParam
+	Type       TypeExpr
+	S          source.Span
 }
 
 // BadDecl is a declaration that could not be parsed.
@@ -196,6 +213,7 @@ func (d *PropDecl) Span() source.Span      { return d.S }
 func (d *ConstDecl) Span() source.Span     { return d.S }
 func (d *BadDecl) Span() source.Span       { return d.S }
 func (d *TypeAliasDecl) Span() source.Span { return d.S }
+func (d *TypeDefDecl) Span() source.Span   { return d.S }
 func (d *ImportDecl) Span() source.Span    { return d.S }
 func (f *File) Span() source.Span          { return f.S }
 func (r *Receiver) Span() source.Span      { return r.S }
@@ -214,6 +232,7 @@ func (*ConstDecl) declNode()     {}
 func (*ConstDecl) stmtNode()     {}
 func (*BadDecl) declNode()       {}
 func (*TypeAliasDecl) declNode() {}
+func (*TypeDefDecl) declNode()   {}
 
 // ---------------------------------------------------------------------------
 // Type expressions

@@ -150,7 +150,6 @@ A Lyth package compiles to a normal Go package:
 | Limitation | Diagnostic today | Plan |
 |---|---|---|
 | Go and Lyth files in the same package | E0601 "package mixes Go and Lyth files" (hand-written `_test.go` files are allowed: only go test compiles them) | Two-phase check: emit Go stubs for Lyth declarations, type-check Go files plus stubs with `go/types`, then check Lyth bodies (like Kotlin/Java joint compilation stubs). |
-| Embedding in Lyth structs | E0601 | Lowering to Go embedding; promotion via the shadow `go/types` package. |
 | Go APIs whose last result is a concrete error type | treated as an ordinary value | Opt-in `?` with nil check before interface conversion. |
 | Calling methods through `unsafe` or with `//go:linkname` | unsupported | not planned |
 | Go generic methods (Go does not have them) | n/a | n/a |

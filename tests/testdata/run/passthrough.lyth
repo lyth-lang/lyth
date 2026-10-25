@@ -10,13 +10,13 @@ struct limited {
 }
 
 func *limited.Write(b: []byte): (int, error?) {
-    if len(b) > Left {
-        n := Left
-        Left = 0
+    if len(b) > self.Left {
+        n := self.Left
+        self.Left = 0
         // Go's io.Writer contract: n bytes were written, then the error.
         return n, io.ErrShortWrite
     }
-    Left -= len(b)
+    self.Left -= len(b)
     return len(b), null
 }
 
@@ -26,7 +26,7 @@ struct counting {
     Total: int
 }
 
-func *counting.Write(b: []byte): int throws = W.Write(b)
+func *counting.Write(b: []byte): int throws = self.W.Write(b)
 
 func parse(s: string): int throws {
     return strconv.Atoi(s)

@@ -1,0 +1,85 @@
+// Defined types and aliases use Go's spelling (ADR 0037): type Name
+// Underlying is a new type with the operators of its underlying type and
+// methods of its own; type Name = Type is another name for the same type.
+import "fmt"
+import "net/http"
+import "strings"
+
+type UserID int64
+type OrderID int64
+type Cents int64
+type Role string
+type Tags []string
+type Set[T: comparable] map[T]struct{}
+type Celsius float64
+type Hot Celsius
+type Handler (http.ResponseWriter, *http.Request) -> unit throws
+type Middleware = (http.Handler) -> http.Handler
+
+const Admin: Role = "admin"
+const Member: Role = "member"
+
+func Cents.Euros(): float64 = float64(self) / 100
+
+func Cents.String(): string = "€${self.Euros()}"
+
+func Role.Valid(): bool = self == Admin || self == Member
+
+func Tags.Joined(): string = strings.Join(self, ",")
+
+func *Tags.Add(t: string) {
+    *self = append(*self, t)
+}
+
+func Set[T].Has(v: T): bool {
+    _, ok := self[v]
+    return ok
+}
+
+func lookup(id: UserID): string = "user ${id}"
+
+func order(id: OrderID): string = "order ${id}"
+
+func identity(next: http.Handler): http.Handler = next
+
+func main() {
+    id: UserID = 42
+    other := UserID(7)
+    println(lookup(id), lookup(other), int64(id) + 1, id + other, order(OrderID(int64(id))))
+
+    price := Cents(1999)
+    fmt.Println(price, price.Euros(), price * 2, price > 1000)
+
+    r := Admin
+    println(r, r == "admin", string(Member), r.Valid(), Role("guest").Valid())
+
+    tags: Tags = ["a", "b"]
+    tags.Add("c")
+    println(tags.Joined(), len(tags), tags[0], "b" in tags)
+    for i, t in tags {
+        println(i, t)
+    }
+
+    s := Set[string](["x": struct{}{}])
+    println(s.Has("x"), s.Has("y"), len(s))
+
+    hot := Hot(30.5)
+    println(float64(hot) > 30)
+
+    h: Handler = { w, req -> }
+    m: Middleware = identity
+    _ = h
+    println(m(http.NotFoundHandler()) != null)
+}
+
+// Output:
+// user 42 user 7 43 49 order 42
+// €19.99 19.99 €39.98 true
+// admin true member true false
+// a,b,c 3 a true
+// 0 a
+// 1 b
+// 2 c
+// true false 1
+// true
+// true

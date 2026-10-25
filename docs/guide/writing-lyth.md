@@ -50,7 +50,7 @@ struct User {
     Email: string?
 }
 
-func User.Label(): string = "${Name} (${Age})"
+func User.Label(): string = "${self.Name} (${self.Age})"
 
 func *User.Birthday() {
     self.Age++
@@ -60,7 +60,7 @@ struct NotFound {
     Name: string
 }
 
-func *NotFound.Error(): string = "no user named ${Name}"
+func *NotFound.Error(): string = "no user named ${self.Name}"
 
 func parseAge(s: string): int throws {
     n := strconv.Atoi(strings.TrimSpace(s)) catch (err) {
@@ -117,8 +117,8 @@ func main() throws {
 
 ## Declarations
 
-- Imports: `import "fmt"`, or a group with one per line: `import ( "fmt"; "net/http" as h )`
-  written over several lines. Rename with `as` (`"net/http" as h`), never Go's `h "net/http"`.
+- Imports: `import "fmt"`, or a group with one per line: `import ( "fmt"; h "net/http" )`
+  written over several lines. Rename as in Go: `import h "net/http"`, `import _ "path"`.
 - Functions: `func add(a: int, b: int): int { return a + b }`, or with one expression,
   `func add(a: int, b: int): int = a + b`. Parameters and results are `name: Type` and `: Type`.
   An unexported expression-bodied function may omit its result type (`func sq(n: int) = n * n`).
@@ -128,23 +128,43 @@ func main() throws {
   (the zero value) when the type matters. `a, b := f()` and `a, b = b, a + b` work as in Go.
   There is no `val` or `var` inside functions.
 - Package level: `var Default = "x"`, `const Max = 10`. `const` also works inside a function.
-- Parameters, loop variables, `catch` bindings, and `self` are read-only.
+- Parameters, loop variables, `catch` bindings, and `self` are read-only. `:=` may replace a
+  parameter with a value of its type derived from it, as Go code does:
+  `ctx, cancel := context.WithTimeout(ctx, d)`, `g, ctx := errgroup.WithContext(ctx)`,
+  `name := strings.TrimSpace(name)`.
 - Visibility is Go's: a capitalized name is exported. Write Go-style names yourself: `UserID`,
   `NewServer`, `ID`.
 - Structs: `struct User { ... }` with one `Name: Type` field per line. Exported fields get
-  lower-camel `json` tags automatically. Construct by calling the type:
+  lower-camel `json` tags automatically (`UserID` → `userID`, `IDs` → `ids`, `HTTPServer` →
+  `httpServer`), and a null `T?` field is left out of the JSON. A name like `ETag` warns
+  (W0008): give it a tag such as `json:"etag"`. `json:",string"` keeps the automatic name.
+  Construct by calling the type:
   `User(Name = "a", Age = 3)`, positionally with every field, and `&User(...)` for a pointer. Go
   structs take named arguments: `&http.Server(Addr = ":8080")`.
 - Methods are declared outside the struct: `func User.Hello(): string` (value receiver),
-  `func *User.Rename(n: string)` (pointer receiver). The receiver is `self`; fields are also in
-  scope by bare name. A method that changes the receiver's fields needs `*`.
+  `func *User.Rename(n: string)` (pointer receiver). The receiver is `self`, and fields and
+  methods are reached only through it: `self.Name`, `self.validate()`. A bare `Name` in a method
+  is an error, as in Go. A method that changes the receiver's fields needs `*`.
+- Embedding is Go's: a type alone on a line of a struct (`http.ResponseWriter`, `sync.Mutex`,
+  `pb.UnimplementedGreeterServer`, `Base`). Promoted members are reached through the value or
+  `self` (`self.Lock()`); the field is named after the type (`self.ResponseWriter`). An embedded
+  struct is flattened into JSON. `Store?` embeds an interface that may stay null (partial fakes).
 - Interfaces: `interface Shape { Area(): float64 }`. Conformance is structural, as in Go;
   `struct Circle : Shape { R: float64 }` also declares it, and the compiler checks it.
 - Generics: `func Max[T: cmp.Ordered](a: T, b: T): T`, `struct Page[T] { Items: []T }`,
   `func Page[T].First(): T`. Calls infer type arguments; write them in brackets when nothing
   determines them: `errors.AsType[*NotFound](err)`.
 - Extension functions: `func string.Shout(): string = strings.ToUpper(self) + "!"`.
+- Defined types and aliases, as in Go: `type UserID int64`, `type Role string`,
+  `type Set[T: comparable] map[T]struct{}` (a new type: `UserID(n)` converts, and methods can
+  be declared on it), and `type Handler = (http.ResponseWriter, *http.Request) -> unit throws`
+  (another name for the same type). Structs and interfaces keep `struct Name { ... }` and
+  `interface Name { ... }`.
 - Enums: `enum Color { Red, Green }`, used as `Color.Red`, or `Red` inside `when c { ... }`.
+  JSON carries the entry name in lower camel case (`"red"`) and rejects anything else. For
+  fixed wire values, use a string-backed enum: `enum Plan: string { Free = "free", Pro = "pro" }`
+  (Go's `type Plan string`; pgx and `database/sql` store it as text). A string-backed enum has
+  no zero value unless an entry is `""`.
   `sealed interface Shape { ... }` is implemented only by structs of the same package that
   declare it.
 - Default and named arguments: `func connect(host: string, port: int = 5432)`, called as
@@ -169,7 +189,9 @@ func main() throws {
 - `f() catch { fallback }`, or `f() catch (err) { ...; fallback }`, handles it in place.
   `f() catch {}` ignores it explicitly.
 - `f() catch (e: *NotFound) { ... }` handles one error type (through wrapping); it must end with
-  `?` or a final `catch` for the other errors.
+  `?` or a final `catch` for the other errors. For an error already in a variable, use
+  `nf, ok := errors.AsType[*NotFound](err)`: `err is *NotFound` sees only the outermost error and
+  misses a wrapped one (warning W0007).
 - An error that is not handled is a compile error. `func main() throws` prints the error and
   exits with status 1, and tests may be `throws`.
 - `n, err := strconv.Atoi(s)` also works, as in Go.
@@ -232,6 +254,8 @@ What Go programmers write by habit, and the Lyth for it:
 | `var x = 1` in a function | `x := 1` |
 | `switch` | `when` |
 | `if v := f(); v > 0 { }` | `v := f()`, then `if v > 0 { }` |
+| `ctx, cancel := context.WithTimeout(ctx, d)` | the same: `:=` may replace a parameter with a value derived from it |
+| `r = r.WithContext(ctx)` (assigning a parameter) | `r := r.WithContext(ctx)` |
 | `strings.FieldsFunc(s, func(r rune) bool { ... })` | `strings.FieldsFunc(s) { r -> ... }` |
 
 ## Coming from Kotlin
@@ -255,7 +279,7 @@ What Go programmers write by habit, and the Lyth for it:
 
 ## Not supported yet
 
-Struct embedding in Lyth structs, `when` over errors, `defer f()?`, external test packages
+`when` over errors, `defer f()?`, external test packages
 (`package x_test`), packages mixing Lyth and non-test Go files, `T?` on type parameters, and
 named arguments and default values on generic functions. The compiler reports each of these
 with a way around it.
@@ -278,7 +302,7 @@ The table lists older Lyth forms and the Go and Kotlin habits the compiler recog
 | `[T cmp.Ordered]` | `[T: cmp.Ordered]` | yes |
 | `this` | `self` | yes |
 | `nil` | `null` | yes |
-| `"$name"` | `"${name}"` | yes |
+| `"$name"`, where `name` is a variable | `"${name}"`, or `"\$name"` for the text | no: both are possible |
 | `for (x in xs)` | `for x in xs` | yes |
 | `when (val x = e)` | `when x := e` | yes |
 | `(a, b) = f()` | `a, b = f()` | yes |
@@ -288,8 +312,16 @@ The table lists older Lyth forms and the Go and Kotlin habits the compiler recog
 | `for i := 0; i < n; i++` | `for i in 0..<n` | yes |
 | `go func() { ... }()` | `go { ... }` | yes |
 | `outer: for ...`, `break outer` | `outer@ for ...`, `break@outer` | yes |
-| `import h "net/http"` | `import "net/http" as h` | yes |
+| `import "net/http" as h` | `import h "net/http"` | yes |
+| `typealias Handler = (Ctx) -> unit` | `type Handler = (Ctx) -> unit` | yes |
+| `type User struct { ... }` | `struct User { ... }` | yes (the name and keyword) |
+| `Name Type` (a Go struct field) | `Name: Type` | yes |
 | `func (p *T) M()` | `func *T.M()`, and `self` in the body | no |
+| a field or method by bare name in a method (`Count++`, `validate()`) | `self.Count++`, `self.validate()` | yes, unless the name also names a package-level declaration or import there |
+| automatic json key `iDs` for `IDs`, `urLs` for `URLs`, `iPv4` for `IPv4` | the key is now `ids`, `urls`, `ipv4`; tag `json:"iDs"` keeps the old one (W0009) | no: a wire change |
+| a null `T?` field encoded as `null` | it is left out (`omitzero`); tag `json:"name"` keeps `null` | no: a wire change |
+| a `T?` passed to a Go `any` parameter arrived as a pointer (`*string`) | it arrives as its value, or a nil interface when null; pass `&x` where Go writes through a pointer | no: a run-time change |
+| an enum encoded as its number in JSON | its name (`"pendingReview"`); declare `MarshalJSON` and `UnmarshalJSON` to keep numbers | no: a wire change |
 
 ## Topics
 

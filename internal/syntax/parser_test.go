@@ -204,7 +204,7 @@ func TestParseProgram(t *testing.T) {
 	src := `package users
 
 import "fmt"
-import "github.com/jackc/pgx/v5" as pgx
+import pgx "github.com/jackc/pgx/v5"
 
 // User is a user.
 struct User {
@@ -223,7 +223,7 @@ const maxUsers = 100
 var greeting = "hi"
 
 func *Repo.Find(id: int64): User? throws {
-    u := db.get(id)?
+    u := self.db.get(id)?
         ?: return null
     if u.Name == "" {
         throw errors.New("empty")
@@ -238,7 +238,7 @@ func *Repo.Find(id: int64): User? throws {
     for x in 0..<10 {
         count = count + x
     }
-    for i, v in items { println(i, v) }
+    for i, v in self.items { println(i, v) }
     while count > 0 { count-- }
     a, b := pair()
     label := when count {
@@ -253,7 +253,7 @@ func *Repo.Find(id: int64): User? throws {
     return u
 }
 
-func User.display(): string = "${Name} <${Email ?: "-"}>"
+func User.display(): string = "${self.Name} <${self.Email ?: "-"}>"
 
 func main() throws {
     result := compute()

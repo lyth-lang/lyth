@@ -18,7 +18,7 @@ struct NotFound {
     Key: string
 }
 
-func *NotFound.Error(): string = Key
+func *NotFound.Error(): string = self.Key
 
 func pair(): (*NotFound?, int) {
     return null, 1

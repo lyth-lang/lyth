@@ -187,7 +187,9 @@ func (p *parser) expect(k Kind, context string) Token {
 
 func (p *parser) parseIdent(context string) *Ident {
 	t := p.tok()
-	if t.Kind == IDENT {
+	if t.Kind == IDENT || t.Kind == IN {
+		// in is a name wherever a name is expected (ADR 0044): fields,
+		// parameters, locals, loop variables.
 		p.next()
 		return &Ident{Name: t.Text, S: t.Span}
 	}
@@ -268,7 +270,7 @@ func (p *parser) syncStmt() {
 
 func isDeclStart(k Kind) bool {
 	switch k {
-	case FUN, STRUCT, INTERFACE, ENUM, SEALED, VAL, VAR, CONST, PUB, PRIVATE, IMPORT, PACKAGE, TYPEALIAS:
+	case FUN, STRUCT, INTERFACE, ENUM, SEALED, VAL, VAR, CONST, PUB, PRIVATE, IMPORT, PACKAGE, TYPE, TYPEALIAS:
 		return true
 	}
 	return false
@@ -371,8 +373,8 @@ func (p *parser) parseConst(start source.Span) *ConstDecl {
 	return d
 }
 
-// parseImport parses `import "path" [as name]` or a group
-// `import ( "a"; "b" as c )`, one import per line.
+// parseImport parses `import [name] "path"` or a group
+// `import ( "a"; c "b" )`, one import per line.
 func (p *parser) parseImport() []*ImportDecl {
 	start := p.next().Span // import
 	if !p.at(LPAREN) {
@@ -404,7 +406,7 @@ func (p *parser) parseImport() []*ImportDecl {
 	return out
 }
 
-// parseImportSpec parses `"path" [as name]` starting at the path. In a
+// parseImportSpec parses `[name] "path"` starting at the name or path. In a
 // group, recovery stops at the end of the line or the group.
 func (p *parser) parseImportSpec(start source.Span, inGroup bool) *ImportDecl {
 	d := &ImportDecl{}
@@ -426,20 +428,18 @@ func (p *parser) parseImportSpec(start source.Span, inGroup bool) *ImportDecl {
 		d.PathSpan = t.Span
 	case IDENT:
 		if pt := p.peek(1); pt.Kind == STRING && pt.Value != "" && p.file.Position(pt.Span.Start).Line == p.file.Position(t.Span.Start).Line {
-			// Go's renamed import: import h "net/http".
+			// A renamed import, Go's spelling: import h "net/http".
 			p.next()
 			p.next()
 			d.Path, d.PathSpan = pt.Value, pt.Span
 			d.Alias = &Ident{Name: t.Text, S: t.Span}
-			p.errorf(diag.EUnexpectedToken, t.Span, "a renamed import is written \"path\" as name").
-				WithFix(t.Span.Join(pt.Span), pt.Text+" as "+t.Text, "write %s as %s", pt.Text, t.Text)
 			d.S = p.spanFrom(start)
 			return d
 		}
 		dg := p.errorf(diag.EUnexpectedToken, t.Span, "import paths are quoted Go import paths")
 		if p.peek(1).Kind == DOT {
 			// Kotlin-style dotted import.
-			dg.WithHint("write import \"net/http\" (use 'as name' to rename)")
+			dg.WithHint("write import \"net/http\" (rename it with import h \"net/http\")")
 		} else {
 			dg.WithFix(t.Span, strconv.Quote(t.Text), "write %q", t.Text)
 		}
@@ -458,8 +458,14 @@ func (p *parser) parseImportSpec(start source.Span, inGroup bool) *ImportDecl {
 		d.S = p.spanFrom(start)
 		return d
 	}
-	if p.accept(AS) {
+	if p.at(AS) {
+		// The spelling before ADR 0044: import "net/http" as h.
+		p.next()
 		d.Alias = p.parseIdent("after 'as'")
+		if d.Alias.Name != "_" || d.Alias.S.Len() > 0 {
+			p.errorf(diag.EUnsupportedSyntax, d.PathSpan.Join(d.Alias.S), "a renamed import is written name \"path\", as in Go").
+				WithFix(d.PathSpan.Join(d.Alias.S), d.Alias.Name+" "+t.Text, "write %s %s", d.Alias.Name, t.Text)
+		}
 	}
 	d.S = p.spanFrom(start)
 	return d
@@ -555,8 +561,17 @@ func (p *parser) parseDecl() (decl Decl) {
 		d.S = p.spanFrom(start)
 		p.endDecl()
 		return d
+	case TYPE:
+		d := p.parseTypeDecl(start, doc)
+		if _, bad := d.(*BadDecl); !bad {
+			p.endDecl() // a BadDecl has synchronized to the next declaration
+		}
+		return d
 	case TYPEALIAS:
-		p.next()
+		// The spelling before ADR 0037: typealias Name = Type.
+		kw := p.next()
+		p.errorf(diag.EUnsupportedSyntax, kw.Span, "type aliases are declared with type Name = Type, as in Go").
+			WithFix(kw.Span, "type", "write type")
 		d := &TypeAliasDecl{Doc: doc}
 		d.Name = p.parseIdent("after 'typealias'")
 		if p.at(LBRACK) || p.at(LSS) {
@@ -591,8 +606,6 @@ func (p *parser) parseDecl() (decl Decl) {
 	d := p.errorf(diag.EUnexpectedToken, t.Span, "expected declaration, found %s", describe(t))
 	if t.Kind == IDENT {
 		switch t.Text {
-		case "type":
-			d.WithHint("declare types with 'struct Name { ... }', 'interface Name { ... }', or 'typealias Name = Type'")
 		case "class", "data":
 			d.WithHint("Lyth uses 'struct' for data types")
 		}
@@ -602,6 +615,47 @@ func (p *parser) parseDecl() (decl Decl) {
 	}
 	p.syncDecl()
 	return &BadDecl{S: p.spanFrom(start)}
+}
+
+// parseTypeDecl parses `type Name[T] Underlying` (a defined type) and
+// `type Name = Type` (an alias), Go's spellings (ADR 0037). Go's
+// `type Name struct { ... }` is reported with the Lyth declaration.
+func (p *parser) parseTypeDecl(start source.Span, doc string) Decl {
+	kw := p.expect(TYPE, "")
+	name := p.parseIdent("after 'type'")
+	var tps []*TypeParam
+	if p.at(LBRACK) && p.tok().Span.Start == name.S.End && p.peek(1).Kind == IDENT {
+		// type Set[T: comparable] map[T]struct{}; with a space, as in
+		// type Grid [3]int, the bracket starts an array type.
+		tps = p.parseTypeParams()
+	}
+	if p.at(ASSIGN) {
+		p.next()
+		p.skipNL()
+		d := &TypeAliasDecl{Doc: doc, Name: name}
+		d.Type = p.parseType()
+		d.S = p.spanFrom(start)
+		if len(tps) > 0 {
+			// Without its parameters the aliased type would only add
+			// "undefined" errors, so the declaration is dropped.
+			p.errorf(diag.EUnsupportedSyntax, tps[0].S.Join(tps[len(tps)-1].S), "generic type aliases are not supported yet")
+			return &BadDecl{S: d.S}
+		}
+		return d
+	}
+	if p.at(STRUCT) || p.at(INTERFACE) {
+		// Go's type User struct { ... }: Lyth names the kind first.
+		kind := p.tok()
+		head := kw.Span.Join(kind.Span)
+		p.errorf(diag.EUnsupportedSyntax, head, "a %s is declared %s %s { ... }", kind.Text, kind.Text, name.Name).
+			WithFix(head, kind.Text+" "+name.Name, "write %s %s", kind.Text, name.Name)
+		p.syncDecl()
+		return &BadDecl{S: p.spanFrom(start)}
+	}
+	d := &TypeDefDecl{Doc: doc, Name: name, TypeParams: tps}
+	d.Type = p.parseType()
+	d.S = p.spanFrom(start)
+	return d
 }
 
 // visibilityKeyword reports pub or private, which Lyth does not have: as in
@@ -636,6 +690,8 @@ func declName(d Decl) string {
 	case *PropDecl:
 		id = d.Name
 	case *TypeAliasDecl:
+		id = d.Name
+	case *TypeDefDecl:
 		id = d.Name
 	case *ConstDecl:
 		id = d.Name
@@ -1367,9 +1423,23 @@ func (p *parser) parseStructDecl(start source.Span, doc string) *StructDecl {
 			p.syncStmt()
 			continue
 		}
-		f.Name = p.parseIdent("for field name")
-		p.expect(COLON, "after field name")
-		f.Type = p.parseType()
+		switch {
+		case p.embedLine():
+			// A type alone on its line embeds it (ADR 0043).
+			f.Embedded = true
+			f.Type = p.parseType()
+			f.Name = EmbeddedName(f.Type)
+		case p.at(IDENT) && p.goFieldLine():
+			// Go's Name Type.
+			f.Name = p.parseIdent("")
+			p.errorf(diag.EUnsupportedSyntax, f.Name.S, "struct fields are declared as name: Type").
+				WithFix(f.Name.S, f.Name.Name+":", "write %s: and the type", f.Name.Name)
+			f.Type = p.parseType()
+		default:
+			f.Name = p.parseIdent("for field name")
+			p.expect(COLON, "after field name")
+			f.Type = p.parseType()
+		}
 		if p.at(RAWSTRING) {
 			t := p.next()
 			f.Tag, f.HasTag, f.TagSpan = t.Value, true, t.Span
@@ -1389,8 +1459,59 @@ func (p *parser) parseStructDecl(start source.Span, doc string) *StructDecl {
 	return d
 }
 
-// parseEnumDecl parses `enum Name { A, B, C }`; entries are separated by
-// commas or newlines.
+// embedLine reports whether a struct body line is a type alone, which embeds
+// it: T, *T, pkg.T, T?, or Page[int], followed by the end of the line or a
+// tag.
+func (p *parser) embedLine() bool {
+	switch p.tok().Kind {
+	case MUL, LBRACK, MAP, CHAN, LPAREN:
+		return true // the checker says what can be embedded
+	}
+	if !p.at(IDENT) {
+		return false
+	}
+	switch p.peek(1).Kind {
+	case DOT, NEWLINE, SEMI, RBRACE, RAWSTRING, STRING, COMMA, QUESTION, EOF:
+		return true
+	case LBRACK:
+		switch p.peek(2).Kind {
+		case RBRACK, INT, ELLIPSIS:
+			return false // Go's Name []T or Name [4]T
+		}
+		return true
+	}
+	return false
+}
+
+// goFieldLine reports whether a struct body line is Go's Name Type.
+func (p *parser) goFieldLine() bool {
+	switch p.peek(1).Kind {
+	case IDENT, MUL, MAP, CHAN, LBRACK:
+		return true
+	}
+	return false
+}
+
+// EmbeddedName returns the field name of an embedded type: the type's name
+// without package, pointer, type arguments, or ?, as in Go. It is nil when t
+// is not a type name.
+func EmbeddedName(t TypeExpr) *Ident {
+	for {
+		switch x := t.(type) {
+		case *NullableType:
+			t = x.Elem
+		case *PointerType:
+			t = x.Elem
+		case *NamedType:
+			return &Ident{Name: x.Name.Name, S: x.Name.S}
+		default:
+			return nil
+		}
+	}
+}
+
+// parseEnumDecl parses `enum Name { A, B, C }` and `enum Name: string { A =
+// "a" }`; entries are separated by commas or newlines.
 func (p *parser) parseEnumDecl(start source.Span, doc string) *EnumDecl {
 	p.expect(ENUM, "")
 	d := &EnumDecl{Doc: doc}
@@ -1398,6 +1519,9 @@ func (p *parser) parseEnumDecl(start source.Span, doc string) *EnumDecl {
 	if p.at(IDENT) && p.tok().Text == "class" {
 		p.errorf(diag.EUnsupportedSyntax, p.tok().Span, "Lyth declares enums with 'enum Name { ... }'")
 		p.next()
+	}
+	if p.accept(COLON) {
+		d.Backing = p.parseType()
 	}
 	p.expect(LBRACE, "to start the enum body")
 	for {
@@ -1412,6 +1536,11 @@ func (p *parser) parseEnumDecl(start source.Span, doc string) *EnumDecl {
 			continue
 		}
 		d.Entries = append(d.Entries, p.parseIdent(""))
+		var value Expr
+		if p.accept(ASSIGN) {
+			value = p.parseExpr()
+		}
+		d.Values = append(d.Values, value)
 		if p.at(LPAREN) || p.at(LBRACE) {
 			p.errorf(diag.EUnsupported, p.tok().Span, "enum entries cannot have values or bodies").
 				WithHint("use a sealed interface whose members are structs for entries that carry data")
@@ -1787,6 +1916,12 @@ func (p *parser) parseStmt() Stmt {
 			return s
 		}
 		p.errorf(diag.EUnsupportedSyntax, label.S, "labels can only be placed on for and while loops")
+		t = p.tok()
+	}
+	if t.Kind == IN {
+		// Nothing precedes a statement, so in cannot be the membership
+		// operator here: it is a name (ADR 0044), as in in := 3.
+		p.toks[p.pos].Kind = IDENT
 		t = p.tok()
 	}
 	if t.Kind != IDENT && t.Kind != THIS && t.Kind != VAL && t.Kind != VAR && IsKeywordName(t.Text) && (p.peek(1).Kind == DEFINE || p.peek(1).Kind == COLON && t.Kind != CATCH) {
@@ -2675,7 +2810,7 @@ func (p *parser) parseCall(fun Expr) Expr {
 	for !p.at(RPAREN) && !p.at(EOF) {
 		start := p.tok().Span
 		a := &Arg{}
-		if p.at(IDENT) && p.peek(1).Kind == ASSIGN {
+		if (p.at(IDENT) || p.at(IN)) && p.peek(1).Kind == ASSIGN {
 			a.Name = p.parseIdent("")
 			p.next() // =
 		}
@@ -2808,6 +2943,12 @@ func (p *parser) parseCatch(x Expr) Expr {
 
 func (p *parser) parsePrimary() Expr {
 	t := p.tok()
+	if t.Kind == IN {
+		// At the start of an operand in cannot be the membership operator,
+		// which follows its left operand: it is a name (ADR 0044).
+		p.toks[p.pos].Kind = IDENT
+		t = p.tok()
+	}
 	switch t.Kind {
 	case IDENT:
 		p.next()
@@ -3109,7 +3250,7 @@ func (p *parser) parseLambda() *LambdaExpr {
 	if p.at(ARROW) {
 		p.next()
 		lam.HasArrow = true
-	} else if p.at(IDENT) {
+	} else if p.at(IDENT) || p.at(IN) {
 		// Speculatively parse parameters followed by '->'.
 		save := p.pos
 		saveSink, saveLast := p.sink, p.lastErr
@@ -3117,7 +3258,7 @@ func (p *parser) parseLambda() *LambdaExpr {
 		p.sink = scratch
 		var params []*LambdaParam
 		for {
-			if !p.at(IDENT) {
+			if !p.at(IDENT) && !p.at(IN) {
 				break
 			}
 			start := p.tok().Span

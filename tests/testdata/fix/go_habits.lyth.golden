@@ -2,7 +2,7 @@
 import (
     "cmp"
     "fmt"
-    "net/url" as u
+    u "net/url"
     "strings"
 )
 
@@ -11,7 +11,7 @@ struct Point {
     Y: int
 }
 
-func Point.Sum(): int = X + Y
+func Point.Sum(): int = self.X + self.Y
 
 func biggest[T: cmp.Ordered](xs: []T): T {
     best := xs[0]

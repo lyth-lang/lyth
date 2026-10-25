@@ -34,7 +34,10 @@ type Checker struct {
 	inConstraint bool
 	// callee is the function expression of the call being checked: only
 	// there may a selector name an extension function.
-	callee    syntax.Expr
+	callee syntax.Expr
+	// selectorX is the bare name left of a selector being checked (log in
+	// log.Println), where an import may be meant.
+	selectorX syntax.Expr
 	conf      *Config
 	pkg       *Package
 	info      *Info
@@ -131,6 +134,7 @@ func Check(conf *Config, pkgPath string, files []*syntax.File) *Package {
 	c.declaring = true
 	c.resolveTypeDecls()
 	c.resolveFuncDecls()
+	c.finishEnums()
 	c.validatePendingInstances()
 	c.checkConformance()
 	c.resolveGlobals()
@@ -296,6 +300,8 @@ func (c *Checker) collect(files []*syntax.File) {
 				}
 			case *syntax.EnumDecl:
 				c.collectType(d.Name, types.EnumDecl, d, nil)
+			case *syntax.TypeDefDecl:
+				c.collectType(d.Name, types.DefinedDecl, d, d.TypeParams)
 			}
 		}
 	}
@@ -411,12 +417,12 @@ func (c *Checker) resolveImports(f *syntax.File) {
 		}
 		sym := &PkgSym{name: name, Pkg: pkg, Import: imp}
 		if old := fs.Insert(sym); old != nil {
-			c.errorf(diag.EDuplicate, imp.S, "%s is imported twice", name).WithHint("rename one import with 'as'")
+			c.errorf(diag.EDuplicate, imp.S, "%s is imported twice", name).WithHint("rename one import: name \"path\"")
 		}
 		if other := c.pkgScope.LookupLocal(name); other != nil {
 			c.errorf(diag.EDuplicate, imp.S, "import name %s conflicts with the declaration of %s", name, name).
 				WithRelated(other.DeclSpan(), "%s declared here", name).
-				WithHint("rename the import with 'as'")
+				WithHint("rename the import: name \"path\"")
 		}
 	}
 }
@@ -465,33 +471,114 @@ func universe() *Scope {
 	return u
 }
 
-// lookup resolves a name from the current scope, including receiver members
-// reachable through implicit `this`.
+// lookup resolves a name from the current scope. Receiver members are not
+// in scope: they are reached through self (ADR 0038).
 func (c *Checker) lookup(name string) Symbol {
 	for s := c.scope; s != nil; s = s.parent {
 		if sym := s.syms[name]; sym != nil {
 			return sym
 		}
-		// Members are in scope at the method's own level: inside a lambda
-		// or a go/defer block, the enclosing locals and parameters come
-		// first, then the receiver's fields.
+	}
+	return nil
+}
+
+// lookupSkippingMembers is lookup; the name remains from when members were
+// in scope by name.
+func (c *Checker) lookupSkippingMembers(name string) Symbol { return c.lookup(name) }
+
+// implicitMember returns the receiver member a bare name meant before ADR
+// 0038, when members were in scope at the method's own level (inside a
+// lambda or a go/defer block, the enclosing locals and parameters came
+// first). Such a name is an error whose fix writes self., even where it now
+// resolves to something else, so no meaning changes silently.
+func (c *Checker) implicitMember(name string) *MemberSym {
+	for s := c.scope; s != nil; s = s.parent {
+		if s.syms[name] != nil {
+			return nil
+		}
 		if s.kind == FuncScope && s.fn != nil && !s.fn.isLambda && s.fn.recv != nil && s.fn.recvDecl != nil {
-			if m := c.receiverMember(s.fn, name); m != nil {
-				return m
-			}
+			return c.receiverMember(s.fn, name)
 		}
 	}
 	return nil
 }
 
-// lookupSkippingMembers is lookup without the implicit receiver's members.
-func (c *Checker) lookupSkippingMembers(name string) Symbol {
-	for s := c.scope; s != nil; s = s.parent {
-		if sym := s.syms[name]; sym != nil {
-			return sym
+// callsOther reports whether id, the callee of a call, names something in
+// scope that a field of the receiver shares its name with: Config(Name = "x")
+// constructs the type Config, and max(a, b) calls the builtin, in a method of
+// a struct with a field Config or max. Calling a field that is not a function
+// never compiled, so the member cannot have been meant.
+func (c *Checker) callsOther(id *syntax.Ident, m *MemberSym) bool {
+	if c.callee != syntax.Expr(id) || m.Field == nil || signatureOf(m.Field.Type) != nil {
+		return false
+	}
+	return c.lookup(id.Name) != nil
+}
+
+// otherMeaning describes what a bare name that meant a member before ADR
+// 0038 means now, when that meaning is also valid where the name stands: a
+// package-level variable, constant, or function anywhere, and a builtin, a
+// type, or an import where it is called or selected from. It is "" when the
+// name can only have meant the member.
+func (c *Checker) otherMeaning(id *syntax.Ident) string {
+	switch s := c.lookup(id.Name).(type) {
+	case *VarSym:
+		return "the package-level variable " + id.Name
+	case *ConstSym:
+		return "the constant " + id.Name
+	case *FuncSym:
+		return "the function " + id.Name
+	case *BuiltinSym:
+		if c.callee == syntax.Expr(id) {
+			return "the builtin " + id.Name
+		}
+	case *TypeSym:
+		if c.callee == syntax.Expr(id) {
+			return "the type " + id.Name
+		}
+	case *PkgSym:
+		if c.selectorX == syntax.Expr(id) && s.Pkg != nil {
+			return "the import " + id.Name
 		}
 	}
-	return nil
+	return ""
+}
+
+// memberHas reports whether the receiver member m has a field or method
+// named sel; a method value has none.
+func (c *Checker) memberHas(m *MemberSym, sel *syntax.Ident) bool {
+	if m.Field == nil {
+		return false
+	}
+	t := types.Base(m.Field.Type)
+	if p, ok := t.(*types.Pointer); ok {
+		t = types.Base(p.Elem)
+	}
+	return c.quietMember(t, sel.Name, &syntax.Ident{Name: sel.Name, S: sel.S}) != nil
+}
+
+// bareMember reports a bare name that means a receiver member (ADR 0038).
+//
+// The edit is a fix (lyth fix applies it) only where the name cannot mean
+// anything else: code written before ADR 0038 meant the member, but code
+// written since may mean the package-level name, so there the edit is a hint.
+// It reports whether the name is ambiguous, which the caller treats as an
+// invalid operand: checking on with either meaning would add errors the
+// author's choice may remove.
+func (c *Checker) bareMember(id *syntax.Ident, m *MemberSym) (ambiguous bool) {
+	kind := "field"
+	if m.Method != nil {
+		kind = "method"
+	}
+	if other := c.otherMeaning(id); other != "" {
+		c.errorf(diag.EUndefined, id.S, "%s is a %s of self and also names %s; write self.%s for the %s", id.Name, kind, other, id.Name, kind).
+			WithEdit(id.S, "self."+id.Name, "if the %s is meant: self.%s", kind, id.Name).
+			WithNote("before ADR 0038 a bare %s meant the %s; lyth fix leaves the choice to you because it may mean %s", id.Name, kind, other)
+		return true
+	}
+	c.errorf(diag.EUndefined, id.S, "%s is a %s of self; write self.%s", id.Name, kind, id.Name).
+		WithFix(id.S, "self."+id.Name, "members are reached through self: self.%s", id.Name)
+	return false
 }
 
 func (c *Checker) receiverMember(fn *funcCtx, name string) *MemberSym {

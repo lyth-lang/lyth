@@ -1,0 +1,44 @@
+// Members are reached through self (ADR 0038), so a field may share its
+// name with a type, an import, or a local: Config(...) constructs the type,
+// strings.Join calls the package, and self.strings is the field.
+import "net/http"
+import "strings"
+import "sync/atomic"
+
+struct Config {
+    Name: string
+}
+
+struct Stats {
+    Hits: int64
+}
+
+struct Server {
+    Config: Config
+    http: *http.Client
+    strings: []string
+    hits: atomic.Int64
+}
+
+func *Server.Snapshot(): Stats = Stats(Hits = self.hits.Load())
+
+func *Server.describe(): string {
+    next: Config = Config(Name = self.Config.Name + "-next")
+    strings := strings.Join(self.strings, "+")
+    return "${next.Name} ${strings} timeout=${self.http.Timeout} ${http.StatusOK}"
+}
+
+func *Server.serve(n: int) {
+    for _ in 0..<n {
+        self.hits.Add(1)
+    }
+}
+
+func main() {
+    s := &Server(Config = Config(Name = "api"), http = &http.Client(), strings = ["a", "b"])
+    s.serve(3)
+    println(s.describe(), s.Snapshot().Hits)
+}
+
+// Output:
+// api-next a+b timeout=0s 200 3

@@ -84,7 +84,6 @@ func TestLexerErrors(t *testing.T) {
 		code diag.Code
 	}{
 		{`"abc`, diag.EUnterminated},
-		{`"$name"`, diag.EDollarTemplate},
 		{"017", diag.EInvalidNumber},
 		{"1__0", diag.EInvalidNumber},
 		{"'ab'", diag.EInvalidChar},
@@ -106,13 +105,18 @@ func TestLexerErrors(t *testing.T) {
 }
 
 func TestLexerDollarLiteral(t *testing.T) {
-	// A '$' not followed by an identifier or '{' is literal: SQL placeholders.
-	got, sink := lexKinds(t, `"where id = $1 and price > US$ 5"`)
-	if sink.HasErrors() {
-		t.Fatalf("unexpected error: %s", sink.All()[0].Message)
-	}
-	want := "string literal(where id = $1 and price > US$ 5) NL EOF"
-	if strings.Join(got, " ") != want {
-		t.Errorf("got %s", strings.Join(got, " "))
+	// A '$' not followed by '{' is text: SQL placeholders, and $name, which
+	// the checker reports only when name is a variable in scope (ADR 0042).
+	for src, want := range map[string]string{
+		`"where id = $1 and price > US$ 5"`: "string literal(where id = $1 and price > US$ 5) NL EOF",
+		`"$set $ref $body$ \$name"`:         "string literal($set $ref $body$ $name) NL EOF",
+	} {
+		got, sink := lexKinds(t, src)
+		if sink.HasErrors() {
+			t.Fatalf("Lex(%s): unexpected error: %s", src, sink.All()[0].Message)
+		}
+		if strings.Join(got, " ") != want {
+			t.Errorf("Lex(%s): got %s", src, strings.Join(got, " "))
+		}
 	}
 }

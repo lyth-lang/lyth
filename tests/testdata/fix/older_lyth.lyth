@@ -32,7 +32,7 @@ fun count(words: List<String>): Map<String, Int> {
     }
     for (k, n in counts) {
         if n > 1 {
-            fmt.Println("$k repeats")
+            fmt.Println("${k} repeats")
         }
     }
     return counts
@@ -47,7 +47,7 @@ fun main() {
     total = a * 10 + b
     val parts = strings.split("x,y,x", ",")
     val c = count(parts)
-    fmt.Println("$name ${total} ${c["x"]} ${Greeting}")
+    fmt.Println("${name} ${total} ${c["x"]} ${Greeting}")
     val box = Box<Int>(Items = [3, 4])
     fmt.Println(box.First(), maxOf(2, 5), pick(1.5, 0.5))
     val p: Named? = Pet{PetName: "rex"}

@@ -27,12 +27,12 @@ struct Order {
 
 // Validate checks business rules.
 func Order.Validate() throws {
-    if len(Items) == 0 {
-        throw errors.New("order ${ID}: no items")
+    if len(self.Items) == 0 {
+        throw errors.New("order ${self.ID}: no items")
     }
-    for it in Items {
+    for it in self.Items {
         if it.Quantity <= 0 {
-            throw errors.New("order ${ID}: bad quantity for ${it.Sku}")
+            throw errors.New("order ${self.ID}: bad quantity for ${it.Sku}")
         }
     }
 }
@@ -40,7 +40,7 @@ func Order.Validate() throws {
 // Total returns the order total in cents.
 func Order.Total(): int64 {
     t: int64 = 0
-    for it in Items {
+    for it in self.Items {
         t += int64(it.Quantity) * it.PriceCents
     }
     return t

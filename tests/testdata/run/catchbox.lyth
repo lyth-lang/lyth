@@ -6,7 +6,7 @@ struct NotFound {
     Key: string
 }
 
-func *NotFound.Error(): string = "not found: ${Key}"
+func *NotFound.Error(): string = "not found: ${self.Key}"
 
 func lookup(key: string): int throws {
     when key {

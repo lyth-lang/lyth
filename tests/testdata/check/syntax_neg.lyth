@@ -29,7 +29,7 @@ func main() {
     val a = 1 // ERROR E0008 "write a := 1"
     var b: int = 2 // ERROR E0008 "write b: int = 2"
     name := "lyth"
-    println("$name") // ERROR E0006 "string templates use ${...}"
+    println("$name") // ERROR E0006 "prints literally; templates are written ${name}"
     for (i in 0..<2) { // ERROR E0008 "write for i in 0..<2"
         println(i)
     }

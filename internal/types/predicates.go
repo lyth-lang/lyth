@@ -68,6 +68,9 @@ func IsNilable(t Type) bool {
 				return true
 			}
 		}
+		if u := DefinedUnder(b); u != nil {
+			return IsNilable(u)
+		}
 		return IsInterface(b)
 	case *GoType:
 		_, ok := b.T.Underlying().(*gotypes.Interface)
@@ -133,6 +136,9 @@ func BasicOf(t Type) *Basic {
 					return nb
 				}
 			}
+		}
+		if u := DefinedUnder(b); u != nil {
+			return BasicOf(u)
 		}
 	}
 	return nil
@@ -407,9 +413,17 @@ func zeroable(t Type, seen map[*TypeDecl]bool) bool {
 	case *Array:
 		return zeroable(t.Elem, seen)
 	case *Named:
+		if u := DefinedUnder(t); u != nil {
+			return zeroable(u, seen)
+		}
 		if t.Decl != nil {
 			if t.Decl.Kind == InterfaceDecl {
 				return false
+			}
+			if t.Decl.Backing != nil {
+				// A string-backed enum has a zero value only when "" is
+				// one of its entries (ADR 0035).
+				return t.Decl.HasEmpty
 			}
 			if seen[t.Decl] {
 				return true
@@ -422,8 +436,14 @@ func zeroable(t Type, seen map[*TypeDecl]bool) bool {
 			}
 			return true
 		}
-		_, isIface := t.Go.Underlying().(*gotypes.Interface)
-		return !isIface
+		// A Go named type has its underlying type's zero value: a named
+		// function, pointer, or channel type (context.CancelFunc,
+		// http.HandlerFunc) has none in Lyth, like func() itself.
+		switch t.Go.Underlying().(type) {
+		case *gotypes.Interface, *gotypes.Signature, *gotypes.Pointer, *gotypes.Chan:
+			return false
+		}
+		return true
 	case *GoType:
 		_, isIface := t.T.Underlying().(*gotypes.Interface)
 		return !isIface
