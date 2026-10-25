@@ -79,6 +79,10 @@ Editor support lives in the repository's `editors/` folder:
 - **Kuana** (`editors/kuana-lyth`): highlighting, outline, run and test
   buttons with test results, and the language server. Kuana's Install button
   installs `lyth` with `go install`.
+- **Zed** (`editors/zed-lyth`): the same highlighting, outline, run and
+  test buttons, tasks, and snippets as Kuana, and the language server, which
+  it finds as `lyth` on your `PATH`. Install it with **zed: install dev
+  extension**.
 - **Other editors:** the tree-sitter grammar (`editors/tree-sitter-lyth`)
   covers highlighting, outline, indentation, and text objects. For the
   language server, start `lyth lsp` for `.lyth` files, with `go.mod` as the

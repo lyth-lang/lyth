@@ -1,0 +1,30 @@
+[
+  {
+    "label": "lyth run",
+    "command": "lyth",
+    "args": ["run", "$ZED_FILE"],
+    "cwd": "$ZED_DIRNAME",
+    "tags": ["lyth-main"]
+  },
+  {
+    "label": "lyth test: $ZED_CUSTOM_LYTH_TEST_NAME",
+    "command": "lyth",
+    "args": ["test", "-v", "-run", "^$ZED_CUSTOM_LYTH_TEST_NAME$", "."],
+    "cwd": "$ZED_DIRNAME",
+    "tags": ["lyth-test"]
+  },
+  {
+    "label": "lyth test (package)",
+    "command": "lyth",
+    "args": ["test", "-v", "."],
+    "cwd": "$ZED_DIRNAME",
+    "tags": ["lyth-test"]
+  },
+  {
+    "label": "lyth gen (show generated Go)",
+    "command": "lyth",
+    "args": ["gen", "-stdout", "-no-line-directives", "$ZED_FILE"],
+    "cwd": "$ZED_DIRNAME",
+    "tags": ["lyth-main"]
+  }
+]

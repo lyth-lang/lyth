@@ -1,0 +1,21 @@
+{
+  "main": { "prefix": "main", "body": ["func main() {", "\t$0", "}"], "description": "main function" },
+  "main throws": { "prefix": "mainthrows", "body": ["func main() throws {", "\t$0", "}"], "description": "main function that can fail" },
+  "func": { "prefix": "func", "body": ["func ${1:name}(${2}): ${3:Type} {", "\t$0", "}"], "description": "function" },
+  "func expression": { "prefix": "funce", "body": ["func ${1:name}(${2}) = ${0:value}"], "description": "expression-bodied function" },
+  "func throws": { "prefix": "funct", "body": ["func ${1:name}(${2}): ${3:Type} throws {", "\t$0", "}"], "description": "function that can fail" },
+  "method": { "prefix": "method", "body": ["func ${1:Type}.${2:name}(${3}): ${4:Result} {", "\t$0", "}"], "description": "method (value receiver)" },
+  "pointer method": { "prefix": "pmethod", "body": ["func *${1:Type}.${2:name}(${3}) {", "\t$0", "}"], "description": "method (pointer receiver)" },
+  "struct": { "prefix": "struct", "body": ["struct ${1:Name} {", "\t${2:Field}: ${3:Type}", "}"], "description": "struct" },
+  "interface": { "prefix": "interface", "body": ["interface ${1:Name} {", "\t${2:Method}(): ${3:Type}", "}"], "description": "interface" },
+  "enum": { "prefix": "enum", "body": ["enum ${1:Name} { ${2:First}, ${3:Second} }"], "description": "enum" },
+  "when": { "prefix": "when", "body": ["when ${1:value} {", "\t${2:case} -> ${3:result}", "\telse -> ${0:other}", "}"], "description": "when expression" },
+  "if": { "prefix": "if", "body": ["if ${1:condition} {", "\t$0", "}"], "description": "if" },
+  "for in": { "prefix": "for", "body": ["for ${1:x} in ${2:xs} {", "\t$0", "}"], "description": "for loop" },
+  "for range": { "prefix": "fori", "body": ["for ${1:i} in 0..<${2:n} {", "\t$0", "}"], "description": "for over a range" },
+  "while": { "prefix": "while", "body": ["while ${1:condition} {", "\t$0", "}"], "description": "while loop" },
+  "catch": { "prefix": "catch", "body": ["catch (${1:err}) {", "\t$0", "}"], "description": "handle an error" },
+  "go": { "prefix": "go", "body": ["go {", "\t$0", "}"], "description": "goroutine" },
+  "test": { "prefix": "test", "body": ["func Test${1:Name}(t: *testing.T) {", "\t$0", "}"], "description": "test function (in a _test.lyth file)" },
+  "println": { "prefix": "pl", "body": ["println(\"$0\")"], "description": "println" }
+}

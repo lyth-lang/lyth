@@ -1,0 +1,18 @@
+id = "lyth"
+name = "Lyth"
+version = "0.1.0"
+schema_version = 1
+description = "Support for the Lyth programming language: syntax highlighting, outline, run and test buttons, and the Lyth language server (diagnostics, completion, hover with the generated Go, go to definition, references, rename, signature help, inlay hints, quick fixes)."
+authors = ["Berkay Akin"]
+repository = "https://github.com/lyth-lang/lyth"
+snippets = ["./snippets/lyth.json"]
+
+# Zed builds the grammar from the repository at this commit: the last one that changed
+# editors/tree-sitter-lyth (set by ../build-zed-extension.sh).
+[grammars.lyth]
+repository = "https://github.com/lyth-lang/lyth"
+rev = "4b16ada4ca5a0f448f02bfc6c88bafe782a5dc0f"
+path = "editors/tree-sitter-lyth"
+
+[language_servers.lyth]
+languages = ["Lyth"]
