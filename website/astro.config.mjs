@@ -51,6 +51,17 @@ function lythDocs() {
 	};
 }
 
+// The specification's grammar blocks: terminals and operators.
+const ebnfGrammar = {
+	name: 'ebnf',
+	scopeName: 'source.ebnf',
+	patterns: [
+		{ match: '"[^"]*"', name: 'string.quoted.double.ebnf' },
+		{ match: '[=|.\\[\\]{}()]', name: 'keyword.operator.ebnf' },
+		{ match: '\\b[a-z_]+\\b', name: 'variable.other.ebnf' },
+	],
+};
+
 export default defineConfig({
 	// set LYTH_SITE_URL (and LYTH_REPO_URL for source links) when publishing
 	site: process.env.LYTH_SITE_URL,
@@ -67,7 +78,7 @@ export default defineConfig({
 				themes: ['one-dark-pro', 'one-light'],
 				// the default (5.5) washes the theme's colors out; 4.5 is WCAG AA
 				minSyntaxHighlightingColorContrast: 4.5,
-				shiki: { langs: [lythGrammar] },
+				shiki: { langs: [lythGrammar, ebnfGrammar] },
 			},
 			head: [{ tag: 'script', content: tabScript }],
 			sidebar,
