@@ -75,7 +75,7 @@ has the exact rules.
 | `f() catch {}` | `_ = f()` |
 | `find(id) catch (_: *NotFound) { guest }?` | `if _, ok := errors.AsType[*NotFound](err); ok { u = guest } else { return ..., err }` |
 | `return w.Write(b)` (in a `throws` function) | `return w.Write(b)` |
-| `err.wrap("loading ${path}")` | `fmt.Errorf("loading %v: %w", path, err)` |
+| `err.wrap("loading ${path}")` | `fmt.Errorf("loading %s: %w", path, err)` |
 | `n, err := strconv.Atoi(s)` | the same |
 | `func main() throws` | `main` that prints the error and exits with status 1 |
 
@@ -101,6 +101,7 @@ has the exact rules.
 | `for x in xs`, `for i, x in xs` | `for _, x := range xs`, `for i, x := range xs` |
 | `for k, v in m` | `for k, v := range m` |
 | `for i in 0..<n`, `for i in 1..n` | `for i := range n`, `for i := 1; i <= n; i++` |
+| `for k in maps.Keys(m)`, `for k, v in seq2` | `for k := range maps.Keys(m)`, `for k, v := range seq2` |
 | `while c { ... }`, `while true { ... }` | `for c { ... }`, `for { ... }` |
 | `break` inside `when` | `break` with a loop label (Lyth's `break` always exits the loop) |
 | `outer@ for x in xs { ... break@outer }` | `outer: for ... { ... break outer }` |

@@ -147,6 +147,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "empty_struct"
+        },
+        {
+          "type": "SYMBOL",
           "name": "map_type"
         },
         {
@@ -388,40 +392,87 @@
               "value": "import"
             },
             {
-              "type": "FIELD",
-              "name": "path",
-              "content": {
-                "type": "SYMBOL",
-                "name": "string"
-              }
-            },
-            {
               "type": "CHOICE",
               "members": [
+                {
+                  "type": "SYMBOL",
+                  "name": "_import_spec"
+                },
                 {
                   "type": "SEQ",
                   "members": [
                     {
                       "type": "STRING",
-                      "value": "as"
+                      "value": "("
                     },
                     {
-                      "type": "FIELD",
-                      "name": "alias",
+                      "type": "REPEAT",
                       "content": {
-                        "type": "SYMBOL",
-                        "name": "identifier"
+                        "type": "CHOICE",
+                        "members": [
+                          {
+                            "type": "SYMBOL",
+                            "name": "_import_spec"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": ";"
+                          }
+                        ]
                       }
+                    },
+                    {
+                      "type": "STRING",
+                      "value": ")"
                     }
                   ]
-                },
-                {
-                  "type": "BLANK"
                 }
               ]
             }
           ]
         }
+      }
+    },
+    "_import_spec": {
+      "type": "PREC_RIGHT",
+      "value": 0,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "FIELD",
+            "name": "path",
+            "content": {
+              "type": "SYMBOL",
+              "name": "string"
+            }
+          },
+          {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "SEQ",
+                "members": [
+                  {
+                    "type": "STRING",
+                    "value": "as"
+                  },
+                  {
+                    "type": "FIELD",
+                    "name": "alias",
+                    "content": {
+                      "type": "SYMBOL",
+                      "name": "identifier"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "BLANK"
+              }
+            ]
+          }
+        ]
       }
     },
     "function_declaration": {
@@ -1568,8 +1619,62 @@
         {
           "type": "SYMBOL",
           "name": "nullable_type"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "empty_struct_type"
         }
       ]
+    },
+    "empty_struct_type": {
+      "type": "PREC",
+      "value": 2,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "STRING",
+            "value": "struct"
+          },
+          {
+            "type": "STRING",
+            "value": "{"
+          },
+          {
+            "type": "STRING",
+            "value": "}"
+          }
+        ]
+      }
+    },
+    "empty_struct": {
+      "type": "PREC_DYNAMIC",
+      "value": 10,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "STRING",
+            "value": "struct"
+          },
+          {
+            "type": "STRING",
+            "value": "{"
+          },
+          {
+            "type": "STRING",
+            "value": "}"
+          },
+          {
+            "type": "STRING",
+            "value": "{"
+          },
+          {
+            "type": "STRING",
+            "value": "}"
+          }
+        ]
+      }
     },
     "_simple_type": {
       "type": "CHOICE",
@@ -2908,6 +3013,10 @@
         {
           "type": "STRING",
           "value": ">>="
+        },
+        {
+          "type": "STRING",
+          "value": "&^="
         },
         {
           "type": "STRING",

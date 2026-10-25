@@ -43,6 +43,7 @@ func MustEmail(u User) string {
 //line nullable.lyth:14
 	v := u.Email
 	if v == nil {
+//line nullable.lyth:14
 		panic("lyth: unexpected null (nullable.lyth:14:42)")
 	}
 //line nullable.lyth:14
@@ -92,6 +93,7 @@ func Port(s string) *int {
 	var toInt *int
 //line nullable.lyth:33
 	if v, err := strconv.Atoi(s); err == nil {
+//line nullable.lyth:33
 		toInt = new(v)
 	}
 	return toInt

@@ -104,6 +104,25 @@ const helloLyth = `func main() {
 // existing Go module: go.mod (through go mod init), main.lyth when there is
 // no Lyth code yet, AGENTS.md and CLAUDE.md for coding agents, and .lyth/ in
 // .gitignore. Files that exist are kept.
+// modulePathFor turns a directory name into a module path go mod init
+// accepts: "my proj 2" becomes "my-proj-2".
+func modulePathFor(dir string) string {
+	var b strings.Builder
+	for _, r := range dir {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '.', r == '_', r == '~':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	path := strings.Trim(b.String(), "-.")
+	if path == "" {
+		return "app"
+	}
+	return path
+}
+
 func cmdInit(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 1 || len(args) == 1 && strings.HasPrefix(args[0], "-") {
 		fmt.Fprintln(stderr, "usage: lyth init [module-path]")
@@ -127,14 +146,14 @@ func cmdInit(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 	default:
-		path := filepath.Base(wd)
+		path := modulePathFor(filepath.Base(wd))
 		if len(args) == 1 {
 			path = args[0]
 		}
 		cmd := exec.Command("go", "mod", "init", path)
 		cmd.Dir, cmd.Stdout, cmd.Stderr = wd, stdout, stderr
 		if err := cmd.Run(); err != nil {
-			fmt.Fprintf(stderr, "lyth: go mod init %s: %v\n", path, err)
+			fmt.Fprintf(stderr, "lyth: go mod init %s failed; give a module path: lyth init example.com/app\n", path)
 			return 1
 		}
 	}

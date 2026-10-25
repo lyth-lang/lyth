@@ -82,8 +82,8 @@ not keywords; a declaration beginning with `fun` is E0008 with the edit
 ### 1.6 Operators and punctuation
 
 ```
-+  -  *  /  %  &  |  ^  <<  >>  &&  ||  !  ==  !=  <  <=  >  >=
-=  +=  -=  *=  /=  %=  &=  |=  ^=  <<=  >>=  ++  --
++  -  *  /  %  &  |  ^  &^  <<  >>  &&  ||  !  ==  !=  <  <=  >  >=
+=  +=  -=  *=  /=  %=  &=  |=  ^=  &^=  <<=  >>=  ++  --
 :=  .  ?.  ?  ?:  !!  ..  ..<  ->  ...  ,  ;  :  @
 (  )  [  ]  {  }
 ```
@@ -122,13 +122,14 @@ raw_string = "`" { any char except "`" } "`" .
 ```ebnf
 SourceFile    = [ PackageClause ] { ImportDecl } { TopLevelDecl } .
 PackageClause = "package" identifier NEWLINE .
-ImportDecl    = "import" string_lit [ "as" ( identifier | "_" ) ] NEWLINE .
+ImportDecl    = "import" ( ImportSpec | "(" { ImportSpec NEWLINE } ")" ) NEWLINE .
+ImportSpec    = string_lit [ "as" ( identifier | "_" ) ] .
 ```
 
 A package is a directory. The package clause is optional. When it is
 omitted, the name is `main` if a file in the package declares a top-level
 `func main()`, otherwise the directory name (which must then be a valid
-identifier). External test packages (`package foo_test`) must be explicit.
+identifier). External test packages (`package foo_test`) are **[planned]**.
 
 Import paths are Go import paths, resolved by the Go toolchain
 against the enclosing module's `go.mod`. An import may refer to a Go package or a
@@ -136,15 +137,17 @@ Lyth package; the importer cannot tell the difference and does not need to. The
 default qualifier is the imported package's declared name (e.g. `pgx` for
 `github.com/jackc/pgx/v5`), not the last path element. `as name` renames the
 qualifier; `as _` imports for side effects (database drivers). Dot-imports do not
-exist.
+exist. Imports can be grouped as in Go, one per line:
+`import ( "fmt"; "net/http" as h )` written over several lines. Go's renamed form
+`h "net/http"` is E0003, with the edit to `"net/http" as h`.
 
 Unused imports are a warning (W0002); the generated Go simply omits them.
 
 ## 3. Declarations
 
 ```ebnf
-TopLevelDecl = { Annotation } ( FuncDecl | StructDecl | InterfaceDecl | SealedDecl
-             | EnumDecl | VarDecl | ConstDecl | TypeAliasDecl ) .
+TopLevelDecl = FuncDecl | StructDecl | InterfaceDecl | SealedDecl
+             | EnumDecl | VarDecl | ConstDecl | TypeAliasDecl .
 ```
 
 ### 3.1 Visibility and Go names
@@ -373,9 +376,10 @@ is exported, any importing package) may assign it, so it never smart-casts
 ([types.md §5.3](types.md#53-using-nullable-values)). A top-level `val` is
 E0008 with the edit `var`. `const` declares a Go constant: the initializer must
 be a constant expression, untyped unless a type is given
-(`const X: int64 = 5`); assigning one is E0501. Both are package-level only:
-inside a function, local variables are declared with `:=` (§4.1), and `const`
-is E0601.
+(`const X: int64 = 5`); assigning one is E0501. `var` is package-level only:
+inside a function, local variables are declared with `:=` (§4.1). `const` may
+also appear in a function body, as in Go; a local constant is in scope from its
+declaration to the end of the block and may refer to earlier constants.
 
 ### 3.6 Type aliases
 
@@ -502,7 +506,7 @@ ExprList     = Expression { "," Expression } .
   parameter in the function's outermost block, is E0005 with the hint "use =
   to assign". Redeclaring a name with `x: T` in the same scope is E0102.
 - Inside a function, `val` and `var` are E0008, with a hint giving the `:=`
-  or `name: Type` form; `const` is E0601 (constants are package-level, §3.5).
+  or `name: Type` form. `const` declares a local constant (§3.5).
 - A declaration in an inner block may hide a variable or parameter of an
   enclosing scope, as in Go. It draws warning W0006, which catches the
   shadowed `err` that `x, err := f()` in an inner block leaves unchanged in
@@ -532,7 +536,7 @@ Assignment = Target { "," Target } "=" ExprList
 Target     = Expression | "_" .
 ```
 
-`lhs = rhs` and compound forms `+= -= *= /= %= &= |= ^= <<= >>=`. The left side
+`lhs = rhs` and compound forms `+= -= *= /= %= &= |= ^= &^= <<= >>=`. The left side
 must be *assignable*: a local variable, a package-level `var`, a field or
 element reached through a mutable path, or `*p` (see
 [types.md §7](types.md#7-mutability)). Assigning a parameter, loop variable,
@@ -580,7 +584,11 @@ Continue = "continue" [ "@" identifier ] .
   - `string`: runes; `for i, r in s` gives byte offset and rune.
   - `chan T`: values until the channel is closed.
   - ranges `a..b` (inclusive) and `a..<b` (exclusive) of integer type.
-  - Go 1.23 iterator functions (`iter.Seq[T]`, `iter.Seq2[K, V]`) **[planned]**.
+  - Go iterator functions: `iter.Seq[V]` (`for v in seq`) and
+    `iter.Seq2[K, V]` (`for k, v in seq`; `for k in seq` gives the first
+    value), or any `func(yield func(...) bool)`. They lower to Go's
+    range-over-func, so `maps.Keys(m)`, `strings.Lines(s)`, and
+    `slices.All(xs)` work directly.
   Go's `for i, x := range xs` is E0008; its hint gives the Lyth form (for
   `for _, x := range xs`, `for x in xs`). Loop variables are read-only and
   fresh per iteration (Go 1.22 semantics), so closures capture them safely.
@@ -624,7 +632,7 @@ which is right-associative.
 | 6 | `?:` | elvis; right side may be `return`/`throw`/`break`/`continue` |
 | 7 | `..` `..<` | ranges, only in `for` and `in` |
 | 8 | `+` `-` `\|` `^` | Go's additive level |
-| 9 | `*` `/` `%` `<<` `>>` `&` | Go's multiplicative level |
+| 9 | `*` `/` `%` `<<` `>>` `&` `&^` | Go's multiplicative level |
 | 10 | `as` `as?` | |
 | 11 | prefix `-` `+` `!` `^` `&` `*` | |
 | 12 | postfix `.` `?.` `?` `!!` call `[...]` `catch` | |
@@ -666,12 +674,18 @@ slice literal `[]T{...}`, which is non-nil even when empty, so it serializes as
 `f(args)` is a function call, a struct construction (§3.3), or a conversion when
 `f` names a non-struct type (`int64(x)`, `float64(n)`, `time.Duration(n)`,
 `string(bytes)`, `[]byte(s)`).
+As in Go, a call whose only argument is a call returning several values passes
+those values as the arguments: `template.Must(t.Parse(s))` gives `Must` the
+template and the error, and `show(pair())` the two results of `pair`. A
+variadic function takes several results this way only when none is an error
+(`sum(pair())`); `fmt.Println(strconv.Atoi(s))` stays E0210, so an error is
+never printed instead of handled.
 Conversions follow Go's rules exactly; a lambda converted to a named function
 type takes its parameter types from that type
 (`http.HandlerFunc({ w, r -> ... })`), and a collection literal converted to a
 type is a literal of that type: `gin.H(["error": msg, "code": 7])` lowers to
 `gin.H{"error": msg, "code": 7}`. A trailing lambda may follow the
-argument list on the same line: `app.get("/health") { c -> c.text(200, "ok") }`.
+argument list on the same line: `strings.FieldsFunc(s) { r -> r == ',' }`.
 Explicit type arguments follow the name in brackets, `Max[int](xs)` or
 `errors.AsType[*NotFound](err)`: `x[A]` is an instantiation when `x` names a
 generic function or type, and an index otherwise

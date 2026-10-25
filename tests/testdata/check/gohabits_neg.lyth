@@ -1,0 +1,37 @@
+// Go habits get one diagnostic each, in Lyth's terms, and no cascade.
+struct T {
+    N: int
+    val: int // ERROR E0003 "val is a reserved word and cannot name a field"
+}
+
+func (t *T) Inc() { // ERROR E0008 "methods are declared func *T.Name(...); the receiver is self"
+    t.N++
+}
+
+func f(): int = 3
+
+func main() {
+    x := &T(N = 1)
+    x.Inc()
+    if v := f(); v > 0 { // ERROR E0008 "if has no initializer statement in Lyth"
+        println(v)
+    }
+    switch x.N { // ERROR E0008 "Lyth has no switch: use when"
+    case 1:
+        println("one")
+    }
+    go func() { // ERROR E0008 "go takes a block: go { ... }"
+        println("go")
+    }()
+    var n int // ERROR E0008 "local variables are declared with :="
+    in := 3 // ERROR E0003 "in is a keyword and cannot be a variable name"
+    for i := 0; i < n; i++ { // ERROR E0008 "Lyth has no three-part for loop"
+        println(i)
+    }
+    for k := 0; k < n; k++ { // ERROR E0008 "Lyth has no three-part for loop"
+        n = 0
+    }
+    for j := 0; j < n; j += 2 { // ERROR E0003 "for another step, use while"
+        println(j)
+    }
+}

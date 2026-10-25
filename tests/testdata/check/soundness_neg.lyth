@@ -1,0 +1,114 @@
+// Programs the checker must reject because the generated Go would not
+// compile, or would misbehave at run time.
+import "fmt"
+import "slices"
+import "strconv"
+
+enum Color { Red, Green }
+
+struct U {
+    Name: string
+}
+
+func find(): U? throws = null
+
+func nullCompare(s: string, n: int, u: U, p: *U) {
+    println(s != null) // ERROR E0201 "s has non-nullable type string, so it is never null"
+    println(n == null) // ERROR E0201 "never null"
+    println(u == null) // ERROR E0201 "never null"
+    when n {
+        null -> println("n") // ERROR E0201 "never null"
+        else -> println("e")
+    }
+}
+
+func safeCallOnNullableResult() throws {
+    a := find()??.Name
+    b := find()?.Name // ERROR E0401 "find(...) may be null on success (type U?)"
+    println(a, b)
+}
+
+func breakInCatch(s: string): int {
+    while true {
+        strconv.Atoi(s) catch { break }
+    }
+} // ERROR E0206 "missing return in breakInCatch"
+
+func rangeToMax(lo: byte) {
+    for b in lo..255 { // ERROR E0215 "a range of byte up to 255 never ends"
+        println(b)
+    }
+    for b in lo..<255 {
+        println(b)
+    }
+}
+
+func duplicates(x: int, c: Color, a: any) {
+    println(when x { 1, 1 -> "a"; else -> "c" }) // ERROR E0102 "duplicate when condition 1"
+    println(when c { Color.Red -> 1; Red -> 3; Green -> 2 }) // ERROR E0102 "duplicate when condition Red"
+    println(when a { is int -> 1; is int -> 2; else -> 3 }) // ERROR E0102 "duplicate when condition is int"
+}
+
+func deferPrint() {
+    defer fmt.Println("bye")
+    go fmt.Println("go")
+}
+
+struct P {
+    X: int
+}
+
+func *P.Inc() {
+    X++
+}
+
+func optionalsAreValues() {
+    o: P? = P(1)
+    if o != null {
+        o.X = 2 // ERROR E0502 "cannot assign to o.X: o is an optional value, which copies share"
+        o.Inc() // ERROR E0504 "cannot call Inc on o"
+    }
+    o?.Inc() // ERROR E0504 "o is an optional value"
+}
+
+struct S {
+    A: int?
+    B: string
+}
+
+func optionalFieldsCompareByAddress(x: S, y: S, a: [2]int?) {
+    println(x == y) // ERROR E0209 "field A has type int?, which Go would compare by address"
+    println(a == a) // ERROR E0209 "an element has type int?"
+    println(x in [y]) // ERROR E0209 "so in cannot search them"
+}
+
+func handlerWithoutValue() {
+    x := strconv.Atoi("q") catch (e) { fmt.Println(e) } // ERROR E0307 "catch handler must end with a value of type int or exit"
+    println(x)
+}
+
+func genericValues() {
+    f := slices.Reverse[[]int]
+    g := slices.Reverse // ERROR E0208 "cannot use generic function slices.Reverse without type arguments"
+    fmt.Println(slices.Max) // ERROR E0208 "slices.Max[...]"
+    println(f, g)
+}
+
+func nullTypeParam[T](f: () -> T throws): T {
+    x := f() catch { null } // ERROR E0407 "null makes this T?, and nullable type parameters are not supported yet"
+    return x
+}
+
+func Eq[T: comparable](x: T, y: T): bool = x == y
+
+func optionalKeys(q: S) {
+    m: map[S]int = [:] // ERROR E0213 "S cannot be a map key: field A has type int?"
+    println(len(m), Eq(q, q)) // ERROR E0213 "S cannot be the comparable type T"
+    o: P? = P(1)
+    if o != null {
+        f := o.Inc // ERROR E0504 "o is an optional value"
+        f()
+    }
+}
+
+func main() {}

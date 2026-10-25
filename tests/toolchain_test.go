@@ -85,6 +85,39 @@ func main() {
 	}
 }
 
+// The panic of !! is compiler glue before the statement; its frame must
+// still show the statement's line.
+func TestNullAssertionPanicShowsLythLine(t *testing.T) {
+	root := writeModule(t, "nntrace", map[string]string{
+		"app/main.lyth": `func get(): string? = null
+
+func main() {
+    x := 1
+    y := 2
+    s := get()!!
+    println(s, x, y)
+}
+`,
+	})
+	s := compileModule(t, root, false)
+	bin := filepath.Join(root, "app.bin")
+	if ok, err := s.GoBuild(bin, []string{"nntrace/app"}, nil); err != nil || !ok {
+		t.Fatalf("build failed: %v\n%s", err, render(s.Sink.All()))
+	}
+	var stderr bytes.Buffer
+	cmd := exec.Command(bin)
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err == nil {
+		t.Fatal("expected a panic")
+	}
+	out := stderr.String()
+	for _, want := range []string{"unexpected null (main.lyth:6:15)", "app/main.lyth:6 "} {
+		if !strings.Contains(out, want) {
+			t.Errorf("stack trace does not mention %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestVetFindingsMapToLyth(t *testing.T) {
 	root := writeModule(t, "vetmap", map[string]string{
 		"main.lyth": `import "fmt"
@@ -422,6 +455,11 @@ func TestParse(t: *testing.T) throws {
 }
 
 func helper(): int = 1
+
+func ExampleAdd() {
+    println(Add(2, 3))
+    // Output: 5
+}
 `,
 		"calc/calc_go_test.go": `package calc
 
@@ -438,7 +476,7 @@ func TestFromGo(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("go test failed (exit %d):\n%s", code, out)
 	}
-	for _, want := range []string{"--- PASS: TestAdd", "--- PASS: TestParse", "--- PASS: TestFromGo"} {
+	for _, want := range []string{"--- PASS: TestAdd", "--- PASS: TestParse", "--- PASS: TestFromGo", "--- PASS: ExampleAdd"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}

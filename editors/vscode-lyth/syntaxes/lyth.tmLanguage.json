@@ -642,7 +642,7 @@
           "name": "keyword.operator.decrement.lyth"
         },
         {
-          "match": "(?:<<|>>|[-+*/%&|^])?=|:=",
+          "match": "(?:<<|>>|&\\^|[-+*/%&|^])?=|:=",
           "name": "keyword.operator.assignment.go"
         },
         {
@@ -650,7 +650,7 @@
           "name": "keyword.operator.address.go"
         },
         {
-          "match": "<<|>>|[&|^]",
+          "match": "<<|>>|&\\^|[&|^]",
           "name": "keyword.operator.arithmetic.bitwise.lyth"
         },
         {

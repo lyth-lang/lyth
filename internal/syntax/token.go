@@ -63,6 +63,9 @@ const (
 	INC        // ++
 	DEC        // --
 
+	AND_NOT        // &^
+	AND_NOT_ASSIGN // &^=
+
 	DOT        // .
 	SAFE_DOT   // ?.
 	QUESTION   // ?
@@ -136,6 +139,7 @@ var kindNames = map[Kind]string{
 	LAND: "&&", LOR: "||", NOT: "!", EQL: "==", NEQ: "!=", LSS: "<", LEQ: "<=", GTR: ">", GEQ: ">=",
 	ASSIGN: "=", ADD_ASSIGN: "+=", SUB_ASSIGN: "-=", MUL_ASSIGN: "*=", QUO_ASSIGN: "/=", REM_ASSIGN: "%=",
 	AND_ASSIGN: "&=", OR_ASSIGN: "|=", XOR_ASSIGN: "^=", SHL_ASSIGN: "<<=", SHR_ASSIGN: ">>=",
+	AND_NOT: "&^", AND_NOT_ASSIGN: "&^=",
 	INC: "++", DEC: "--", DOT: ".", SAFE_DOT: "?.", QUESTION: "?", ELVIS: "?:", NOT_NOT: "!!",
 	RANGE: "..", RANGE_EXCL: "..<", ARROW: "->", ELLIPSIS: "...", COMMA: ",", SEMI: ";",
 	COLON: ":", AT: "@", DEFINE: ":=", LPAREN: "(", RPAREN: ")", LBRACK: "[", RBRACK: "]", LBRACE: "{", RBRACE: "}",

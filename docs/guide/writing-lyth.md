@@ -124,7 +124,7 @@ func main() throws {
 - Locals: `x := 1` declares a mutable variable, `x = 2` assigns, `x: int64 = 0` or `x: int64`
   (the zero value) when the type matters. `a, b := f()` and `a, b = b, a + b` work as in Go.
   There is no `val` or `var` inside functions.
-- Package level: `var Default = "x"`, `const Max = 10`. Constants are package-level only.
+- Package level: `var Default = "x"`, `const Max = 10`. `const` also works inside a function.
 - Parameters, loop variables, `catch` bindings, and `self` are read-only.
 - Visibility is Go's: a capitalized name is exported. Write Go-style names yourself: `UserID`,
   `NewServer`, `ID`.
@@ -150,7 +150,7 @@ func main() throws {
 ## Types
 
 - Go's names: `int`, `int64`, `float64`, `string`, `bool`, `byte`, `rune`, `any`, `error`,
-  `[]T`, `[N]T`, `map[K]V`, `chan T`, `*T`.
+  `[]T`, `[N]T`, `map[K]V`, `chan T`, `*T`, and `struct{}` (value `struct{}{}`).
 - Function types are `(A, B) -> R`, `(A) -> unit`, and `(A) -> R throws` for one that can fail.
 - `T?` is nullable. `[]User?` is a slice of nullable users: `?` belongs to the element. Slices
   and maps themselves are never nullable; an empty one is the absent value.
@@ -184,8 +184,9 @@ func main() throws {
 
 - No parentheses around conditions, braces always: `if c { } else if d { } else { }`,
   `while c { }`, `while true { }`.
-- Loops: `for x in xs`, `for i, x in xs`, `for k, v in m`, `for i in 0..<n`, `for i in 1..n`.
-  There is no `range` and no three-part `for`.
+- Loops: `for x in xs`, `for i, x in xs`, `for k, v in m`, `for i in 0..<n`, `for i in 1..n`,
+  and Go iterators: `for k in maps.Keys(m)`, `for k, v in maps.All(m)`. There is no `range`, no
+  three-part `for`, and no descending range: count down with `while`.
 - `if` and `when` are expressions: `label := if n > 0 { "pos" } else { "neg" }`.
   `when code { 200, 204 -> a; in 500..599 -> b; else -> c }`, and `is T ->` branches over
   interfaces. A `when` over an enum or a
@@ -241,25 +242,26 @@ What Go programmers write by habit, and the Lyth for it:
 | `this` | `self` |
 | `"$name"` | `"${name}"` |
 | `class User(val name: String)` | `struct User { Name: string }` |
-| methods inside the class | `func User.Name()` at top level |
+| methods inside the class | `func User.Greet()` at top level |
 | `companion object`, static methods | package functions (`NewUser`) |
 | `listOf(1, 2)`, `mapOf("a" to 1)` | `[1, 2]`, `["a": 1]` |
 | `when (val x = f())` | `when x := f()` |
 | `for (x in xs)` | `for x in xs` |
-| `try { } catch (e: E) { }` | `f() catch (e: E) { }` |
+| `try { } catch (e: E) { }` | `f() catch (e: *E) { } catch { }`, or end with `?` |
 | `xs.filter { }.map { }` | `import "lyth/coll"`, then `xs.Filter { }.Map { }` |
 
 ## Not supported yet
 
 Struct embedding in Lyth structs, `when` over errors, `defer f()?`, external test packages
-(`package x_test`), packages mixing Lyth and non-test Go files, grouped `import ( ... )`, local
-`const`, and `T?` on type parameters. The compiler reports each of these with a way around it.
+(`package x_test`), packages mixing Lyth and non-test Go files, `T?` on type parameters, and
+named arguments and default values on generic functions. The compiler reports each of these
+with a way around it.
 
 ## Changes between versions
 
 Lyth's syntax has changed and will change again. The compiler keeps recognizing older forms and
 reports each with the edit to today's form; `lyth fix` applies those edits to a whole module.
-The forms below were Lyth before 0.1.0, and most are also what Kotlin and Go habits produce.
+The table lists older Lyth forms and the Go and Kotlin habits the compiler recognizes.
 
 | Older form | Write instead | `lyth fix` |
 |---|---|---|
@@ -280,6 +282,10 @@ The forms below were Lyth before 0.1.0, and most are also what Kotlin and Go hab
 | `Point{X: 1}` | `Point(X = 1)` | yes |
 | `gin.H{"k": v}` | `gin.H(["k": v])` | yes |
 | `strings.split(s, ",")` | `strings.Split(s, ",")` | yes |
+| `for i := 0; i < n; i++` | `for i in 0..<n` | yes |
+| `go func() { ... }()` | `go { ... }` | yes |
+| `outer: for ...`, `break outer` | `outer@ for ...`, `break@outer` | yes |
+| `import h "net/http"` | `import "net/http" as h` | yes |
 | `func (p *T) M()` | `func *T.M()`, and `self` in the body | no |
 
 ## Topics

@@ -86,8 +86,8 @@ func main() {
 	fmt.Println(v7, v8, v3, v6)
 	name, size, err := lookup("")
 	if err != nil {
+//line multicatch.lyth:42
 		if e, ok := errors.AsType[*NotFound](err); ok {
-//line multicatch.lyth:43
 			fmt.Println("not found:", e.Key)
 			return
 		}

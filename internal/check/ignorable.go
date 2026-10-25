@@ -45,6 +45,11 @@ func (c *Checker) errorIgnorable(call *syntax.CallExpr) bool {
 	if ignorableErrors[name] {
 		return true
 	}
+	if fn.Name() == "Write" && c.receiverInPackage(call, "hash") {
+		// h.Write on a hash.Hash (sha256.New(), fnv.New32a()) never fails;
+		// the method is io.Writer's, so its full name does not say so.
+		return true
+	}
 	if fprintFuncs[name] && len(call.Args) > 0 {
 		w := syntax.Unparen(call.Args[0].Value)
 		if sel, ok := w.(*syntax.SelectorExpr); ok {
@@ -76,4 +81,19 @@ func (c *Checker) calledGoFunc(call *syntax.CallExpr) *gotypes.Func {
 		}
 	}
 	return nil
+}
+
+// receiverInPackage reports whether the receiver of the method call has a
+// named type of package pkgPath, as hash.Hash and hash.Hash32 are of hash.
+func (c *Checker) receiverInPackage(call *syntax.CallExpr, pkgPath string) bool {
+	sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr)
+	if !ok {
+		return false
+	}
+	t := c.info.TypeOf(sel.X)
+	if t == nil {
+		return false
+	}
+	n, ok := gotypes.Unalias(types.Lower(t)).(*gotypes.Named)
+	return ok && n.Obj().Pkg() != nil && n.Obj().Pkg().Path() == pkgPath
 }

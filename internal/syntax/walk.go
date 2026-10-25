@@ -32,6 +32,11 @@ func Children(n Node, f func(Node)) {
 		for _, s := range x.Stmts {
 			visit(s)
 		}
+	case *ConstDecl:
+		visit(x.Name)
+		if x.Value != nil {
+			visit(x.Value)
+		}
 	case *LocalDecl:
 		for _, id := range x.Names {
 			visit(id)

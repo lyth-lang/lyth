@@ -1,0 +1,42 @@
+// Go's empty struct: struct{} as a type (chan struct{}, map[K]struct{},
+// ctx.Done()) and struct{}{} as its value.
+import "context"
+import "fmt"
+import "time"
+
+func wait(done: <-chan struct{}): string {
+    select {
+        done.receive() -> return "done"
+        time.After(time.Second).receive() -> return "timeout"
+    }
+}
+
+func main() {
+    ctx, cancel := context.WithCancel(context.Background())
+    cancel()
+    fmt.Println(wait(ctx.Done()))
+    seen: map[string]struct{} = [:]
+    seen["a"] = struct{}{}
+    _, ok := seen["a"]
+    fmt.Println(ok, "b" in seen, len(seen))
+    stop := make(chan struct{}, 1)
+    stop.send(struct{}{})
+    v := stop.receive()
+    fmt.Println(v == struct{}{})
+    close := make(chan struct{})
+    go { close.close() }
+    fmt.Println(wait(close))
+    // Types made of keywords work as operands too.
+    a := make([]map[string]int, 1)
+    b := make([]chan int, 0, 2)
+    c := []struct{}{}
+    d := [2]struct{}{}
+    fmt.Println(len(a), cap(b), len(c), len(d))
+}
+
+// Output:
+// done
+// true false 1
+// true
+// done
+// 1 2 0 2

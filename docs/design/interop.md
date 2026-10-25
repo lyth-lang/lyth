@@ -3,7 +3,8 @@
 Interop is the platform Lyth stands on. This document explains how Lyth learns
 about Go packages, how Go declarations appear in Lyth, what explicit syntax
 exists for Go-specific features, and what does not work yet. Every claim in §10
-is backed by a test in `tests/interop`.
+names the test that backs it (`tests/testdata/run/*.lyth`, `tests/toolchain_test.go`,
+or `examples/todoapi`).
 
 ## 1. Requirements
 
@@ -131,7 +132,7 @@ A Lyth package compiles to a normal Go package:
   visible to Go. When Lyth code imports another Lyth package, it type-checks that
   package **from its `.lyth` sources**, so no metadata format is needed. Published
   Lyth modules therefore ship both the `.lyth` sources and the generated `.go`
-  files (see compiler.md §6.4): Go users consume the `.go`, Lyth users the `.lyth`.
+  files (see compiler.md §6.1): Go users consume the `.go`, Lyth users the `.lyth`.
 
 ## 7. Platform specifics, cgo, and the toolchain
 
@@ -157,13 +158,13 @@ A Lyth package compiles to a normal Go package:
 
 ## 9. Testing interop
 
-`tests/interop` builds and runs Lyth programs against:
+The `run/` suite and `TestThirdPartyModule` build and run Lyth programs against:
 
 - **Standard library**: `fmt`, `strings`, `strconv`, `errors`, `os`, `time`,
   `context`, `encoding/json`, `net/http` (+ `httptest`), `database/sql`, `sync`,
   `slices`, `maps`, `sort`, `io`, `bytes`.
 - **Third-party**: `github.com/google/uuid` (named array type, methods, `(T,
-  error)` parsing), later `github.com/go-chi/chi/v5` and `github.com/jackc/pgx/v5`.
+  error)` parsing) and `github.com/jackc/pgx/v5` (`examples/todoapi`).
 
 Each test covers a construct: struct construction, field access, methods (value
 and pointer receivers), interface satisfaction in both directions, multiple
@@ -196,5 +197,6 @@ Each row names the test that demonstrates it.
 | `context.Context`, `signal.NotifyContext`, `context.AfterFunc` | ✅ | `examples/todoapi` |
 | Hand-written `_test.go` files in a Lyth package | ✅ | `TestLythTest`, `memstore_go_test.go` |
 | Channels from Go APIs (`ctx.Done().receive()`, `time.After(d).receive()`) | ✅ | `run/channels` |
-| Go iterator functions | ⬜ | E0601 |
+| Go iterator functions (`for k in maps.Keys(m)`, `iter.Seq2`) | ✅ | `run/iterators` |
+| Indexing, `len`, `for`, and `in` on Go named collection types (`h["Accept"]`, `len(q)`); Go aliases keep their names (`json.RawMessage`) | ✅ | `run/named_collections` |
 | Mixed Go and Lyth non-test files in one package | ⬜ | E0601 |

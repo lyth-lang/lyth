@@ -12,3 +12,6 @@ internal-docs/
 # eval runs (evals/run.py)
 evals/results/
 __pycache__/
+
+# the lyth binary built at the repository root (go build ./cmd/lyth)
+/lyth

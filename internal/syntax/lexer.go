@@ -240,8 +240,18 @@ func (l *lexer) scanNumber() {
 	}
 	text := string(l.src[start:l.off])
 	if bad || !validNumber(text, kind) {
-		l.errorf(diag.EInvalidNumber, start, l.off, "invalid number literal %s", text).
-			WithNote("decimal literals cannot have leading zeros; use 0o17 for octal, 0x1F for hex, 0b101 for binary")
+		d := l.errorf(diag.EInvalidNumber, start, l.off, "invalid number literal %s", text)
+		lower := strings.ToLower(text)
+		switch {
+		case strings.Contains(text, "_") && !bad:
+			d.WithNote("an underscore must stand between two digits: 1_000")
+		case lower == "0x" || lower == "0o" || lower == "0b":
+			d.WithNote("%s needs digits after it: 0x1F, 0o17, 0b101", lower)
+		case bad:
+			d.WithNote("a number cannot be followed directly by letters or other digits")
+		case len(text) > 1 && text[0] == '0' && isDigit(text[1]):
+			d.WithNote("decimal literals cannot have leading zeros; use 0o17 for octal, 0x1F for hex, 0b101 for binary")
+		}
 		l.emit(ILLEGAL, start, l.off, text)
 		return
 	}
@@ -545,11 +555,15 @@ func (l *lexer) scanOperator(start int) {
 			one(REM)
 		}
 	case '&':
-		switch n1 {
-		case '&':
+		switch {
+		case n1 == '&':
 			two(LAND)
-		case '=':
+		case n1 == '=':
 			two(AND_ASSIGN)
+		case n1 == '^' && n2 == '=':
+			three(AND_NOT_ASSIGN)
+		case n1 == '^':
+			two(AND_NOT)
 		default:
 			one(AND)
 		}

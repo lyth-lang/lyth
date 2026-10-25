@@ -154,6 +154,8 @@ func (c *Checker) expr0(e syntax.Expr, want types.Type) *operand {
 		return &operand{mode: ModeValue, typ: types.String}
 	case *syntax.BoolLit:
 		return &operand{mode: ModeValue, typ: types.UntypedBool, val: constant.MakeBool(e.Value)}
+	case *syntax.EmptyStructLit:
+		return &operand{mode: ModeValue, typ: EmptyStruct}
 	case *syntax.NullLit:
 		return &operand{mode: ModeValue, typ: types.Null}
 	case *syntax.ThisExpr:
@@ -273,6 +275,8 @@ func (c *Checker) ident(e *syntax.Ident) *operand {
 			d.WithHint("add the import: import %q", path)
 		} else if t, ok := oldTypeNames[e.Name]; ok {
 			d.WithFix(e.S, t, "Lyth uses Go's type names: %s", t)
+		} else if h, ok := kotlinBuilders[e.Name]; ok {
+			d.WithHint("%s", h)
 		} else if s := c.suggest(e.Name); s != "" {
 			d.WithHint("did you mean %s?", s)
 		}
@@ -319,7 +323,16 @@ func (c *Checker) ident(e *syntax.Ident) *operand {
 		return &operand{mode: ModeValue, typ: s.Sig, sym: s}
 	case *TypeSym:
 		if s.Generic != "" {
-			c.errorf(diag.ETypeArgs, e.S, "%s requires type arguments", e.Name)
+			// List, Map, Chan: Kotlin-era names, not Lyth types.
+			d := c.errorf(diag.EUndefined, e.S, "undefined: %s", e.Name)
+			switch s.Generic {
+			case "List", "MutableList", "ArrayList":
+				d.WithHint("Lyth writes a list as a literal: [1, 2, 3], of type []int")
+			case "Map", "HashMap":
+				d.WithHint("Lyth writes a map as a literal: [\"a\": 1], of type map[string]int")
+			default:
+				d.WithHint("channels are made with make(chan T, n)")
+			}
 			return invalid(e)
 		}
 		if s.Alias != nil {
@@ -461,6 +474,9 @@ func (c *Checker) addressOf(e *syntax.UnaryExpr) *operand {
 	if call, ok := inner.(*syntax.CallExpr); ok {
 		x := c.expr(e.X, nil)
 		if ci := c.info.Calls[call]; ci != nil && ci.Kind == CallConstruct {
+			if x.mode == ModeInvalid {
+				return invalid(e) // reported; a *invalid type would cascade
+			}
 			return &operand{mode: ModeValue, typ: &types.Pointer{Elem: x.typ}}
 		}
 		if x.mode != ModeInvalid {
@@ -537,7 +553,7 @@ func (c *Checker) binary(e *syntax.BinaryExpr, want types.Type) *operand {
 			c.errorf(diag.EInvalidOp, e.OpSpan, "operator %s is not defined for %s", e.Op, t)
 			return invalid(e)
 		}
-	case e.Op == syntax.REM || e.Op == syntax.AND || e.Op == syntax.OR || e.Op == syntax.XOR:
+	case e.Op == syntax.REM || e.Op == syntax.AND || e.Op == syntax.AND_NOT || e.Op == syntax.OR || e.Op == syntax.XOR:
 		if !types.IsInteger(t) {
 			c.errorf(diag.EInvalidOp, e.OpSpan, "operator %s requires integer operands, not %s", e.Op, t)
 			return invalid(e)
@@ -581,6 +597,8 @@ func goToken(k syntax.Kind) token.Token {
 		return token.REM
 	case syntax.AND:
 		return token.AND
+	case syntax.AND_NOT:
+		return token.AND_NOT
 	case syntax.OR:
 		return token.OR
 	case syntax.XOR:
@@ -813,12 +831,23 @@ func (c *Checker) equality(e *syntax.BinaryExpr, x, y *operand) *operand {
 		if other.typ == types.Null {
 			return &operand{mode: ModeValue, typ: types.Bool}
 		}
-		b := types.Base(other.typ)
+		b := collectionOf(other.typ) // r.Trailer == null on an http.Header
 		_, isSlice := b.(*types.Slice)
 		_, isMap := b.(*types.Map)
 		if !types.MayBeNull(other.typ) && !isSlice && !isMap {
-			c.warnf(diag.WUnnecessary, e.S, "%s has non-nullable type %s, so this comparison is always %v",
-				other.expr.Span().Short(), other.typ, e.Op == syntax.NEQ)
+			if !types.IsNilable(other.typ) {
+				// Go cannot compare a string or a struct with nil.
+				c.errorf(diag.ETypeMismatch, e.S, "%s has non-nullable type %s, so it is never null",
+					other.expr.Span().Short(), other.typ).
+					WithHint("remove the comparison, or declare the type %s? if the value can be absent", other.typ)
+				return invalid(e)
+			}
+			if !types.IsInterface(other.typ) {
+				// An interface value may still be nil when Go code stored
+				// it (json.Unmarshal into []any), so only other types warn.
+				c.warnf(diag.WUnnecessary, e.S, "%s has non-nullable type %s, so this comparison is always %v",
+					other.expr.Span().Short(), other.typ, e.Op == syntax.NEQ)
+			}
 		}
 		return &operand{mode: ModeValue, typ: types.Bool}
 	}
@@ -834,17 +863,72 @@ func (c *Checker) equality(e *syntax.BinaryExpr, x, y *operand) *operand {
 			return invalid(e)
 		}
 	}
+	if path, ft := optionalPart(x.typ); path != "" {
+		c.errorf(diag.EInvalidOp, e.OpSpan, "%s values cannot be compared with %s: %s has type %s, which Go would compare by address", types.Base(x.typ), e.Op, path, ft).
+			WithHint("compare the fields you need, unwrapping optional ones")
+		return invalid(e)
+	}
 	return &operand{mode: ModeValue, typ: types.Bool}
 }
 
+// optionalPart returns the first field or element of a struct or array type
+// that holds an optional value (int?, P?), with its type, or "". Go compares
+// such values by the boxes' addresses, not by content.
+func optionalPart(t types.Type) (string, types.Type) {
+	return optionalPartSeen(t, map[*types.TypeDecl]bool{})
+}
+
+func optionalPartSeen(t types.Type, seen map[*types.TypeDecl]bool) (string, types.Type) {
+	switch b := types.Base(t).(type) {
+	case *types.Array:
+		if types.IsNullable(b.Elem) && !types.IsNilable(b.Elem) {
+			return "an element", b.Elem
+		}
+		return optionalPartSeen(b.Elem, seen)
+	case *types.Named:
+		if b.Decl != nil && b.Decl.Kind == types.StructDecl && !seen[b.Decl] {
+			seen[b.Decl] = true
+			bind := declBindings(b)
+			for _, f := range b.Decl.Fields {
+				t := f.Type
+				if bind != nil {
+					t = subst(t, bind)
+				}
+				if types.IsNullable(t) && !types.IsNilable(t) {
+					return "field " + f.Name, t
+				}
+				if p, ft := optionalPartSeen(t, seen); p != "" {
+					return "field " + f.Name + " (" + p + ")", ft
+				}
+			}
+		}
+	}
+	return "", nil
+}
+
 func comparable(t types.Type) bool {
+	return comparableSeen(t, map[*types.TypeDecl]bool{})
+}
+
+// comparableSeen is comparable, stopping at a struct already being checked
+// (struct S { s: S } is reported elsewhere as an invalid recursive type).
+func comparableSeen(t types.Type, seen map[*types.TypeDecl]bool) bool {
 	switch b := types.Base(t).(type) {
 	case *types.Slice, *types.Map, *types.Signature:
 		return false
 	case *types.Named:
 		if b.Decl != nil && b.Decl.Kind == types.StructDecl {
+			if seen[b.Decl] {
+				return true
+			}
+			seen[b.Decl] = true
+			bind := declBindings(b) // Pair[string, int]: the fields' types
 			for _, f := range b.Decl.Fields {
-				if !comparable(f.Type) {
+				ft := f.Type
+				if bind != nil {
+					ft = subst(ft, bind)
+				}
+				if !comparableSeen(ft, seen) {
 					return false
 				}
 			}
@@ -1029,7 +1113,13 @@ func (c *Checker) assertable(x *operand, t types.Type, span source.Span) bool {
 	if !gotypes.AssertableTo(iface, types.Lower(t)) {
 		d := c.errorf(diag.EInvalidOp, span, "impossible type test: %s can never hold a %s", x.typ, t)
 		if m, _ := gotypes.MissingMethod(types.Lower(t), iface, true); m != nil {
-			d.WithNote("%s does not implement %s (missing method %s)", t, types.Base(x.typ), m.Name())
+			if pm, _ := gotypes.MissingMethod(gotypes.NewPointer(types.Lower(t)), iface, true); pm == nil {
+				// The method exists with a pointer receiver.
+				d.WithNote("%s has a pointer receiver, so *%s implements %s and %s does not", m.Name(), t, types.Base(x.typ), t).
+					WithEdit(span, "*"+span.Text(), "test for the pointer: *%s", t)
+			} else {
+				d.WithNote("%s does not implement %s (missing method %s)", t, types.Base(x.typ), m.Name())
+			}
 		}
 		return false
 	}
@@ -1061,6 +1151,11 @@ func (c *Checker) nullableUse(x *operand, what string) {
 			d.WithHint("copy it into a variable and check that (%s := %s; if %s != null { ... }), provide a default with ?:, or assert with !!", name, text, name)
 			return
 		}
+	}
+	if _, isIdent := syntax.Unparen(x.expr).(*syntax.Ident); !isIdent {
+		// m[k] or f(): a check of the expression itself does not smart-cast it.
+		d.WithHint("store it in a variable and check that (v := %s; if v != null { ... }), provide a default with ?:, or assert with !!", text)
+		return
 	}
 	d.WithHint("check it first (if %s != null { ... }), provide a default with ?:, or assert with !!", text)
 }
@@ -1095,8 +1190,17 @@ func (c *Checker) elvis(e *syntax.ElvisExpr, want types.Type) *operand {
 		c.value(e.Y, want)
 		return invalid(e)
 	}
-	if !types.MayBeNull(x.typ) {
-		c.warnf(diag.WUnnecessary, e.OpSpan, "left side of ?: has non-nullable type %s, so the right side is never used", x.typ)
+	isColl := false
+	switch collectionOf(x.typ).(type) {
+	case *types.Slice, *types.Map:
+		isColl = true // xs ?: default: a nil slice is the absent value
+	}
+	if !types.MayBeNull(x.typ) && !isColl {
+		d := c.warnf(diag.WUnnecessary, e.OpSpan, "left side of ?: has non-nullable type %s, so the right side is never used", x.typ)
+		if ci := c.info.Calls[callOf(e.X)]; ci != nil && ci.Kind == CallPrelude && ci.Prelude == PreludeReceive {
+			d.WithNote("receiving from a closed channel of %s yields its zero value, not null", x.typ).
+				WithHint("tell a closed channel apart with v, ok := ch.receive()")
+		}
 	}
 	base := types.Base(x.typ)
 	if x.typ == types.Null {
@@ -1137,11 +1241,11 @@ func (c *Checker) join(t types.Type, y *operand, ye syntax.Expr) (types.Type, bo
 		if t == types.Null {
 			return t, true
 		}
-		return types.MakeNullable(t), true
+		return c.nullableOf(t, ye.Span()), true
 	}
 	if t == types.Null {
 		yt := c.defaultValueType(y, "")
-		return types.MakeNullable(yt), true
+		return c.nullableOf(yt, ye.Span()), true
 	}
 	if types.IsUntyped(y.typ) {
 		if c.assignableQuiet(y, t) {
@@ -1159,6 +1263,18 @@ func (c *Checker) join(t types.Type, y *operand, ye syntax.Expr) (types.Type, bo
 		return y.typ, true
 	}
 	return nil, false
+}
+
+// nullableOf returns t? for a value that may be null (a branch or a catch
+// fallback is null), reporting T? on a type parameter, which Lyth cannot
+// represent yet.
+func (c *Checker) nullableOf(t types.Type, span source.Span) types.Type {
+	if _, isTP := types.Base(t).(*types.TypeParam); isTP && !types.IsNilable(t) {
+		c.errorf(diag.ENullableTParam, span, "null makes this %s?, and nullable type parameters are not supported yet", t).
+			WithHint("return a zero value, or declare the result as a pointer: *%s", t)
+		return types.Invalid
+	}
+	return types.MakeNullable(t)
 }
 
 // ---------------------------------------------------------------------------
@@ -1390,20 +1506,37 @@ func (c *Checker) commonType(ops []*operand, what string) types.Type {
 			return nil
 		}
 	}
-	hasNull := false
+	final := t
 	for _, o := range ops {
 		if o.typ == types.Null {
-			hasNull = true
+			// [1, null]: the elements are int?, each boxed.
+			final = types.MakeNullable(t)
+		}
+	}
+	for _, o := range ops {
+		if o.typ == types.Null {
+			c.assign(o, final, what)
 			continue
 		}
-		if !c.assign(o, t, what) {
+		if (what == "list element" || what == "map value") && !c.assignableQuiet(o, t) {
+			// [1, "x"]: Go needs the element type written, []any{1, "x"}.
+			first := t
+			if types.IsUntyped(first) {
+				first = types.DefaultType(first)
+			}
+			d := c.errorf(diag.ETypeMismatch, o.expr.Span(), "%ss have different types: %s and %s", what, first, types.DefaultType(o.typ))
+			if what == "list element" {
+				d.WithHint("give the element type, as Go does: []any{...}")
+			} else {
+				d.WithHint("give the value type, as Go does: map[string]any{...}")
+			}
+			return nil
+		}
+		if !c.assign(o, final, what) {
 			return nil
 		}
 	}
-	if hasNull {
-		t = types.MakeNullable(t)
-	}
-	return t
+	return final
 }
 
 // ---------------------------------------------------------------------------
@@ -1427,7 +1560,7 @@ func (c *Checker) index(e *syntax.IndexExpr) *operand {
 		c.nullableUse(x, "index")
 		return invalid(e)
 	}
-	switch t := types.Base(x.typ).(type) {
+	switch t := collectionOf(x.typ).(type) {
 	case *types.Slice:
 		c.indexValue(e.Index)
 		return &operand{mode: ModeValue, typ: t.Elem}
@@ -1448,7 +1581,7 @@ func (c *Checker) index(e *syntax.IndexExpr) *operand {
 		}
 		return &operand{mode: ModeValue, typ: vt}
 	}
-	if types.IsString(types.Base(x.typ)) {
+	if types.IsString(collectionOf(x.typ)) {
 		c.indexValue(e.Index)
 		return &operand{mode: ModeValue, typ: types.Byte}
 	}
@@ -1485,9 +1618,9 @@ func (c *Checker) sliceExpr(e *syntax.SliceExpr) *operand {
 	if x.mode == ModeInvalid {
 		return invalid(e)
 	}
-	switch t := types.Base(x.typ).(type) {
+	switch t := collectionOf(x.typ).(type) {
 	case *types.Slice:
-		return &operand{mode: ModeValue, typ: t}
+		return &operand{mode: ModeValue, typ: types.Base(x.typ)}
 	case *types.Array:
 		if !c.mutablePath(e.X, "slice", diag.EAddressOfVal) {
 			return invalid(e)
@@ -1600,6 +1733,13 @@ func (c *Checker) catchStmt(e *syntax.CatchExpr) {
 
 func (c *Checker) catchMode(e *syntax.CatchExpr, want types.Type, discard bool) *operand {
 	x := c.fallibleOperand(e.X, discard)
+	if _, isError := x.typ.(*types.Result); !isError && x.mode == ModeValue && types.IsErrorType(x.typ) {
+		// n := err catch { 0 }: catch handles a failing call, not a value.
+		c.errorf(diag.ECatchNotFall, e.CatchSpan, "catch needs a call that returns an error; %s is an error value", e.X.Span().Short()).
+			WithHint("check it: if %s != null { ... }", e.X.Span().Short())
+		c.withScope(newScope(c.scope, BlockScope), func() { c.blockValue(e.Body, want, true) })
+		return invalid(e)
+	}
 	scope := newScope(c.scope, BlockScope)
 	catchType := c.catchType(e)
 	var binder *VarSym
@@ -1615,7 +1755,8 @@ func (c *Checker) catchMode(e *syntax.CatchExpr, want types.Type, discard bool) 
 			c.fn.locals = append(c.fn.locals, binder)
 		}
 	}
-	if x.mode == ModeInvalid {
+	if x.mode == ModeInvalid || catchType == types.Invalid {
+		// Reported; the handler is checked for its own errors only.
 		c.withScope(scope, func() { c.blockValue(e.Body, want, true) })
 		return invalid(e)
 	}
@@ -1649,7 +1790,10 @@ func (c *Checker) catchMode(e *syntax.CatchExpr, want types.Type, discard bool) 
 	bwant := succ
 	if _, isTuple := succ.(*types.Tuple); isTuple {
 		bwant = nil
-	} else if want != nil && needValue {
+	} else if want != nil && needValue && !(types.IsInterface(want) && !types.IsInterface(succ)) {
+		// The expected type types the fallback (catch { null } for an int?),
+		// unless it is an interface: a: any = load() catch { [] } falls
+		// back to the success type, []int.
 		bwant = want
 	}
 	var res blockResult
@@ -1666,6 +1810,9 @@ func (c *Checker) catchMode(e *syntax.CatchExpr, want types.Type, discard bool) 
 			return &operand{mode: ModeNoValue, typ: types.Unit}
 		}
 		return &operand{mode: ModeValue, typ: succ}
+	}
+	if !e.Body.Rbrace.IsValid() {
+		return invalid(e) // the handler did not parse; that error stands
 	}
 	if _, isTuple := succ.(*types.Tuple); isTuple {
 		c.errorf(diag.ECatchBlock, e.Body.Rbrace, "this catch handler must exit (return, throw, break, or continue)").
@@ -1749,7 +1896,7 @@ func (c *Checker) jump(e *syntax.JumpExpr) {
 		}
 		if types.IsNullable(x.typ) {
 			c.errorf(diag.EThrowOperand, e.Values[0].Span(), "cannot throw %s: it may be null (type %s)", e.Values[0].Span().Short(), x.typ).
-				WithHint("check it first: if (err != null) throw err")
+				WithHint("check it first: if %s != null { throw %s }", e.Values[0].Span().Short(), e.Values[0].Span().Short())
 			return
 		}
 		if ok, _, _ := c.assignable(x.typ, types.Error); !ok {
@@ -1771,7 +1918,7 @@ func (c *Checker) jump(e *syntax.JumpExpr) {
 			if len(fn.labels) > 0 {
 				d.WithNote("enclosing loop labels: %s", labelNames(fn.labels))
 			} else {
-				d.WithHint("label the loop: %s@ for (...) { ... %s@%s ... }", e.Label.Name, kw, e.Label.Name)
+				d.WithHint("label the loop: %s@ for x in xs { ... %s@%s ... }", e.Label.Name, kw, e.Label.Name)
 			}
 		}
 	}
@@ -1814,11 +1961,14 @@ func (c *Checker) returnValues(e *syntax.JumpExpr) {
 			return
 		}
 		if len(results) == 0 {
-			c.errorf(diag.EReturnMismatch, e.Values[0].Span(), "%s does not return a value", fn.name).
-				WithHint("remove the value, or declare a result type")
+			d := c.errorf(diag.EReturnMismatch, e.Values[0].Span(), "%s does not return a value", fn.name)
+			c.callbackReturnHint(d, fn, e)
 			return
 		}
 		if len(results) == 1 {
+			if c.notPassedThrough(x, results) {
+				return
+			}
 			x = c.singleValue(x)
 			c.assign(x, results[0], "return value")
 			return
@@ -1834,12 +1984,23 @@ func (c *Checker) returnValues(e *syntax.JumpExpr) {
 		return
 	}
 	if len(results) == 0 {
-		c.errorf(diag.EReturnMismatch, e.Values[0].Span(), "%s does not return a value", fn.name).
-			WithHint("remove the value, or declare a result type")
+		d := c.errorf(diag.EReturnMismatch, e.Values[0].Span(), "%s does not return a value", fn.name)
+		c.callbackReturnHint(d, fn, e)
 		for _, v := range e.Values {
 			c.value(v, nil)
 		}
 		return
+	}
+	if len(e.Values) == 1 && len(results) > 1 {
+		if _, isCall := syntax.Unparen(e.Values[0]).(*syntax.CallExpr); isCall {
+			// return w.Write(p): the call's results are the function's, as in Go.
+			x := c.expr(e.Values[0], nil)
+			if x.mode == ModeInvalid || c.forwardResults(x, results) {
+				return
+			}
+			c.errorf(diag.EReturnMismatch, e.S, "%s returns %s, but %s returns %s", fn.name, resultString(fn.sig), e.Values[0].Span().Short(), x.typ)
+			return
+		}
 	}
 	if len(e.Values) != len(results) {
 		c.errorf(diag.EReturnMismatch, e.S, "%s returns %s, but %s given", fn.name, plural(len(results), "value"), plural(len(e.Values), "value")).
@@ -1875,6 +2036,10 @@ func (c *Checker) defaultValueType(x *operand, context string) types.Type {
 		t := types.DefaultType(x.typ)
 		c.assign(x, t, context)
 		return t
+	}
+	if isGenericFunc(x.typ) {
+		c.genericFuncValue(x)
+		return types.Invalid
 	}
 	return x.typ
 }
@@ -1963,7 +2128,7 @@ func (c *Checker) membership(node syntax.Node, x *operand, y syntax.Expr, record
 		return false
 	}
 	info := &InInfo{}
-	switch b := types.Base(yo.typ).(type) {
+	switch b := collectionOf(yo.typ).(type) {
 	case *types.Slice, *types.Array:
 		var elem types.Type
 		if sl, ok := b.(*types.Slice); ok {
@@ -1975,12 +2140,20 @@ func (c *Checker) membership(node syntax.Node, x *operand, y syntax.Expr, record
 			c.errorf(diag.EInvalidOp, y.Span(), "%s elements cannot be compared, so in cannot search them", elem)
 			return false
 		}
+		if path, ft := optionalPart(elem); path != "" {
+			c.errorf(diag.EInvalidOp, y.Span(), "%s elements cannot be compared, so in cannot search them: %s has type %s, which Go would compare by address", elem, path, ft)
+			return false
+		}
 		if !elemFits(elem) {
 			return false
 		}
 		info.Kind = InList
 		if _, isArray := b.(*types.Array); isArray {
 			info.Kind = InArray
+		}
+		if types.IsNullable(elem) && !types.IsNilable(elem) && x.typ != types.Null {
+			// []int?: compare contents, not the boxes' addresses.
+			info.Optional = elem
 		}
 	case *types.Map:
 		if !elemFits(b.Key) {
@@ -2058,6 +2231,66 @@ func (c *Checker) passThrough(x *operand, results []types.Type) bool {
 	return true
 }
 
+// callbackReturnHint completes the error for return v in a function without
+// results. In a lambda that can fail (a Go callback returning error, such
+// as fs.WalkDirFunc), Go's return err is throw err and return nil is return.
+func (c *Checker) callbackReturnHint(d *diag.Diagnostic, fn *funcCtx, e *syntax.JumpExpr) {
+	if !fn.isLambda || !fn.fallible || len(e.Values) != 1 {
+		d.WithHint("remove the value, or declare a result type")
+		return
+	}
+	if _, isNull := syntax.Unparen(e.Values[0]).(*syntax.NullLit); isNull {
+		d.WithEdit(e.S, "return", "this callback can fail; it succeeds with a plain return")
+		return
+	}
+	d.WithEdit(e.S, "throw "+e.Values[0].Span().Text(), "this callback can fail: return an error with throw %s", e.Values[0].Span().Short())
+}
+
+// forwardResults reports whether the call x returns exactly the results a
+// function with results returns, and records the return as a pass-through:
+// each value has the result's Go type, or an interface type assignable to
+// it (a concrete value converted to an interface could be Go's typed nil).
+func (c *Checker) forwardResults(x *operand, results []types.Type) bool {
+	var raw []types.Type
+	switch t := x.typ.(type) {
+	case *types.Result:
+		raw = t.Raw
+	case *types.Tuple:
+		raw = t.Elems
+	}
+	if len(raw) != len(results) {
+		return false
+	}
+	for i, t := range raw {
+		if ok, _, _ := c.assignable(t, results[i]); !ok {
+			return false
+		}
+		gs, gd := types.Lower(t), types.Lower(results[i])
+		if !gotypes.Identical(gs, gd) && !(gotypes.IsInterface(gs) && gotypes.AssignableTo(gs, gd)) {
+			return false
+		}
+	}
+	c.info.PassThrough[x.expr] = true
+	return true
+}
+
+// notPassedThrough reports a fallible call returned from a throws function
+// whose success value would need a conversion on the way (T into an
+// interface, T into T?), so it cannot pass through, and returns true then.
+func (c *Checker) notPassedThrough(x *operand, results []types.Type) bool {
+	r, ok := x.typ.(*types.Result)
+	if !ok || x.mode == ModeInvalid || len(r.Success) != 1 || len(results) != 1 || c.fn == nil || !c.fn.fallible {
+		return false
+	}
+	if ok, _, _ := c.assignable(r.Success[0], results[0]); !ok {
+		return false
+	}
+	text := x.expr.Span().Short()
+	c.errorf(diag.ETypeMismatch, x.expr.Span(), "%s returns %s, which would have to become %s, so its results cannot be returned as they are", text, r.Success[0], results[0]).
+		WithEdit(x.expr.Span().EndSpan(), "?", "propagate the error and return the value: %s?", text)
+	return true
+}
+
 // indexInstantiation returns x[A] read as the instantiation x[A] when x names
 // a generic function or type, or A can only be a type; otherwise nil.
 func (c *Checker) indexInstantiation(e *syntax.IndexExpr) *syntax.InstantiateExpr {
@@ -2106,4 +2339,28 @@ func (c *Checker) indexInstantiation(e *syntax.IndexExpr) *syntax.InstantiateExp
 		}
 	}
 	return nil
+}
+
+// callOf returns e as a call, or nil.
+func callOf(e syntax.Expr) *syntax.CallExpr {
+	c, _ := syntax.Unparen(e).(*syntax.CallExpr)
+	return c
+}
+
+// kotlinBuilders are Kotlin's collection functions, which Lyth writes as
+// literals.
+var kotlinBuilders = map[string]string{
+	"listOf":        "Lyth writes a list as a literal: [1, 2, 3]",
+	"mutableListOf": "Lyth writes a list as a literal: [1, 2, 3]; slices are mutable",
+	"arrayListOf":   "Lyth writes a list as a literal: [1, 2, 3]; slices are mutable",
+	"emptyList":     "an empty list needs its type: xs: []int = []",
+	"mapOf":         "Lyth writes a map as a literal: [\"a\": 1, \"b\": 2]",
+	"mutableMapOf":  "Lyth writes a map as a literal: [\"a\": 1]; maps are mutable",
+	"hashMapOf":     "Lyth writes a map as a literal: [\"a\": 1]; maps are mutable",
+	"emptyMap":      "an empty map needs its type: m: map[string]int = [:]",
+	"setOf":         "Lyth has no set type: use map[T]bool, or [a, b].ToSet() with import \"lyth/coll\"",
+	"mutableSetOf":  "Lyth has no set type: use map[T]bool, or [a, b].ToSet() with import \"lyth/coll\"",
+	"arrayOf":       "Lyth writes a list as a literal: [1, 2, 3]",
+	"require":       "check and throw: if !cond { throw errors.New(\"...\") }",
+	"check":         "check and throw: if !cond { throw errors.New(\"...\") }",
 }

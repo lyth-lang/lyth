@@ -21,13 +21,29 @@ func parse(s: string): int throws {
 //   describe(Config(name = "a", retries = 1)) == "a/1"
 func describe(c: Config): string = "${c.Name}/${c.Retries}"
 
+func apply(f: (int, int) -> int): int = f(1, 2)
+
+// Pair is declared on one line; its doc comment stays above it.
+struct Pair { A: int; B: int }
+
 func main() throws {
     c := Config(
         Name = "lyth",
         Retries = parse("1")?,
     )
     println(describe(c))
+    println(Pair(1, 2).B)
+    // Lines may break after a comma in lambda parameters, and after in.
+    println(apply { a: int,
+        b: int -> a + b })
+    for x in
+        [7] {
+        println(x)
+    }
 }
 
 // Output:
 // lyth/11
+// 2
+// 3
+// 7

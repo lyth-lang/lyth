@@ -35,7 +35,7 @@ Preview the notes of the next release before tagging it (`brew install git-cliff
 token, add `--offline`, which leaves out the logins and pull request numbers):
 
 ```bash
-GITHUB_TOKEN=... git cliff --unreleased --tag v0.3.0 --strip header
+GITHUB_TOKEN=... git cliff --unreleased --tag vX.Y.Z --strip header
 git cliff --unreleased --tag vscode-v0.2.0 --strip header --tag-pattern '^vscode-v' \
   --include-path 'editors/vscode-lyth/**' --include-path 'website/src/lyth-grammar.mjs' --offline
 ```
@@ -45,7 +45,7 @@ To change the notes after the fact, edit the release on GitHub.
 ## Lyth
 
 1. Make sure `main` builds and passes `go test ./...`, and preview the release notes.
-2. Tag and push: `git tag -a v0.3.0 -m "Lyth 0.3.0" && git push origin v0.3.0`.
+2. Tag and push: `git tag -a vX.Y.Z -m "Lyth X.Y.Z" && git push origin vX.Y.Z`.
 3. `.github/workflows/release.yml` runs the tests, creates the GitHub release, and commits the
    new formula to the Homebrew tap (repository secret `HOMEBREW_TAP_TOKEN`: a fine-grained
    token with read and write access to the contents of `lyth-lang/homebrew-tap`).

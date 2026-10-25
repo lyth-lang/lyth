@@ -102,6 +102,9 @@ In gin, `c.JSON(200, gin.H(["error": msg, "code": 7]))` is
 `gin.H{"error": msg}` is an error whose fix is the conversion: braces after a
 type name are a trailing lambda in Lyth.
 
+Values of these types index, range, and take `len` like their underlying
+slice or map: `h["Accept"]`, `for k, vs in q`, `"q" in q`, `len(names)`.
+
 ## Implementing Go interfaces
 
 ```kotlin
@@ -298,16 +301,10 @@ Use `lyth mod tidy` instead of `go mod tidy`: the `go` command cannot see
 imports inside `.lyth` files and would remove modules only Lyth code uses. The
 [REST API example](../../examples/todoapi/README.md) uses `pgx` this way.
 
-## Current limits
+## Limits and differences
 
 - A package cannot mix Lyth and Go source files yet, apart from `_test.go`
   files. Put Go code in its own package and import it.
-- Values of a Go named collection type cannot yet be indexed, measured with
-  `len`, or iterated directly (`h["Accept"]`, `len(q)`); use the type's
-  methods (`h.Values("Accept")`), or convert it first (`map[string][]string(h)`).
-- Iterating over Go iterator functions (`for x in seq` with an `iter.Seq`) is
-  not implemented yet; collect one with `slices.Collect` or `maps.Collect`
-  first.
-  Channels are: Go's `<-` is spelled `ch.send(v)` and `ch.receive()`
-  (`<-ctx.Done()` is `ctx.Done().receive()`), and `select` has `when`-style
-  branches.
+- Go's channel operator is spelled with methods: `ch <- v` is `ch.send(v)` and
+  `<-ch` is `ch.receive()` (`<-ctx.Done()` is `ctx.Done().receive()`), and
+  `select` has `when`-style branches.

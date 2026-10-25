@@ -34,7 +34,13 @@ func MayBeNull(t Type) bool {
 }
 
 // MakeNullable returns T? for t (idempotent; platform becomes nullable).
+// Slices and maps are never nullable: their empty value is the absent one,
+// so null of a slice type is the nil slice.
 func MakeNullable(t Type) Type {
+	switch Base(t).(type) {
+	case *Slice, *Map:
+		return Base(t)
+	}
 	switch tt := t.(type) {
 	case *Nullable:
 		return t
@@ -55,6 +61,13 @@ func IsNilable(t Type) bool {
 	case *Pointer, *Signature, *Chan, *AnyType:
 		return true
 	case *Named:
+		if b.Go != nil {
+			// context.CancelFunc, a named func type, is nil-able like func().
+			switch b.Go.Underlying().(type) {
+			case *gotypes.Pointer, *gotypes.Signature, *gotypes.Chan:
+				return true
+			}
+		}
 		return IsInterface(b)
 	case *GoType:
 		_, ok := b.T.Underlying().(*gotypes.Interface)

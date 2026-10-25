@@ -1,0 +1,53 @@
+// Go values Lyth must treat as Go does: constants of different types in a
+// when over any, generic functions instantiated from a function type, named
+// func types that are nil-able, hash writes that never fail, and enum
+// entries, which are constants.
+import "context"
+import "crypto/sha256"
+import "fmt"
+import "slices"
+import "time"
+
+enum Color { Red, Green }
+
+enum Light { Red, Off }
+
+const Favorite = Color.Green
+
+func main() {
+    x: any = 1.0
+    fmt.Println(when x { 1 -> "int"; 1.0 -> "float"; int64(1) -> "int64"; else -> "?" })
+    d: any = time.Duration(0)
+    fmt.Println(when d { 0 -> "int"; time.Duration(0) -> "dur"; else -> "?" })
+
+    sorter: ([]int) -> unit = slices.Sort
+    xs := [3, 1, 2]
+    sorter(xs)
+    fmt.Println(xs)
+
+    _, c := context.WithCancel(context.Background())
+    cancel: context.CancelFunc? = c
+    if cancel != null {
+        cancel()
+    }
+
+    h := sha256.New()
+    h.Write([]byte("lyth"))
+    fmt.Println(len(h.Sum(null)))
+
+    const mine = Color.Red
+    fmt.Println(Favorite, mine)
+    // Named constants print through String in templates.
+    fmt.Println("color ${Color.Green}, favorite ${Favorite}, ${time.Second}, ${time.Monday}")
+    v: any = Light.Red
+    fmt.Println(when v { Color.Red -> "color"; Light.Red -> "light"; else -> "?" })
+}
+
+// Output:
+// float
+// dur
+// [1 2 3]
+// 32
+// Green Red
+// color Green, favorite Green, 1s, Monday
+// light

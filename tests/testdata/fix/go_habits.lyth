@@ -1,8 +1,10 @@
 // Go spellings that lyth fix rewrites.
-import "cmp"
-import "fmt"
-import "net/url"
-import "strings"
+import (
+    "cmp"
+    "fmt"
+    u "net/url"
+    "strings"
+)
 
 struct Point {
     X: int
@@ -29,10 +31,26 @@ func main() {
     if lookup(["a": &p], "b") == nil {
         fmt.Println("missing")
     }
+    rows: for r in [[1, 2], [3]] {
+        for v in r {
+            if v == 2 {
+                continue rows
+            }
+            fmt.Println(v)
+        }
+    }
+    done := make(chan bool)
+    go func() {
+        done.send(true)
+    }()
+    done.receive()
+    for i := 0; i < 2; i++ {
+        fmt.Println(i)
+    }
     for x in []int{1, 2} {
         fmt.Println(strings.repeat("*", x))
     }
-    q := url.Values{"q": ["lyth"], "page": ["2"]}
+    q := u.Values{"q": {"lyth"}, "page": {"2"}}
     fmt.Println(q.Encode())
     var b: strings.Builder
     b.writeString("done")

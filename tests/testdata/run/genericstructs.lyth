@@ -1,0 +1,36 @@
+// Instances of generic structs compare like Go structs, generic functions
+// infer type arguments from them, and an interface expected type (fmt's any)
+// does not decide a generic call's result type.
+import "cmp"
+import "fmt"
+
+func sumBy[T, N: cmp.Ordered](xs: []T, key: (T) -> N): N {
+    total: N
+    for x in xs {
+        total += key(x)
+    }
+    return total
+}
+
+struct Pair[A, B] {
+    First: A
+    Second: B
+}
+
+struct Box[T] {
+    V: T
+}
+
+func same[T: comparable](a: Box[T], b: Box[T]): bool = a == b
+
+func main() {
+    fmt.Println(sumBy(["a", "bcd"]) { len(it) })
+    p := Pair("a", 1)
+    fmt.Println(p == Pair("a", 1), p != Pair("b", 2))
+    fmt.Println(same(Box(1), Box(1)), same(Box("x"), Box("y")))
+}
+
+// Output:
+// 4
+// true true
+// true false

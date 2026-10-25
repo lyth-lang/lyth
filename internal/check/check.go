@@ -50,6 +50,7 @@ type Checker struct {
 	preArgs   map[syntax.Expr]*operand // arguments already checked during inference
 	aliases   []*TypeSym
 	damaged   map[*source.File][]source.Span // syntax.File.Damaged by source file
+	misspelt  map[*source.File]bool          // files with syntax errors the parser read past (Go and Kotlin spellings)
 	// While the package's types are being defined (resolveTypeDecls), a
 	// constraint that names a Lyth type without its definition yet
 	// (struct Cache[S: Store[int]], struct Box[S: Plain]) is set once all
@@ -115,6 +116,14 @@ func Check(conf *Config, pkgPath string, files []*syntax.File) *Package {
 			c.damaged[f.Src] = f.Damaged
 		}
 	}
+	for _, d := range c.sink.All() {
+		if d.Severity == diag.Error && d.Code.IsSyntax() && d.Span.IsValid() {
+			if c.misspelt == nil {
+				c.misspelt = map[*source.File]bool{}
+			}
+			c.misspelt[d.Span.File] = true
+		}
+	}
 	c.collect(files)
 	for _, f := range files {
 		c.resolveImports(f)
@@ -143,9 +152,10 @@ func (c *Checker) errorf(code diag.Code, span source.Span, format string, args .
 }
 
 // warnf reports a warning unless the file has syntax errors: whether a name
-// is used, for example, depends on code that did not parse.
+// is used, for example, depends on code that did not parse, or that the
+// parser skipped after reporting a Go or Kotlin spelling (P{X: n}, "$name").
 func (c *Checker) warnf(code diag.Code, span source.Span, format string, args ...any) *diag.Diagnostic {
-	if len(c.damaged[span.File]) > 0 {
+	if len(c.damaged[span.File]) > 0 || c.misspelt[span.File] {
 		return &diag.Diagnostic{}
 	}
 	return c.sink.Warnf(code, span, format, args...)
@@ -462,7 +472,10 @@ func (c *Checker) lookup(name string) Symbol {
 		if sym := s.syms[name]; sym != nil {
 			return sym
 		}
-		if s.kind == FuncScope && s.fn != nil && s.fn.recv != nil && s.fn.recvDecl != nil {
+		// Members are in scope at the method's own level: inside a lambda
+		// or a go/defer block, the enclosing locals and parameters come
+		// first, then the receiver's fields.
+		if s.kind == FuncScope && s.fn != nil && !s.fn.isLambda && s.fn.recv != nil && s.fn.recvDecl != nil {
 			if m := c.receiverMember(s.fn, name); m != nil {
 				return m
 			}
@@ -497,7 +510,7 @@ func (c *Checker) receiverMember(fn *funcCtx, name string) *MemberSym {
 
 // suggest returns the most similar visible name, for "did you mean" hints.
 func (c *Checker) suggest(name string) string {
-	best, bestDist := "", 3
+	best, bestDist := "", suggestLimit(name)
 	consider := func(n string) {
 		if n == name || n == "_" {
 			return
@@ -507,7 +520,10 @@ func (c *Checker) suggest(name string) string {
 		}
 	}
 	for s := c.scope; s != nil; s = s.parent {
-		for n := range s.syms {
+		for n, sym := range s.syms {
+			if ts, ok := sym.(*TypeSym); ok && ts.Generic != "" {
+				continue // List, Map: old spellings, never a suggestion
+			}
 			consider(n)
 		}
 		if s.kind == FuncScope && s.fn != nil && s.fn.recvDecl != nil {
@@ -520,6 +536,15 @@ func (c *Checker) suggest(name string) string {
 		}
 	}
 	return best
+}
+
+// suggestLimit is the edit distance below which a name is suggested for
+// name: one edit for short names (foo is not bool), two for longer ones.
+func suggestLimit(name string) int {
+	if len(name) <= 4 {
+		return 2
+	}
+	return 3
 }
 
 func editDistance(a, b string) int {

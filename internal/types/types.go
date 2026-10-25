@@ -132,6 +132,9 @@ type Named struct {
 	Go   *gotypes.Named // set for Go-declared types (possibly instantiated)
 	Decl *TypeDecl      // set for Lyth-declared types
 	Args []Type         // type arguments
+	// Alias is the Go alias the type was named by (json.RawMessage for
+	// jsontext.Value), kept so that diagnostics and generated code use it.
+	Alias *gotypes.Alias
 }
 
 func (*Named) isType() {}
@@ -140,6 +143,12 @@ func (n *Named) String() string {
 	var b strings.Builder
 	if n.Decl != nil {
 		b.WriteString(n.Decl.Name)
+	} else if n.Alias != nil {
+		obj := n.Alias.Obj()
+		if obj.Pkg() != nil {
+			b.WriteString(obj.Pkg().Name() + ".")
+		}
+		b.WriteString(obj.Name())
 	} else {
 		obj := n.Go.Obj()
 		if obj.Pkg() == nil && obj.Name() == "error" {

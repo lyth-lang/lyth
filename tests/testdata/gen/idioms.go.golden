@@ -39,6 +39,7 @@ func (m memStore) Name(id int) (string, error) {
 func NameOr(s Store, id int, fallback string) (string, error) {
 	n, err := s.Name(id)
 	if err != nil {
+//line idioms.lyth:28
 		if _, ok := errors.AsType[*NotFound](err); ok {
 			n = fallback
 		} else {

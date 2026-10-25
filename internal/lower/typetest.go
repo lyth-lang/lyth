@@ -585,7 +585,7 @@ func (fl *fnLower) chainFrom(e *syntax.WhenExpr, i int, subj ast.Expr, target as
 			stmt.Body = fl.branch(br.Body, target, targetType)
 		}
 		fl.release(bind.ident.Name, ok)
-	} else if in := fl.info.Ins[br.Conds[0]]; len(br.Conds) == 1 && in != nil && in.Kind == check.InMap {
+	} else if in := fl.info.Ins[br.Conds[0]]; len(br.Conds) == 1 && in != nil && in.Kind == check.InMap && !boxedOptional(fl.info.TypeOf(e.Subject)) {
 		// A single map test goes in the if's init: if _, ok := m[k]; ok
 		ok := fl.temp("ok")
 		stmt = &ast.IfStmt{If: fl.l.pos(br.S), Cond: ast.NewIdent(ok),
@@ -673,10 +673,36 @@ func boxedOptional(t types.Type) bool {
 func (fl *fnLower) whenCond(c *syntax.WhenCond, subj ast.Expr, boxed bool) ast.Expr {
 	switch c.Kind {
 	case syntax.WhenIn, syntax.WhenNotIn:
-		if in := fl.info.Ins[c]; in != nil {
+		in := fl.info.Ins[c]
+		if in == nil {
+			return ast.NewIdent("false")
+		}
+		if !boxed {
 			return fl.membership(in, subj, nil, c.X, c.Kind == syntax.WhenNotIn, c.S)
 		}
-		return ast.NewIdent("false")
+		// An optional subject: null is in nothing, so n != nil && *n in c,
+		// and n == nil || *n !in c.
+		sub, stmts := fl.sub()
+		test := sub.membership(in, &ast.StarExpr{X: subj}, nil, c.X, c.Kind == syntax.WhenNotIn, c.S)
+		if len(*stmts) > 0 {
+			// A map test needs statements, which may run only once the
+			// subject is known not to be null:
+			//	match := n != nil
+			//	if match { _, ok := m[*n]; match = ok }
+			match := fl.temp("match")
+			init, guard := nilCmp(subj, token.NEQ), ast.Expr(ast.NewIdent(match))
+			if c.Kind == syntax.WhenNotIn {
+				init, guard = nilCmp(subj, token.EQL), &ast.UnaryExpr{Op: token.NOT, X: ast.NewIdent(match)}
+			}
+			fl.emitSynth(&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(match)}, Tok: token.DEFINE, Rhs: []ast.Expr{init}}, c.S)
+			body := append(*stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(match)}, Tok: token.ASSIGN, Rhs: []ast.Expr{test}})
+			fl.emitSynthShallow(&ast.IfStmt{Cond: guard, Body: &ast.BlockStmt{List: body}}, c.S)
+			return ast.NewIdent(match)
+		}
+		if c.Kind == syntax.WhenNotIn {
+			return &ast.BinaryExpr{X: &ast.BinaryExpr{X: subj, Op: token.EQL, Y: ast.NewIdent("nil")}, Op: token.LOR, Y: test}
+		}
+		return &ast.BinaryExpr{X: &ast.BinaryExpr{X: subj, Op: token.NEQ, Y: ast.NewIdent("nil")}, Op: token.LAND, Y: test}
 	case syntax.WhenIs, syntax.WhenNotIs:
 		ok := fl.temp("is" + upperFirst(typeBase(fl.info.TypeTests[c])))
 		fl.emitSynth(fl.typeAssign(ast.NewIdent("_"), ok, subj, fl.info.TypeTests[c]), c.S)

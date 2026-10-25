@@ -28,7 +28,21 @@ func Lift(t gotypes.Type) Type {
 	case *gotypes.Basic:
 		return liftBasic(t)
 	case *gotypes.Alias:
-		return Lift(gotypes.Unalias(t))
+		lt := Lift(gotypes.Unalias(t))
+		if t.TypeArgs() != nil || t.Obj().Pkg() == nil {
+			return lt
+		}
+		switch x := lt.(type) {
+		case *Named:
+			if x.Go != nil {
+				return &Named{Go: x.Go, Args: x.Args, Alias: t}
+			}
+		case *Platform:
+			if n, ok := x.Elem.(*Named); ok && n.Go != nil {
+				return &Platform{Elem: &Named{Go: n.Go, Args: n.Args, Alias: t}}
+			}
+		}
+		return lt
 	case *gotypes.Named:
 		n := &Named{Go: t}
 		if args := t.TypeArgs(); args != nil {
@@ -230,6 +244,9 @@ func Lower(t Type) gotypes.Type {
 	case *AnyType:
 		return goAny
 	case *Named:
+		if t.Alias != nil {
+			return t.Alias
+		}
 		if t.Go != nil {
 			return t.Go
 		}

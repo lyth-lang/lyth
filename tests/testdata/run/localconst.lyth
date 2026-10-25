@@ -1,0 +1,28 @@
+// Constants declared in function bodies, as in Go.
+import "time"
+
+const Base = 10
+
+func main() {
+    const limit = 3
+    const scale: float64 = 1.5
+    const total = limit * Base
+    const timeout = 2 * time.Second
+    const name = "lyth"
+    buf: [limit]int
+    for i in 0..<limit {
+        buf[i] = i * total
+    }
+    println(limit, scale * 2, total, timeout.String(), name, len(buf), buf[2])
+    if true {
+        const limit = "inner"
+        println(limit)
+    }
+    f := { const k = 7; k * 2 }
+    println(f())
+}
+
+// Output:
+// 3 3 30 2s lyth 3 60
+// inner
+// 14

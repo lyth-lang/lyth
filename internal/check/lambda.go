@@ -150,7 +150,11 @@ func (c *Checker) lambda(e *syntax.LambdaExpr, want types.Type) *operand {
 		if needValue && lastExpr != nil {
 			terminated := c.stmtList(stmts[:n-1])
 			x := c.expr(lastExpr, sig.Results[0])
-			if !terminated && x.mode != ModeInvalid {
+			if !terminated && x.mode != ModeInvalid && c.passThrough(x, sig.Results) {
+				// { strconv.Atoi(s) } for a func() (int, error): the call's
+				// results are the lambda's, as return strconv.Atoi(s) would be.
+				info.ResultExpr = lastExpr
+			} else if !terminated && x.mode != ModeInvalid {
 				x = c.singleValue(x)
 				if x.mode != ModeInvalid && !isNothing(x.typ) {
 					c.assign(x, sig.Results[0], "lambda result")
@@ -167,16 +171,26 @@ func (c *Checker) lambda(e *syntax.LambdaExpr, want types.Type) *operand {
 		}
 	} else {
 		var resultT types.Type
-		if lastExpr != nil {
+		if lastExpr != nil && !statementLike(lastExpr) {
 			c.stmtList(stmts[:n-1])
 			x := c.expr(lastExpr, nil)
-			if x.mode == ModeValue {
+			switch {
+			case x.mode == ModeValue && isStatementCall(lastExpr, x):
+				// { fmt.Println(x) }: a call whose results are not one value
+				// ends a unit lambda, as a statement would.
+				if r, ok := x.typ.(*types.Result); ok {
+					if call := callOf(lastExpr); call != nil && !c.errorIgnorable(call) {
+						c.unhandledError(call, r)
+					}
+				}
+				resultT = types.Unit
+			case x.mode == ModeValue:
 				x = c.singleValue(x)
 				if x.mode != ModeInvalid {
 					resultT = c.defaultValueType(x, "lambda result")
 					info.ResultExpr = lastExpr
 				}
-			} else if x.mode == ModeNoValue {
+			case x.mode == ModeNoValue:
 				resultT = types.Unit
 			}
 		} else {
@@ -204,4 +218,37 @@ func (c *Checker) lambda(e *syntax.LambdaExpr, want types.Type) *operand {
 		return &operand{mode: ModeValue, typ: types.Base(want)}
 	}
 	return &operand{mode: ModeValue, typ: sig}
+}
+
+// statementLike reports whether e, the last statement of a lambda whose
+// result type is inferred, can only be a statement: an if without else, or
+// a catch whose handler yields no value.
+func statementLike(e syntax.Expr) bool {
+	switch x := syntax.Unparen(e).(type) {
+	case *syntax.IfExpr:
+		return x.Else == nil
+	case *syntax.CatchExpr:
+		stmts := x.Body.Stmts
+		if len(stmts) == 0 {
+			return true
+		}
+		_, isExpr := stmts[len(stmts)-1].(*syntax.ExprStmt)
+		return !isExpr
+	}
+	return false
+}
+
+// isStatementCall reports whether x, a call ending a lambda, has results that
+// cannot be the lambda's value: several values, or a value and an error.
+func isStatementCall(e syntax.Expr, x *operand) bool {
+	if callOf(e) == nil {
+		return false
+	}
+	switch t := x.typ.(type) {
+	case *types.Result:
+		return len(t.Raw) > 1 // errors.New(...) is one value: an error
+	case *types.Tuple:
+		return len(t.Elems) != 1
+	}
+	return false
 }

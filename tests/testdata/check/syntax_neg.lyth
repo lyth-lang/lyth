@@ -45,13 +45,12 @@ func main() {
     self := 1 // ERROR E0003 "self is the method receiver"
 }
 
-func localConst() {
-    const k = 1 // ERROR E0601 "constants are declared at package level"
-}
-
 func headerLambda(xs: []int) {
     if xs.Any { it > 1 } { // ERROR E0008 "the if header cannot end in a trailing lambda"
         println(xs)
+    }
+    for x in xs.Filter { x -> x > 1 } { // ERROR E0008 "parenthesize the header expression: (xs.Filter { x -> x > 1 })"
+        println(x)
     }
 }
 

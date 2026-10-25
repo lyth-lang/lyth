@@ -51,7 +51,7 @@ func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-const usage = `lyth is the Lyth compiler: Kotlin-inspired syntax, compiled to Go.
+const usage = `lyth is the Lyth compiler: all of Go, in fewer lines.
 
 Usage:
   lyth build [-o output] [packages] [-- go build flags]   compile packages with the Go toolchain
@@ -222,10 +222,17 @@ func report(s *build.Session, c *common, stderr io.Writer) bool {
 
 // countFixable counts the diagnostics lyth fix would settle.
 func countFixable(ds []*diag.Diagnostic) int {
+	fixable := map[*diag.Edit]bool{}
+	for _, e := range build.ApplicableFixes(ds) {
+		fixable[e] = true
+	}
 	n := 0
 	for _, d := range ds {
-		if len(d.Fixes()) > 0 {
-			n++
+		for _, e := range d.Fixes() {
+			if fixable[e] {
+				n++
+				break
+			}
 		}
 	}
 	return n

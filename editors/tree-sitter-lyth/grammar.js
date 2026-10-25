@@ -104,6 +104,7 @@ module.exports = grammar({
         $.method_call,
         $.member_access,
         $.typed_literal,
+        $.empty_struct,
         $.map_type,
         $.channel_type,
         $.lambda,
@@ -141,7 +142,9 @@ module.exports = grammar({
     package_clause: ($) => prec.dynamic(10, seq('package', field('name', $.identifier))),
 
     import_declaration: ($) =>
-      prec.dynamic(10, prec.right(seq('import', field('path', $.string), optional(seq('as', field('alias', $.identifier)))))),
+      prec.dynamic(10, prec.right(seq('import', choice($._import_spec, seq('(', repeat(choice($._import_spec, ';')), ')'))))),
+
+    _import_spec: ($) => prec.right(seq(field('path', $.string), optional(seq('as', field('alias', $.identifier))))),
 
     // func f(...), func T.m(), func *T.m(), func Page[T].first(), func []T.second[T](), func string.shout()
     function_declaration: ($) =>
@@ -260,7 +263,11 @@ module.exports = grammar({
         $.channel_type,
         $.function_type,
         $.nullable_type,
+        $.empty_struct_type,
       ),
+    // struct{}: Go's empty struct; struct{}{} is its value.
+    empty_struct_type: (_) => prec(2, seq('struct', '{', '}')),
+    empty_struct: (_) => prec.dynamic(10, seq('struct', '{', '}', '{', '}')),
     _simple_type: ($) => choice($.primitive_type, alias($.identifier, $.type_identifier)),
     qualified_type: ($) => seq(field('package', $.identifier), '.', field('name', alias($.identifier, $.type_identifier))),
     generic_type: ($) => prec(2, seq(choice($._simple_type, $.qualified_type), field('arguments', $.type_arguments))),
@@ -352,7 +359,7 @@ module.exports = grammar({
     operator: (_) =>
       choice(
         '+', '-', '*', '/', '%', '=', '==', '!=', '<', '>', '<=', '>=', '&&', '||', '!', '&', '|', '^', '<<', '>>', '&^',
-        '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<=', '>>=', '++', '--', '->', '?', '?:', '!!', '..', '..<', '...',
+        '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<=', '>>=', '&^=', '++', '--', '->', '?', '?:', '!!', '..', '..<', '...',
         '<-', '.', '?.', '!in', '!is', 'as?',
       ),
 

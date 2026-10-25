@@ -27,7 +27,9 @@ Functions named the way `go test` expects (`TestXxx`, `BenchmarkXxx`,
 `FuzzXxx`, `ExampleXxx`, and `TestMain`) are capitalized, so they are exported
 as `go test` requires. Their signatures are checked
 (`func TestXxx(t: *testing.T)` and so on), so a typo in a signature cannot
-silently skip a test.
+silently skip a test. An example's `// Output:` comment at the end of its body
+is kept in the generated Go, so `go test` runs the example and compares what
+it prints.
 
 ## Tests that throw
 
@@ -146,7 +148,7 @@ lyth test -race -cover ./...
 DATABASE_URL=postgres:///test lyth test -run TestWithDatabase ./store
 ```
 
-Flags other than Lyth's own (`-tags`, `-diagnostics`, `-timings`) go to
+Flags other than Lyth's own (`-tags`, `-diagnostics`, `-no-line-directives`, `-timings`) go to
 `go test`. Failures point at `.lyth` lines:
 
 ```text

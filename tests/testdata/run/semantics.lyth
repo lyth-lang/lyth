@@ -1,0 +1,162 @@
+// Go semantics kept in places where the lowering adds code: deferred calls
+// with catch, membership in lists of optional values, rune conversions, and
+// ?: on a value that is never null.
+import "fmt"
+import "io"
+import "os"
+import "strconv"
+import "sync"
+import "text/template"
+import "unicode"
+
+struct Res {
+    Name: string
+}
+
+func *Res.Shut(): error? {
+    fmt.Println("shut", Name)
+    return null
+}
+
+func close(name: string): error? {
+    fmt.Println("close", name)
+    return null
+}
+
+func deferred() {
+    name := "first"
+    defer close(name) catch {}
+    name = "second"
+    r := &Res(Name = "a")
+    defer r.Shut() catch (err) { fmt.Println(err) }
+    r = &Res(Name = "b")
+    fmt.Println("body", name, r.Name)
+}
+
+struct P {
+    X: int
+}
+
+func sizes(): (int, int) {
+    return 2, 3
+}
+
+func pair(): (int, string) {
+    return 1, "a"
+}
+
+struct Invalid {
+    Field: string
+}
+
+func *Invalid.Error(): string = "invalid ${Field}"
+
+// Any error value wraps, not only one of type error.
+func validate(): int throws {
+    throw (&Invalid(Field = "name")).wrap("validating")
+}
+
+func fields(s: string): []string throws {
+    if s == "" {
+        throw fmt.Errorf("empty")
+    }
+    return [s]
+}
+
+func sum(xs: ...int): int {
+    t := 0
+    for x in xs {
+        t += x
+    }
+    return t
+}
+
+func show(n: int, s: string) {
+    fmt.Println(n, s)
+}
+
+struct prefixed {
+    w: io.Writer
+}
+
+// Write returns the call's results as they are, as in Go.
+func prefixed.Write(p: []byte): (int, error?) {
+    return w.Write(p)
+}
+
+func main() {
+    deferred()
+
+    xs: []int? = [1, 3, null]
+    ys: []string? = ["a", null]
+    ps: []P? = [P(1)]
+    fmt.Println(3 in xs, 2 in xs, null in xs, "a" in ys, "b" !in ys, P(1) in ps)
+    n := 3
+    fmt.Println(when n {
+        in xs -> "in"
+        else -> "out"
+    })
+
+    r: rune = 'x'
+    out := ""
+    for c in "héllo" {
+        out += string(unicode.ToUpper(c))
+    }
+    b: byte = 65
+    fmt.Println(string(r), out, string(b))
+
+    ch := make(chan string, 1)
+    ch.send("msg")
+    s := ch.receive() ?: "none"
+    fmt.Println(s)
+
+    arr: [3]int = [1, 2, 3]
+    pa := &arr
+    fmt.Println(len(pa), pa[1])
+    for i, v in pa {
+        fmt.Println(i, v)
+    }
+
+    // f(g()) passes g's results as f's arguments, as in Go.
+    show(pair())
+    fmt.Println(fmt.Sprint(pair()), sum(sizes()))
+    t := template.Must(template.New("t").Parse("hi {{.}}\n"))
+    t.Execute(os.Stdout, "lyth") catch {}
+
+    prefixed(os.Stdout).Write([]byte("written\n")) catch {}
+    once := sync.OnceValues[int, error]({ strconv.Atoi("7") })
+    n7, err := once()
+    fmt.Println(n7, err == null)
+
+    // A fallback is typed by the success value, also where any is expected.
+    fallback: any = strconv.Atoi("x") catch { -1 }
+    empty: any = fields("") catch { [] }
+    fmt.Println(fallback, empty)
+
+    validate() catch (err) { fmt.Println(err) }
+
+    bits := 0b1111
+    bits &^= 0b0101
+    fmt.Println(bits, 0b1100 &^ 0b0100)
+}
+
+// Output:
+// body second b
+// shut a
+// close first
+// true false true true true true
+// in
+// x HÉLLO A
+// msg
+// 3 2
+// 0 1
+// 1 2
+// 2 3
+// 1 a
+// 1a 5
+// hi lyth
+// written
+// 7 true
+// -1 []
+// validating: invalid name
+// 10 8

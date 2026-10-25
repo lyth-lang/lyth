@@ -291,7 +291,7 @@ func (c *Checker) boundCall(e *syntax.CallExpr, sig *types.Signature, args []*sy
 	if !ok {
 		return invalid(e)
 	}
-	return c.callResult(sig, info)
+	return c.callResult(sig, info, e.S)
 }
 
 func paramName(sig *types.Signature, p int) string {
@@ -303,7 +303,7 @@ func paramName(sig *types.Signature, p int) string {
 
 // closest returns the name in names most similar to name, if any is close.
 func closest(name string, names []string) string {
-	best, bestDist := "", 3
+	best, bestDist := "", suggestLimit(name)
 	for _, n := range names {
 		if d := editDistance(strings.ToLower(n), strings.ToLower(name)); d < bestDist {
 			best, bestDist = n, d
@@ -314,6 +314,14 @@ func closest(name string, names []string) string {
 
 // ptrMethodReceiver checks that the receiver of a pointer method is mutable.
 func (c *Checker) ptrMethodReceiver(s *syntax.SelectorExpr) {
+	if c.optionalValue(s.X, s.Sel.Name, "call") {
+		return
+	}
+	if t := c.info.TypeOf(s.X); s.Safe && t != nil && types.IsNullable(t) && !types.IsNilable(t) {
+		// o?.Inc() on a P?: the box is shared like a smart-cast o's.
+		c.errorf(diag.EPtrMethodVal, s.Sel.S, "cannot call %s on %s: the method modifies its receiver, and %s is an optional value, which copies share", s.Sel.Name, s.X.Span().Short(), s.X.Span().Short())
+		return
+	}
 	inner := syntax.Unparen(s.X)
 	switch x := inner.(type) {
 	case *syntax.Ident:
@@ -379,13 +387,15 @@ func (c *Checker) callSig(e *syntax.CallExpr, sig *types.Signature, args []*synt
 	if !c.checkArgs(e, sig, args) {
 		return invalid(e)
 	}
-	return c.callResult(sig, info)
+	return c.callResult(sig, info, e.S)
 }
 
-func (c *Checker) callResult(sig *types.Signature, info *CallInfo) *operand {
+func (c *Checker) callResult(sig *types.Signature, info *CallInfo, span source.Span) *operand {
 	if r := types.ResultOf(sig); r != nil {
 		if info.Safe {
-			c.errorf(diag.EUnsupported, info.Args0Span(), "safe calls to methods that return errors are not supported yet")
+			c.errorf(diag.EUnsupported, span, "safe calls to methods that return errors are not supported yet").
+				WithHint("check the receiver first: if x != null { x.M()? }")
+			return &operand{mode: ModeInvalid, typ: types.Invalid}
 		}
 		return &operand{mode: ModeValue, typ: r}
 	}
@@ -402,17 +412,16 @@ func (c *Checker) callResult(sig *types.Signature, info *CallInfo) *operand {
 	return &operand{mode: ModeValue, typ: &types.Tuple{Elems: sig.Results}}
 }
 
-// Args0Span returns a span for reporting on the call.
-func (ci *CallInfo) Args0Span() source.Span {
-	if len(ci.Args) > 0 {
-		return ci.Args[0].Span()
-	}
-	return source.Span{}
-}
-
 // checkArgs checks call arguments, including variadic spreading.
 func (c *Checker) checkArgs(e *syntax.CallExpr, sig *types.Signature, args []*syntax.Arg) bool {
 	np := len(sig.Params)
+	if len(args) == 1 && (np >= 2 || sig.Variadic) && !args[0].Spread && args[0].Name == nil {
+		if _, isCall := syntax.Unparen(args[0].Value).(*syntax.CallExpr); isCall {
+			if forwarded, ok := c.forwardedArgs(e, sig, args[0]); forwarded {
+				return ok
+			}
+		}
+	}
 	ok := true
 	spread := false
 	for i, a := range args {
@@ -557,7 +566,7 @@ func (c *Checker) typeCall(e *syntax.CallExpr, t types.Type, args []*syntax.Arg,
 		c.defaultValueType(x, "conversion")
 	}
 	src := types.Base(x.typ)
-	if types.IsInteger(src) && types.IsString(t) {
+	if types.IsInteger(src) && types.IsString(t) && !isRuneOrByte(src) {
 		c.errorf(diag.EConversion, e.S, "converting %s to %s yields a rune, not a decimal string", x.typ, t).
 			WithHint("use a template for the number as text: \"${%s}\"", args[0].Value.Span().Short()).
 			WithHint("or string(rune(%s)) for a character", args[0].Value.Span().Short())
@@ -854,7 +863,7 @@ func (c *Checker) builtinCall(e *syntax.CallExpr, k BuiltinKind, args []*syntax.
 			c.nullableUse(x, "take the length of")
 			return invalid(e)
 		}
-		switch t := types.Base(x.typ).(type) {
+		switch t := collectionOf(x.typ).(type) {
 		case *types.Slice, *types.Chan:
 			return &operand{mode: ModeValue, typ: types.Int}
 		case *types.Map:
@@ -864,6 +873,10 @@ func (c *Checker) builtinCall(e *syntax.CallExpr, k BuiltinKind, args []*syntax.
 			return &operand{mode: ModeValue, typ: types.Int}
 		case *types.Array:
 			return &operand{mode: ModeValue, typ: types.Int, val: constant.MakeInt64(t.Len)}
+		case *types.Pointer:
+			if a, ok := types.Base(t.Elem).(*types.Array); ok {
+				return &operand{mode: ModeValue, typ: types.Int, val: constant.MakeInt64(a.Len)}
+			}
 		default:
 			if types.IsString(t) && k == BuiltinLen {
 				if x.val != nil {
@@ -884,9 +897,9 @@ func (c *Checker) builtinCall(e *syntax.CallExpr, k BuiltinKind, args []*syntax.
 			c.checkArgsLoose(args[1:])
 			return invalid(e)
 		}
-		s, ok := types.Base(x.typ).(*types.Slice)
+		s, ok := collectionOf(x.typ).(*types.Slice)
 		if !ok {
-			c.errorf(diag.EInvalidOp, args[0].Value.Span(), "first argument of append must be a List, not %s", x.typ)
+			c.errorf(diag.EInvalidOp, args[0].Value.Span(), "first argument of append must be a slice, not %s", x.typ)
 			c.checkArgsLoose(args[1:])
 			return invalid(e)
 		}
@@ -921,11 +934,11 @@ func (c *Checker) builtinCall(e *syntax.CallExpr, k BuiltinKind, args []*syntax.
 			return invalid(e)
 		}
 		m := c.value(args[0].Value, nil)
-		if mt, ok := types.Base(m.typ).(*types.Map); ok {
+		if mt, ok := collectionOf(m.typ).(*types.Map); ok {
 			c.assign(c.value(args[1].Value, mt.Key), mt.Key, "key of delete")
 		} else {
 			if m.mode != ModeInvalid {
-				c.errorf(diag.EInvalidOp, args[0].Value.Span(), "first argument of delete must be a Map, not %s", m.typ)
+				c.errorf(diag.EInvalidOp, args[0].Value.Span(), "first argument of delete must be a map, not %s", m.typ)
 			}
 			c.value(args[1].Value, nil)
 		}
@@ -942,7 +955,7 @@ func (c *Checker) builtinCall(e *syntax.CallExpr, k BuiltinKind, args []*syntax.
 			c.checkArgsLoose(args[1:])
 			return invalid(e)
 		}
-		switch tt := t.typ.(type) {
+		switch tt := collectionOf(t.typ).(type) {
 		case *types.Slice:
 			if len(args) < 2 {
 				c.errorf(diag.EArgCount, e.S, "make(%s) needs a length", tt)
@@ -960,7 +973,7 @@ func (c *Checker) builtinCall(e *syntax.CallExpr, k BuiltinKind, args []*syntax.
 			}
 			c.intArgs(args[1:])
 		default:
-			c.errorf(diag.EInvalidUse, args[0].Value.Span(), "cannot make %s; make creates List, Map, and Chan values", t.typ)
+			c.errorf(diag.EInvalidUse, args[0].Value.Span(), "cannot make %s; make creates slices, maps, and channels", t.typ)
 			return invalid(e)
 		}
 		info.Sig = &types.Signature{Results: []types.Type{t.typ}}
@@ -1034,7 +1047,7 @@ func (c *Checker) builtinCall(e *syntax.CallExpr, k BuiltinKind, args []*syntax.
 			return invalid(e)
 		}
 		x := c.value(args[0].Value, nil)
-		if _, ok := types.Base(x.typ).(*types.Chan); !ok && x.mode != ModeInvalid {
+		if _, ok := collectionOf(x.typ).(*types.Chan); !ok && x.mode != ModeInvalid {
 			c.errorf(diag.EInvalidOp, args[0].Value.Span(), "close requires a channel, not %s", x.typ)
 		}
 		return &operand{mode: ModeNoValue, typ: types.Unit}
@@ -1063,10 +1076,91 @@ func underlyingSignature(t types.Type) types.Type {
 		return b
 	case *types.Named:
 		if b.Go != nil {
+			if origin := b.Go.Origin(); len(b.Args) > 0 && origin.TypeParams().Len() == len(b.Args) {
+				// iter.Seq[Item]: the generic signature with the Lyth type
+				// arguments, which keep their nullability (Item's Loc: string?).
+				if gs, ok := origin.Underlying().(*gotypes.Signature); ok {
+					bind := bindings{}
+					for i := range b.Args {
+						bind[origin.TypeParams().At(i)] = b.Args[i]
+					}
+					return subst(types.LiftSignature(gs), bind)
+				}
+			}
 			if gs, ok := b.Go.Underlying().(*gotypes.Signature); ok {
 				return types.LiftSignature(gs)
 			}
 		}
 	}
 	return nil
+}
+
+// isRuneOrByte reports whether t is rune or byte, whose conversion to string
+// gives a character (go vet accepts string(r) for them).
+func isRuneOrByte(t types.Type) bool {
+	b, ok := t.(*types.Basic)
+	return ok && (b.Name == "rune" || b.Name == "byte" || b.Kind == types.UntypedRuneKind)
+}
+
+// forwardedArgs checks f(g()) where g returns several values, which Go
+// passes as f's arguments: template.Must(t.Parse(s)), sum(pair()) for a
+// variadic sum. forwarded is false when g returns one value, which the
+// ordinary argument check handles; a variadic f does not receive an error
+// this way, which would hide one Lyth must see handled.
+func (c *Checker) forwardedArgs(e *syntax.CallExpr, sig *types.Signature, a *syntax.Arg) (forwarded, ok bool) {
+	x, pre := c.preArgs[a.Value]
+	if !pre {
+		x = c.expr(a.Value, nil)
+	}
+	c.preArgs = map[syntax.Expr]*operand{a.Value: x}
+	if x.mode == ModeInvalid {
+		return true, false
+	}
+	single := func() (bool, bool) {
+		// Not forwarded: the argument is one value, as c.value checks it.
+		c.preArgs = map[syntax.Expr]*operand{a.Value: c.singleValue(x)}
+		return false, false
+	}
+	var raw []types.Type
+	switch t := x.typ.(type) {
+	case *types.Result:
+		if sig.Variadic {
+			return single()
+		}
+		raw = t.Raw
+	case *types.Tuple:
+		raw = t.Elems
+	}
+	if len(raw) < 2 {
+		return single()
+	}
+	c.preArgs = nil
+	np := len(sig.Params)
+	params := sig.Params
+	if sig.Variadic {
+		if len(raw) < np-1 {
+			c.argCountError(e, sig, len(raw))
+			return true, false
+		}
+		params = append([]types.Type{}, sig.Params[:np-1]...)
+		var elem types.Type = types.Invalid
+		if sl, ok := sig.Params[np-1].(*types.Slice); ok {
+			elem = sl.Elem
+		}
+		for len(params) < len(raw) {
+			params = append(params, elem)
+		}
+	} else if len(raw) != np {
+		c.argCountError(e, sig, 1)
+		return true, false
+	}
+	for i, t := range raw {
+		v := &operand{mode: ModeValue, typ: t, expr: a.Value}
+		if !c.assignableQuiet(v, params[i]) {
+			c.errorf(diag.ETypeMismatch, a.Value.Span(), "%s returns %s, which cannot be passed as the arguments of %s", a.Value.Span().Short(), (&types.Tuple{Elems: raw}).String(), e.Fun.Span().Short()).
+				WithNote("result %d has type %s; parameter %d needs %s", i+1, t, i+1, params[i])
+			return true, false
+		}
+	}
+	return true, true
 }

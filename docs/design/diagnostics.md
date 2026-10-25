@@ -48,7 +48,7 @@ users.lyth:12:27: error[E0201]: type mismatch in argument id of repo.find
   quickfix, and VS Code problem matchers parse it unchanged.
 - Columns are 1-based Unicode code points. Carets span the whole primary range.
   Tabs are expanded consistently in the snippet and the caret line.
-- `--diagnostics=json` emits one JSON object per diagnostic with byte offsets,
+- `-diagnostics=json` emits one JSON object per diagnostic with byte offsets,
   line/column pairs, and all fields above, for editors and tests.
 - `-v` adds `Cause` blocks: the Go message, the generated file and position, and
   the mapping kind (exact, line-level, or unmapped).
@@ -139,15 +139,13 @@ diagnostic is never shown to the user without its original text available.
 
 ## 7. Testing diagnostics
 
-- `tests/check/*.lyth` contain inline expectations:
+- `tests/testdata/check/*.lyth` contain inline expectations:
   ```kotlin
   x: int = "a"   // ERROR E0201 "expected int, found string"
   ```
-  The harness compares code, file, line, column (the column of the comment's
-  `^` marker when present), and a message substring. Every expected diagnostic
-  must occur, and no unexpected diagnostic may occur.
-- Snapshot tests (`*.diag.golden`) pin the full rendered output of selected
-  cases, including snippets and carets.
+  The harness compares code, line, and a message substring. Every expected
+  diagnostic must occur, and no unexpected error may occur; warnings are
+  checked in files with a `// WARN` expectation or a `// Warnings: none` line.
 - Toolchain-mapping tests deliberately produce `go/types` validation errors and
   `go build` errors (e.g. via unsupported constructs or a linker failure) and
   assert the mapped positions.

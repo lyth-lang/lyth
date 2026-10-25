@@ -1,0 +1,45 @@
+// Slices and maps are never nullable: null, catch { null }, and ?. on a
+// slice give the nil slice. Boxed constants keep their declared type.
+import "errors"
+import "fmt"
+import "net/http"
+struct U {
+    Tags: []string
+}
+func words(ok: bool): []string throws {
+    if !ok { throw errors.New("x") }
+    return ["a", "b"]
+}
+func absent() {
+    m: map[string][]string = [:]
+    fmt.Println(m["k"] ?: ["default"], [1, null][1] == null)
+    h: http.Header = null
+    fmt.Println(h == null)
+}
+
+func main() {
+    absent()
+    ys := words(false) catch { null }
+    zs := words(true) catch { null }
+    u: U? = U(Tags = ["t"])
+    tags := u?.Tags
+    v: U? = null
+    more()
+    fmt.Println(len(ys), len(zs), ys == null, zs, len(tags), len(v?.Tags), if len(zs) > 5 { zs } else { null })
+}
+
+func U.All(): []string = Tags
+
+func more() {
+    u: U? = null
+    fmt.Println(len(u?.All()))
+    f: float64? = 10
+    fmt.Println(f!! / 4)
+}
+
+// Output:
+// [default] true
+// true
+// 0
+// 2.5
+// 0 2 true [a b] 1 0 <nil>

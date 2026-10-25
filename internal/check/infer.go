@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/lyth-lang/lyth/internal/diag"
+	"github.com/lyth-lang/lyth/internal/source"
 	"github.com/lyth-lang/lyth/internal/syntax"
 	"github.com/lyth-lang/lyth/internal/types"
 )
@@ -34,6 +35,7 @@ func (c *Checker) inferCall(e *syntax.CallExpr, sig *types.Signature, args []*sy
 	}
 	ops := make([]*operand, len(args))
 	isLambda := func(a *syntax.Arg) bool { _, ok := syntax.Unparen(a.Value).(*syntax.LambdaExpr); return ok }
+	var genericArgs []int // generic function values (cmp.Compare), instantiated last
 	for i, a := range args {
 		if isLambda(a) {
 			continue
@@ -46,6 +48,10 @@ func (c *Checker) inferCall(e *syntax.CallExpr, sig *types.Signature, args []*sy
 		x := c.value(a.Value, hint)
 		ops[i] = x
 		if x.mode == ModeInvalid || pt == nil || types.IsUntyped(x.typ) || x.typ == types.Null {
+			continue
+		}
+		if isGenericFunc(x.typ) {
+			genericArgs = append(genericArgs, i)
 			continue
 		}
 		unify(pt, x.typ, bind)
@@ -63,7 +69,9 @@ func (c *Checker) inferCall(e *syntax.CallExpr, sig *types.Signature, args []*sy
 		}
 	}
 	c.inferCore(sig, bind)
-	if want != nil && len(sig.Results) == 1 {
+	if want != nil && len(sig.Results) == 1 && !types.IsInterface(want) {
+		// An interface expected type (fmt.Println's any) says nothing about
+		// the result type: sumBy(xs) { len(it) } still gives int.
 		unify(sig.Results[0], want, bind)
 		c.inferCore(sig, bind)
 	}
@@ -88,6 +96,22 @@ func (c *Checker) inferCall(e *syntax.CallExpr, sig *types.Signature, args []*sy
 		}
 	}
 	c.inferCore(sig, bind)
+	for _, x := range ops {
+		if x != nil && x.mode == ModeInvalid {
+			// An argument failed to check (undefined: maps): that error is
+			// the one to read, not a type argument it could not give.
+			return nil, nil
+		}
+	}
+	for _, i := range genericArgs {
+		// slices.SortFunc(xs, cmp.Compare): the parameter's type, known from
+		// the other arguments, instantiates the generic function, as in Go.
+		if pt := paramFor(i, args[i]); pt != nil {
+			if want := subst(pt, bind); !hasTypeParams(want) {
+				c.instantiateFuncValue(ops[i], want, false)
+			}
+		}
+	}
 	var missing []string
 	for _, tp := range sig.TypeParams {
 		if _, ok := bind[tp.Go]; !ok {
@@ -114,6 +138,7 @@ func (c *Checker) inferCall(e *syntax.CallExpr, sig *types.Signature, args []*sy
 			WithNote("%s", c.lythNames(translateGoMessage(err.Error())))
 		return nil, nil
 	}
+	c.comparableArgs(e.Fun.Span(), sig.TypeParams, bind)
 	res := substSig(sig, bind)
 	res.GoSig = inst.(*gotypes.Signature)
 	// Remember the checked operands so checkArgs does not re-check them.
@@ -178,6 +203,23 @@ func coreTerm(tp *gotypes.TypeParam) gotypes.Type {
 	}
 	return nil
 }
+
+// collectionOf returns t without nullability and, for a Go named type whose
+// underlying type is a collection, channel, or basic type, that underlying
+// type: http.Header indexes, ranges, and takes len like the map it is.
+func collectionOf(t types.Type) types.Type {
+	b := types.Base(t)
+	if n, ok := b.(*types.Named); ok && n.Go != nil {
+		switch n.Go.Underlying().(type) {
+		case *gotypes.Slice, *gotypes.Map, *gotypes.Array, *gotypes.Chan, *gotypes.Basic:
+			return types.Base(types.Lift(n.Go.Underlying()))
+		}
+	}
+	return b
+}
+
+// CollectionOf is collectionOf for the lowering.
+func CollectionOf(t types.Type) types.Type { return collectionOf(t) }
 
 func underlyingOf(t types.Type) types.Type {
 	if n, ok := types.Base(t).(*types.Named); ok && n.Go != nil {
@@ -435,6 +477,13 @@ func unify(p, a types.Type, bind bindings) {
 		}
 	case *types.Named:
 		x, ok := ab.(*types.Named)
+		if ok && pt.Decl != nil && x.Decl == pt.Decl && len(x.Args) == len(pt.Args) {
+			// Box[T] against Box[int], both Lyth-declared.
+			for i := range pt.Args {
+				unify(pt.Args[i], x.Args[i], bind)
+			}
+			return
+		}
 		if !ok && pt.Go != nil && len(pt.Args) > 0 {
 			// A defined generic type against a type literal unifies through
 			// its underlying type, as Go's inference does: RowToFunc[T] with
@@ -568,4 +617,77 @@ func translateGoMessage(msg string) string {
 		i++
 	}
 	return b.String()
+}
+
+// genericFuncValue reports a generic function used as a value where nothing
+// determines its type arguments.
+func (c *Checker) genericFuncValue(x *operand) {
+	name := x.expr.Span().Short()
+	c.errorf(diag.ECannotInfer, x.expr.Span(), "cannot use generic function %s without type arguments", name).
+		WithHint("write them: %s[...], or give the expected function type: f: (A) -> R = %s", name, name)
+}
+
+// isGenericFunc reports whether t is the type of a generic function used
+// without type arguments (cmp.Compare, slices.Reverse).
+func isGenericFunc(t types.Type) bool {
+	sig, ok := types.Base(t).(*types.Signature)
+	return ok && len(sig.TypeParams) > 0
+}
+
+// instantiateFuncValue gives the generic function value x the type
+// arguments that make it a want, as Go infers them from the function type a
+// generic function is assigned or passed to. It reports whether want
+// determines them all; x keeps its generic type otherwise.
+func (c *Checker) instantiateFuncValue(x *operand, want types.Type, explicit bool) bool {
+	sig, ok := types.Base(x.typ).(*types.Signature)
+	if !ok || len(sig.TypeParams) == 0 || sig.GoSig == nil {
+		return false
+	}
+	ws := signatureOf(types.Base(want))
+	if ws == nil || hasTypeParams(ws) {
+		return false
+	}
+	bind := bindings{}
+	unify(&types.Signature{Params: sig.Params, Results: sig.Results, Throws: sig.Throws}, ws, bind)
+	c.inferCore(sig, bind) // slices.Sort for ([]int) -> unit: S = []int gives E = int
+	targs := make([]gotypes.Type, len(sig.TypeParams))
+	for i, tp := range sig.TypeParams {
+		b, ok := bind[tp.Go]
+		if !ok {
+			return false
+		}
+		targs[i] = types.Lower(b)
+	}
+	inst, err := gotypes.Instantiate(nil, sig.GoSig, targs, true)
+	if err != nil {
+		return false
+	}
+	res := substSig(sig, bind)
+	res.GoSig = inst.(*gotypes.Signature)
+	x.typ = res
+	if explicit && x.expr != nil {
+		// Go infers a generic function's type arguments from an assignment,
+		// but not reliably from every context (struct fields): write them.
+		lyth := make([]types.Type, len(sig.TypeParams))
+		for i, tp := range sig.TypeParams {
+			lyth[i] = bind[tp.Go]
+		}
+		c.info.ValueInsts[x.expr] = lyth
+	}
+	return true
+}
+
+// comparableArgs reports a type argument holding an optional value (a
+// struct with an int? field) for a comparable type parameter: Go would
+// compare it by the boxes' addresses (slices.Contains, map keys).
+func (c *Checker) comparableArgs(span source.Span, tps []*types.TypeParam, bind bindings) {
+	for _, tp := range tps {
+		iface, ok := tp.Go.Constraint().Underlying().(*gotypes.Interface)
+		if !ok || !iface.IsComparable() {
+			continue
+		}
+		if path, ft := optionalPart(bind[tp.Go]); path != "" {
+			c.errorf(diag.ETypeArgs, span, "%s cannot be the comparable type %s: %s has type %s, which Go would compare by address", bind[tp.Go], tp.Name, path, ft)
+		}
+	}
 }
