@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("struct S S,y S,0}\nfun A x S,y S,a*0{x!=x\nA!=\"")

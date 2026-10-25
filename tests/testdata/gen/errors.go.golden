@@ -76,6 +76,7 @@ func run() error {
 }
 
 func main() {
+//line errors.lyth:35
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)

@@ -32,6 +32,10 @@ func (s Severity) String() string {
 // Code is a stable diagnostic identifier such as "E0201".
 type Code string
 
+// IsSyntax reports whether c is a lexical or syntax error (E0001-E0099),
+// reported while parsing.
+func (c Code) IsSyntax() bool { return len(c) == 5 && c[:3] == "E00" }
+
 // Related is a secondary location with its own label.
 type Related struct {
 	Span  source.Span
@@ -165,6 +169,14 @@ func (s *Sink) Add(d *Diagnostic) {
 
 // Len returns the number of diagnostics reported so far.
 func (s *Sink) Len() int { return len(s.diags) }
+
+// Truncate drops the diagnostics reported after the first n (a parser
+// backing out of a speculative parse).
+func (s *Sink) Truncate(n int) {
+	if n < len(s.diags) {
+		s.diags = s.diags[:n]
+	}
+}
 
 // Since returns the diagnostics reported after the first n, sorted.
 func (s *Sink) Since(n int) []*Diagnostic {

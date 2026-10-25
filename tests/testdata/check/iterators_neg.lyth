@@ -1,0 +1,23 @@
+// Go's renamed imports, and for loops over functions that are not iterators.
+import (
+    "fmt"
+    s "strings" // ERROR E0003 "a renamed import is written"
+)
+
+func pairs(yield: (string, int) -> bool) {}
+
+func none(yield: () -> bool) {}
+
+func main() {
+    fmt.Println(s.ToUpper("a"))
+    for x in fmt.Println { // ERROR E0209 "cannot iterate over a function of type"
+        fmt.Println(x)
+    }
+    for k, v in pairs {
+        fmt.Println(k, v)
+    }
+    for x in none { // ERROR E0216 "this iterator yields no values"
+    }
+    for _ in none {
+    }
+}

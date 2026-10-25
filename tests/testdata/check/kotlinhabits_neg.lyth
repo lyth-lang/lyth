@@ -1,0 +1,31 @@
+// Kotlin habits and literals Go would need a type for get one diagnostic
+// each, with the Lyth form.
+interface Shape {
+    Area(): int
+}
+
+struct Sq {
+    S: int
+}
+
+func *Sq.Area(): int = S * S
+
+func isSquare(s: Shape): bool = s is Sq // ERROR E0209 "Area has a pointer receiver, so *Sq implements Shape"
+
+func main() {
+    n := 3
+    for i in n downTo 0 { // ERROR E0008 "Lyth has no downTo"
+        println(i)
+    }
+    for j in 0 until n { // ERROR E0008 "Lyth has no until"
+        println(j)
+    }
+    for k in 0..10 step 2 { // ERROR E0008 "Lyth has no step"
+        println(k)
+    }
+    xs := listOf(1, 2) // ERROR E0101 "Lyth writes a list as a literal"
+    m := ["a": 1, "b": "s"] // ERROR E0201 "map values have different types"
+    ys := [1, "x"] // ERROR E0201 "list elements have different types"
+    zs := List(1, 2) // ERROR E0101 "undefined: List"
+    println(xs, m, ys, zs)
+}

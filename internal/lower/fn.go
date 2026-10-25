@@ -41,6 +41,10 @@ type fnLower struct {
 	casts       map[*check.VarSym]*castBinding // smart casts served by a binding, see typetest.go
 	breaks      *[]*breakCtx                   // enclosing loops and switches, innermost last
 	labels      map[string]bool                // Go labels used in this function
+	pre         map[syntax.Expr]ast.Expr       // operands already evaluated into temporaries (deferred calls)
+	// assignedFields names the fields the function assigns (x.f = ...), so
+	// that reading resp.Body at a defer and at exit is known to agree.
+	assignedFields map[string]bool
 }
 
 // breakCtx is an enclosing Go statement that an unlabeled break exits.
@@ -54,7 +58,8 @@ func newFnLower(l *fileLowerer, sig *types.Signature, lambda bool) *fnLower {
 	fl := &fnLower{l: l, info: l.info, locals: map[*check.VarSym]string{}, taken: map[string]bool{},
 		reserved: map[string]bool{}, plain: map[string]bool{}, live: map[string]int{}, errNames: &[]string{},
 		temps: map[string]int{}, declCount: map[string]int{},
-		casts: map[*check.VarSym]*castBinding{}, breaks: &[]*breakCtx{}, labels: map[string]bool{}}
+		casts: map[*check.VarSym]*castBinding{}, breaks: &[]*breakCtx{}, labels: map[string]bool{},
+		pre: map[syntax.Expr]ast.Expr{}, assignedFields: map[string]bool{}}
 	fl.setShape(sig)
 	for name := range l.importNames {
 		fl.reserved[name] = true
@@ -81,7 +86,7 @@ func (fl *fnLower) child(sig *types.Signature) *fnLower {
 	c := &fnLower{l: fl.l, info: fl.info, locals: fl.locals, taken: fl.taken, reserved: fl.reserved,
 		plain: fl.plain, live: fl.live, errNames: fl.errNames,
 		temps: fl.temps, declCount: fl.declCount, recvName: fl.recvName, parent: fl, casts: fl.casts,
-		breaks: &[]*breakCtx{}, labels: map[string]bool{}}
+		breaks: &[]*breakCtx{}, labels: map[string]bool{}, pre: fl.pre, assignedFields: fl.assignedFields}
 	c.setShape(sig)
 	return c
 }
@@ -92,6 +97,10 @@ func (fl *fnLower) child(sig *types.Signature) *fnLower {
 func (fl *fnLower) collectNames(n syntax.Node) {
 	syntax.Walk(n, func(x syntax.Node) {
 		switch x := x.(type) {
+		case *syntax.AssignStmt:
+			if sel, ok := syntax.Unparen(x.Lhs).(*syntax.SelectorExpr); ok {
+				fl.assignedFields[sel.Sel.Name] = true
+			}
 		case *syntax.Ident:
 			fl.taken[x.Name] = true
 			if !fl.binderIdent(x) {
@@ -508,6 +517,8 @@ func (fl *fnLower) stmt(s syntax.Stmt) {
 	switch s := s.(type) {
 	case *syntax.LocalDecl:
 		fl.localDecl(s)
+	case *syntax.ConstDecl:
+		fl.localConst(s)
 	case *syntax.AssignStmt:
 		fl.assignStmt(s)
 	case *syntax.IncDecStmt:
@@ -768,6 +779,8 @@ func assignToken(k syntax.Kind) token.Token {
 		return token.SHL_ASSIGN
 	case syntax.SHR_ASSIGN:
 		return token.SHR_ASSIGN
+	case syntax.AND_NOT_ASSIGN:
+		return token.AND_NOT_ASSIGN
 	}
 	return token.ASSIGN
 }
@@ -792,6 +805,10 @@ func (fl *fnLower) exprStmt(e syntax.Expr) {
 		return
 	case *syntax.ElvisExpr:
 		// `x ?: return ...` as a statement: an early exit.
+		if xt := fl.info.TypeOf(x.X); xt != nil && !types.MayBeNull(xt) && !types.IsNilable(xt) && !isCollection(xt) {
+			fl.exprStmt(x.X) // never null (the checker warned)
+			return
+		}
 		v := fl.expr(x.X)
 		sub, stmts := fl.sub()
 		sub.exprStmt(x.Y)
@@ -1250,7 +1267,7 @@ func (fl *fnLower) forStmt(s *syntax.ForStmt) {
 	switch {
 	case len(names) == 2:
 		rs.Key, rs.Value = ast.NewIdent(names[0]), ast.NewIdent(names[1])
-	case fi.Kind == check.ForMap || fi.Kind == check.ForChan:
+	case fi.Kind == check.ForMap || fi.Kind == check.ForChan || fi.Kind == check.ForFunc:
 		rs.Key = ast.NewIdent(names[0])
 	default:
 		rs.Key, rs.Value = ast.NewIdent("_"), ast.NewIdent(names[0])
@@ -1372,6 +1389,10 @@ func (fl *fnLower) deferGo(call syntax.Expr, body *syntax.Block, isGo bool, span
 		})
 		callExpr = &ast.CallExpr{Fun: &ast.FuncLit{Type: &ast.FuncType{Params: &ast.FieldList{}}, Body: &ast.BlockStmt{List: stmts}}}
 	} else if c, ok := syntax.Unparen(call).(*syntax.CatchExpr); ok {
+		// Go evaluates a deferred call's function value and arguments at
+		// the defer statement; the handler's closure would read them at
+		// exit. Spill the ones that may change into temporaries first.
+		fl.evalOperandsNow(c.X)
 		child := fl.child(&types.Signature{})
 		var stmts []ast.Stmt
 		child.stmts = &stmts
@@ -1390,6 +1411,79 @@ func (fl *fnLower) deferGo(call syntax.Expr, body *syntax.Block, isGo bool, span
 		fl.emit(&ast.GoStmt{Go: fl.l.pos(span), Call: callExpr}, span)
 	} else {
 		fl.emit(&ast.DeferStmt{Defer: fl.l.pos(span), Call: callExpr}, span)
+	}
+}
+
+// evalOperandsNow evaluates the receiver and arguments of the call e that a
+// later assignment could change into temporaries, recorded in fl.pre for the
+// closure that runs the call.
+func (fl *fnLower) evalOperandsNow(e syntax.Expr) {
+	call, ok := syntax.Unparen(e).(*syntax.CallExpr)
+	if !ok {
+		return
+	}
+	spill := func(x syntax.Expr, name string, copyValue bool) {
+		if fl.stableField(x) {
+			return // resp.Body: a field of a variable nothing assigns
+		}
+		g := fl.expr(x)
+		if id, ok := g.(*ast.Ident); ok && identOf(x) == nil {
+			// x ?: 1, if/when/catch: already computed into a temporary,
+			// which the closure reads.
+			fl.pre[x] = id
+			return
+		}
+		if fl.pure(x, g) && !(copyValue && fl.mutableVar(x)) {
+			return
+		}
+		tmp := fl.temp(name)
+		fl.emitSynth(&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(tmp)}, Tok: token.DEFINE, Rhs: []ast.Expr{g}}, x.Span())
+		fl.pre[x] = ast.NewIdent(tmp)
+	}
+	switch f := syntax.Unparen(call.Fun).(type) {
+	case *syntax.SelectorExpr:
+		// A pointer or interface receiver is a value, and so is the copy a
+		// value method receives; a struct receiver of a pointer method is
+		// the variable itself, as in Go.
+		s := fl.info.Selections[f]
+		t := fl.info.TypeOf(f.X)
+		_, ptr := types.Base(t).(*types.Pointer)
+		switch {
+		case t == nil || s == nil || fl.info.Types[f.X].Mode != check.ModeValue:
+		case s.Kind == check.SelMethod && ptr && !s.PtrRecv:
+			// p.Show() with a value method: Go copies *p at the defer.
+			g := fl.expr(f.X)
+			tmp := fl.temp("recv")
+			fl.emitSynth(&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(tmp)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.StarExpr{X: g}}}, f.X.Span())
+			fl.pre[f.X] = ast.NewIdent(tmp)
+		case s.Kind == check.SelMethod && (types.IsNilable(t) || !s.PtrRecv):
+			// A value method's copy is made at the defer, even of a
+			// variable whose fields change later.
+			spill(f.X, "recv", !types.IsNilable(t))
+		case s.Kind == check.SelField:
+			// s.cb(): the function value is read at the defer.
+			spill(f, "fn", false)
+		}
+	case *syntax.IndexExpr:
+		spill(f, "fn", false) // hs[i]()
+	case *syntax.Ident:
+		// g(1) with a function variable g: Go evaluates g at the defer.
+		if v, ok := fl.info.Uses[f].(*check.VarSym); ok && !v.Settled() {
+			spill(f, "fn", false)
+		}
+	}
+	var names []string
+	if sig, ok := types.Base(fl.info.TypeOf(call.Fun)).(*types.Signature); ok {
+		names = sig.ParamNames
+	}
+	for i, a := range call.Args {
+		if a.Value != nil {
+			name := "arg"
+			if i < len(names) && names[i] != "" && names[i] != "_" {
+				name = names[i] // defer cancel(ctx): ctx := ...
+			}
+			spill(a.Value, name, true)
+		}
 	}
 }
 
@@ -1538,4 +1632,73 @@ func trues(n int) []bool {
 		out[i] = true
 	}
 	return out
+}
+
+// localConst lowers a constant declared in a function body to Go's local
+// const declaration.
+func (fl *fnLower) localConst(d *syntax.ConstDecl) {
+	k, ok := fl.info.Defs[d.Name].(*check.ConstSym)
+	if !ok || k.Val == nil {
+		return
+	}
+	spec := &ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(k.GoName)}, Values: []ast.Expr{fl.expr(d.Value)}}
+	fl.l.mark(spec.Names[0], d.Name.S)
+	if d.Type != nil {
+		spec.Type = fl.l.typeExpr(k.Type)
+	}
+	fl.emit(&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.CONST, TokPos: fl.l.pos(d.S), Specs: []ast.Spec{spec}}}, d.S)
+}
+
+// stableField reports whether e is a chain of field selections on a variable
+// that is never reassigned, none of whose fields the function assigns: its
+// value is the same at a defer and when the deferred call runs.
+func (fl *fnLower) stableField(e syntax.Expr) bool {
+	sel, ok := syntax.Unparen(e).(*syntax.SelectorExpr)
+	if !ok {
+		return false
+	}
+	s := fl.info.Selections[sel]
+	if s == nil || s.Kind != check.SelField || s.Safe || fl.assignedFields[sel.Sel.Name] {
+		return false
+	}
+	if id := identOf(sel.X); id != nil {
+		v, ok := fl.info.Uses[id].(*check.VarSym)
+		return ok && v.Settled()
+	}
+	return fl.stableField(sel.X)
+}
+
+// mutableVar reports whether e names a mutable local or package variable,
+// whose fields or elements may change after it is read.
+func (fl *fnLower) mutableVar(e syntax.Expr) bool {
+	id := identOf(e)
+	if id == nil {
+		return false
+	}
+	v, ok := fl.info.Uses[id].(*check.VarSym)
+	return ok && v.Mutable && !types.IsNilable(v.Type) && !isScalar(v.Type)
+}
+
+// isCollection reports whether t is a slice or map (also a Go named one),
+// which ?: treats as absent when nil.
+func isCollection(t types.Type) bool {
+	switch types.Base(t).(type) {
+	case *types.Slice, *types.Map:
+		return true
+	case *types.Named:
+		if n := types.Base(t).(*types.Named); n.Go != nil {
+			switch n.Go.Underlying().(type) {
+			case *gotypes.Slice, *gotypes.Map:
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// isScalar reports whether t is a basic type, whose value a field
+// assignment cannot change.
+func isScalar(t types.Type) bool {
+	_, ok := types.Base(t).(*types.Basic)
+	return ok
 }

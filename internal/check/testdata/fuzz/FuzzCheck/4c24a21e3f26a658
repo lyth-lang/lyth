@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("fun A0000000\nfunc \nfunc(")

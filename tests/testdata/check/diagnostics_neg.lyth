@@ -1,5 +1,3 @@
-import "maps"
-
 struct User {
     Email: string?
     UserID: int?
@@ -21,9 +19,6 @@ func fields(u: User) {
 func loops() {
     for c in 3.5 { // ERROR E0209 "for loops iterate over slices, arrays, maps, strings, channels"
         println(c)
-    }
-    for k in maps.Keys(["a": 1]) { // ERROR E0601 "slices.Collect"
-        println(k)
     }
 }
 

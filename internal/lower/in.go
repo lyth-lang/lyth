@@ -36,6 +36,11 @@ func (fl *fnLower) membership(in *check.InInfo, elem ast.Expr, elemSyn syntax.Ex
 	}
 	var y ast.Expr
 	if elem == nil {
+		if in.Optional != nil && fl.info.Implicit[elemSyn] == check.ConvBox {
+			// Search by content: keep the element unboxed.
+			delete(fl.info.Implicit, elemSyn)
+			defer func() { fl.info.Implicit[elemSyn] = check.ConvBox }()
+		}
 		xs := fl.exprList([]syntax.Expr{elemSyn, container}, nil)
 		elem, y = xs[0], xs[1]
 		// Go evaluates the container before the element in all forms below.
@@ -53,6 +58,27 @@ func (fl *fnLower) membership(in *check.InInfo, elem ast.Expr, elemSyn syntax.Ex
 				y = fl.stash(container, y) // slicing needs an addressable array
 			}
 			y = &ast.SliceExpr{X: y}
+		}
+		if in.Optional != nil {
+			// slices.ContainsFunc(xs, func(v *int) bool { return v != nil && *v == x })
+			if !fl.pure(elemSyn, elem) {
+				elem = fl.stash(elemSyn, elem) // read by every call of the func
+			}
+			v := fl.temp("v")
+			cmp := &ast.BinaryExpr{
+				X:  &ast.BinaryExpr{X: ast.NewIdent(v), Op: token.NEQ, Y: ast.NewIdent("nil")},
+				Op: token.LAND,
+				Y:  &ast.BinaryExpr{X: &ast.StarExpr{X: ast.NewIdent(v)}, Op: token.EQL, Y: elem},
+			}
+			fn := &ast.FuncLit{
+				Type: &ast.FuncType{
+					Params:  &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{ast.NewIdent(v)}, Type: fl.l.typeExpr(in.Optional)}}},
+					Results: &ast.FieldList{List: []*ast.Field{{Type: ast.NewIdent("bool")}}},
+				},
+				Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{cmp}}}},
+			}
+			test = &ast.CallExpr{Fun: sel(fl.l.useImport("slices", "slices"), "ContainsFunc"), Args: []ast.Expr{y, fn}}
+			break
 		}
 		test = &ast.CallExpr{Fun: sel(fl.l.useImport("slices", "slices"), "Contains"), Args: []ast.Expr{y, elem}}
 	case check.InString:

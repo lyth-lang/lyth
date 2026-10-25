@@ -168,7 +168,7 @@ type PropDecl struct {
 	S       source.Span
 }
 
-// ConstDecl is a top-level `const`.
+// ConstDecl is a `const`, at package level or in a function body.
 type ConstDecl struct {
 	Doc   string
 	Name  *Ident
@@ -211,6 +211,7 @@ func (*InterfaceDecl) declNode() {}
 func (*EnumDecl) declNode()      {}
 func (*PropDecl) declNode()      {}
 func (*ConstDecl) declNode()     {}
+func (*ConstDecl) stmtNode()     {}
 func (*BadDecl) declNode()       {}
 func (*TypeAliasDecl) declNode() {}
 
@@ -703,6 +704,18 @@ type TypeOperand struct {
 	Type TypeExpr
 	S    source.Span
 }
+
+// EmptyStructType is Go's struct{}, the type of values that carry no data
+// (chan struct{}, map[K]struct{}).
+type EmptyStructType struct{ S source.Span }
+
+// EmptyStructLit is Go's struct{}{}, the value of type struct{}.
+type EmptyStructLit struct{ S source.Span }
+
+func (t *EmptyStructType) Span() source.Span { return t.S }
+func (*EmptyStructType) typeNode()           {}
+func (e *EmptyStructLit) Span() source.Span  { return e.S }
+func (*EmptyStructLit) exprNode()            {}
 
 // BadExpr is an expression that could not be parsed.
 type BadExpr struct{ S source.Span }

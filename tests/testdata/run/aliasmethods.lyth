@@ -1,0 +1,15 @@
+// A method declared through a type alias of a struct is a method of the
+// struct, as in Go.
+import "fmt"
+struct Pt {
+    X: int
+}
+typealias Point = Pt
+func Point.String(): string = "P(${X})"
+func main() {
+    s: fmt.Stringer = Pt(2)
+    fmt.Println(s, Point(3).String())
+}
+
+// Output:
+// P(2) P(3)

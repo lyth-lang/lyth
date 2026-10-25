@@ -1,0 +1,31 @@
+// A struct construction in an if, while, or when header is a parenthesized
+// Go composite literal, whose { would otherwise start the body.
+struct P {
+    x: int
+}
+func main() {
+    p := P(1)
+    if p == P(1) {
+        println("eq")
+    }
+    n := 0
+    while p != P(3) && n < 2 {
+        n++
+        p = P(p.x + 1)
+    }
+    q: P? = P(1)
+    r := when q {
+        P(1) -> "one"
+        else -> "other"
+    }
+    a: any = P(2)
+    s := when a {
+        P(2) -> "two"
+        else -> "x"
+    }
+    println(n, p.x, r, s)
+}
+
+// Output:
+// eq
+// 2 3 one two

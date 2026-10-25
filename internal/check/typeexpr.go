@@ -34,15 +34,23 @@ func constraintOnly(t types.Type) bool {
 	return ok && !iface.IsMethodSet()
 }
 
+// EmptyStruct is Go's struct{}.
+var EmptyStruct = &types.GoType{T: gotypes.NewStruct(nil, nil)}
+
 func (c *Checker) resolveType0(te syntax.TypeExpr) types.Type {
 	switch te := te.(type) {
+	case *syntax.EmptyStructType:
+		return EmptyStruct
 	case *syntax.NamedType:
 		if te.Pkg != nil {
 			sym := c.lookup(te.Pkg.Name)
 			ps, ok := sym.(*PkgSym)
 			if !ok {
 				if sym == nil {
-					c.errorf(diag.EUndefined, te.Pkg.S, "undefined package %s", te.Pkg.Name)
+					d := c.errorf(diag.EUndefined, te.Pkg.S, "undefined package %s", te.Pkg.Name)
+					if path, ok := stdPackages[te.Pkg.Name]; ok {
+						d.WithHint("add the import: import %q", path)
+					}
 				} else {
 					c.errorf(diag.ENotExpected, te.Pkg.S, "%s is not a package", te.Pkg.Name)
 				}
@@ -104,6 +112,15 @@ func (c *Checker) resolveType0(te syntax.TypeExpr) types.Type {
 		case *types.Nullable:
 			return b
 		}
+		if n, ok := elem.(*types.Named); ok && n.Go != nil {
+			switch collectionOf(n).(type) {
+			case *types.Slice, *types.Map:
+				// http.Header?, json.RawMessage?: a slice or map underneath.
+				c.errorf(diag.ENullableColl, te.S, "%s cannot be nullable; its empty value already represents absence", elem).
+					WithHint("use %s and an empty value instead of null", elem)
+				return elem
+			}
+		}
 		if elem == types.Unit || elem == types.Invalid {
 			return elem
 		}
@@ -128,6 +145,12 @@ func (c *Checker) resolveType0(te syntax.TypeExpr) types.Type {
 		if key != types.Invalid && !gotypes.Comparable(gk) {
 			c.errorf(diag.ETypeArgs, te.Key.Span(), "%s cannot be a map key: it is not comparable", key)
 		}
+		keySpan := te.Key.Span()
+		c.whenDeclared(func() {
+			if path, ft := optionalPart(key); path != "" {
+				c.errorf(diag.ETypeArgs, keySpan, "%s cannot be a map key: %s has type %s, which Go would compare by address", key, path, ft)
+			}
+		})
 		return &types.Map{Key: key, Elem: elem}
 	case *syntax.ChanType:
 		elem := c.resolveType(te.Elem)
@@ -470,4 +493,14 @@ func requalify(word string, quals map[string]string) string {
 func pathByte(b byte) bool {
 	return 'a' <= b && b <= 'z' || 'A' <= b && b <= 'Z' || '0' <= b && b <= '9' ||
 		b == '_' || b == '-' || b == '.' || b == '/' || b == '~' || b >= 0x80
+}
+
+// whenDeclared runs f now, or once every declaration of the package is
+// resolved when types are still being declared (struct fields may not be).
+func (c *Checker) whenDeclared(f func()) {
+	if c.declaring {
+		c.pendingChecks = append(c.pendingChecks, f)
+		return
+	}
+	f()
 }

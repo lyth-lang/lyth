@@ -1,6 +1,7 @@
 package check
 
 import (
+	"go/constant"
 	gotypes "go/types"
 	"strings"
 	"unicode"
@@ -45,7 +46,7 @@ func (c *Checker) selector(e *syntax.SelectorExpr, want types.Type) *operand {
 				if entry := ts.Decl.LookupEntry(name); entry != nil {
 					c.info.Uses[id] = ts
 					c.info.Entries[e] = entry
-					return &operand{mode: ModeValue, typ: ts.Type}
+					return &operand{mode: ModeValue, typ: ts.Type, val: constant.MakeInt64(int64(entry.Value))}
 				}
 			}
 		}
@@ -57,8 +58,8 @@ func (c *Checker) selector(e *syntax.SelectorExpr, want types.Type) *operand {
 	if x.mode == ModeType {
 		if d := types.EnumOf(x.typ); d != nil && !types.IsNullable(x.typ) {
 			if entry := d.LookupEntry(name); entry != nil {
-				c.info.Entries[e] = entry
-				return &operand{mode: ModeValue, typ: x.typ}
+				c.info.Entries[e] = entry // an iota constant in Go
+				return &operand{mode: ModeValue, typ: x.typ, val: constant.MakeInt64(int64(entry.Value))}
 			}
 			d := c.errorf(diag.EUnknownMember, e.Sel.S, "enum %s has no entry %s", d.Name, name)
 			if s := closest(name, entryNames(types.EnumOf(x.typ))); s != "" {
@@ -83,6 +84,12 @@ func (c *Checker) selector(e *syntax.SelectorExpr, want types.Type) *operand {
 			return invalid(e)
 		}
 		t = r.Success[0]
+		if types.IsNullable(t) {
+			// find()?.Name on a T? result: the error is handled, the null is not.
+			c.errorf(diag.ENullable, e.S, "%s may be null on success (type %s)", callName(e.X), t).
+				WithEdit(e.OpSpan, "??.", "propagate the error, then call safely: %s??.%s", e.X.Span().Short(), name)
+			return invalid(e)
+		}
 	} else {
 		x = c.singleValue(x)
 		if x.mode == ModeInvalid {
@@ -104,6 +111,10 @@ func (c *Checker) selector(e *syntax.SelectorExpr, want types.Type) *operand {
 	t = types.DefaultType(t) // "hi".Shout() and "x".Nope() see a String
 	sel.Recv = t
 	m := c.quietMember(types.Base(t), name, e.Sel)
+	if m == nil && name == "wrap" && c.implements(t, types.Error) {
+		// (&Invalid(...)).wrap("ctx"): any error value wraps, not only error.
+		m = &member{kind: SelPrelude, typ: &types.Signature{Params: []types.Type{types.String}, ParamNames: []string{"message"}, Results: []types.Type{types.Error}}, prelude: PreludeWrap}
+	}
 	if m == nil {
 		// Members win; then an extension function for the receiver's type.
 		ext, reported := c.findExtension(t, name, e.Sel)
@@ -120,6 +131,13 @@ func (c *Checker) selector(e *syntax.SelectorExpr, want types.Type) *operand {
 	}
 	sel.Kind, sel.GoName, sel.Type, sel.PtrRecv, sel.Obj, sel.Prelude = m.kind, m.goName, m.typ, m.ptrRecv, m.obj, m.prelude
 	c.info.Selections[e] = sel
+	if m.kind == SelMethod && m.ptrRecv && c.callee != syntax.Expr(e) && !sel.TryFirst {
+		// f := o.Inc: a pointer method value binds the receiver's address,
+		// so it needs the same mutable storage as a call.
+		if _, isPtr := types.Base(c.info.TypeOf(e.X)).(*types.Pointer); !isPtr {
+			c.ptrMethodReceiver(e)
+		}
+	}
 	rt := m.typ
 	if sel.Safe && m.kind == SelField {
 		rt = types.MakeNullable(rt)
@@ -617,7 +635,21 @@ func (c *Checker) instantiateFunc(e *syntax.InstantiateExpr) *operand {
 		c.errorf(diag.ETypeArgs, e.S, "%s is not a generic function", e.X.Span().Short())
 		return invalid(e)
 	}
-	if len(e.Args) != len(sig.TypeParams) {
+	tooMany := len(e.Args) > len(sig.TypeParams)
+	bind := bindings{}
+	if !tooMany {
+		for i, a := range e.Args {
+			t := c.resolveType(a)
+			if t == types.Invalid {
+				return invalid(e)
+			}
+			bind[sig.TypeParams[i].Go] = t
+		}
+		// As in Go, leading type arguments may determine the rest through
+		// constraints' core types: slices.Reverse[[]int] gives E = int.
+		c.inferCore(sig, bind)
+	}
+	if tooMany || len(bind) != len(sig.TypeParams) {
 		var names []string
 		for _, tp := range sig.TypeParams {
 			names = append(names, tp.Name)
@@ -626,16 +658,11 @@ func (c *Checker) instantiateFunc(e *syntax.InstantiateExpr) *operand {
 			WithNote("give all type arguments, or none to infer them from the call's arguments")
 		return invalid(e)
 	}
-	bind := bindings{}
-	targs := make([]types.Type, len(e.Args))
-	goArgs := make([]gotypes.Type, len(e.Args))
-	for i, a := range e.Args {
-		t := c.resolveType(a)
-		if t == types.Invalid {
-			return invalid(e)
-		}
-		targs[i], goArgs[i] = t, types.Lower(t)
-		bind[sig.TypeParams[i].Go] = t
+	targs := make([]types.Type, len(sig.TypeParams))
+	goArgs := make([]gotypes.Type, len(sig.TypeParams))
+	for i, tp := range sig.TypeParams {
+		targs[i] = bind[tp.Go]
+		goArgs[i] = types.Lower(targs[i])
 	}
 	inst, err := gotypes.Instantiate(nil, sig.GoSig, goArgs, true)
 	if err != nil {

@@ -1,0 +1,14 @@
+// Local constants: constant initializers, no assignment, one per name.
+func f(): int = 1
+
+func main() {
+    n := 2
+    const a = f() // ERROR E0216 "use 'a := ...' for values computed at run time"
+    const b = n // ERROR E0216 "const initializer must be a constant expression"
+    const c = 1
+    c = 2 // ERROR E0501 "cannot assign to constant c"
+    c++ // ERROR E0501 "cannot modify constant c"
+    const c = 3 // ERROR E0102 "c is already declared in this scope"
+    const d: []int = 1 // ERROR E0201 "constants must have a basic type"
+    println(a, b, c, d)
+}

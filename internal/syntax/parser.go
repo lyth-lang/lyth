@@ -2,6 +2,7 @@ package syntax
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -196,6 +197,14 @@ func (p *parser) parseIdent(context string) *Ident {
 		p.next()
 		return &Ident{Name: "_", S: t.Span}
 	}
+	if t.Kind.IsKeyword() && p.peek(1).Kind == COLON {
+		// func f(in: int), struct fields, typed locals: the keyword names
+		// what is declared; report it and read on.
+		p.errorf(diag.EUnexpectedToken, t.Span, "%s is a keyword and cannot be a name", t.Text).
+			WithHint("choose another name, such as %sValue", t.Text)
+		p.next()
+		return &Ident{Name: t.Text, S: t.Span}
+	}
 	d := p.errorf(diag.EUnexpectedToken, t.Span, "expected identifier %s, found %s", context, describe(t))
 	if t.Kind.IsKeyword() {
 		d.WithNote("'%s' is a keyword in Lyth", t.Text)
@@ -309,7 +318,7 @@ func (p *parser) parseFile() *File {
 		if !p.at(IMPORT) {
 			break
 		}
-		f.Imports = append(f.Imports, p.parseImport())
+		f.Imports = append(f.Imports, p.parseImport()...)
 	}
 	for {
 		p.skipNLSemi()
@@ -317,9 +326,11 @@ func (p *parser) parseFile() *File {
 			break
 		}
 		if p.at(IMPORT) {
-			imp := p.parseImport()
-			p.sink.Errorf(diag.EUnexpectedToken, imp.S, "imports must come before declarations")
-			f.Imports = append(f.Imports, imp)
+			imps := p.parseImport()
+			for _, imp := range imps {
+				p.sink.Errorf(diag.EUnexpectedToken, imp.S, "imports must come before declarations")
+			}
+			f.Imports = append(f.Imports, imps...)
 			continue
 		}
 		start, n, inner := p.pos, p.sink.Len(), len(p.damaged)
@@ -345,25 +356,105 @@ func (p *parser) endDecl() {
 	p.syncDecl()
 }
 
-func (p *parser) parseImport() *ImportDecl {
+// parseConst parses `const Name [: Type] = value` from the const keyword.
+func (p *parser) parseConst(start source.Span) *ConstDecl {
+	p.next() // const
+	d := &ConstDecl{}
+	d.Name = p.parseIdent("in const declaration")
+	if p.accept(COLON) {
+		d.Type = p.parseType()
+	}
+	p.expect(ASSIGN, "in const declaration")
+	p.skipNL()
+	d.Value = p.parseExpr()
+	d.S = p.spanFrom(start)
+	return d
+}
+
+// parseImport parses `import "path" [as name]` or a group
+// `import ( "a"; "b" as c )`, one import per line.
+func (p *parser) parseImport() []*ImportDecl {
 	start := p.next().Span // import
+	if !p.at(LPAREN) {
+		d := p.parseImportSpec(start, false)
+		p.endDecl()
+		return []*ImportDecl{d}
+	}
+	p.next()
+	var out []*ImportDecl
+	for {
+		p.skipNLSemi()
+		if p.at(RPAREN) || p.at(EOF) {
+			break
+		}
+		d := p.parseImportSpec(p.tok().Span, true)
+		out = append(out, d)
+		// The lexer emits no newlines inside parentheses: one import per
+		// line means the next one starts on a later line.
+		prev := p.toks[p.pos-1].Span
+		if !p.at(SEMI) && !p.at(RPAREN) && !p.at(EOF) && p.file.Position(p.tok().Span.Start).Line == p.file.Position(prev.End).Line {
+			p.errorf(diag.EUnexpectedToken, p.tok().Span, "one import per line, found %s", describe(p.tok()))
+			for line := p.file.Position(prev.End).Line; !p.at(RPAREN) && !p.at(EOF) && p.file.Position(p.tok().Span.Start).Line == line; {
+				p.next()
+			}
+		}
+	}
+	p.expect(RPAREN, "to close the import group")
+	p.endDecl()
+	return out
+}
+
+// parseImportSpec parses `"path" [as name]` starting at the path. In a
+// group, recovery stops at the end of the line or the group.
+func (p *parser) parseImportSpec(start source.Span, inGroup bool) *ImportDecl {
 	d := &ImportDecl{}
 	t := p.tok()
+	sync := func() {
+		if !inGroup {
+			p.syncStmt()
+			return
+		}
+		line := p.file.Position(t.Span.Start).Line
+		for !p.at(RPAREN) && !p.at(EOF) && p.file.Position(p.tok().Span.Start).Line == line {
+			p.next()
+		}
+	}
 	switch t.Kind {
 	case STRING, RAWSTRING:
 		p.next()
 		d.Path = t.Value
 		d.PathSpan = t.Span
 	case IDENT:
-		// Kotlin-style dotted import: give a precise hint.
-		p.errorf(diag.EUnexpectedToken, t.Span, "import paths are quoted Go import paths").
-			WithHint("write import \"net/http\" (use 'as name' to rename)")
-		p.syncStmt()
+		if pt := p.peek(1); pt.Kind == STRING && pt.Value != "" && p.file.Position(pt.Span.Start).Line == p.file.Position(t.Span.Start).Line {
+			// Go's renamed import: import h "net/http".
+			p.next()
+			p.next()
+			d.Path, d.PathSpan = pt.Value, pt.Span
+			d.Alias = &Ident{Name: t.Text, S: t.Span}
+			p.errorf(diag.EUnexpectedToken, t.Span, "a renamed import is written \"path\" as name").
+				WithFix(t.Span.Join(pt.Span), pt.Text+" as "+t.Text, "write %s as %s", pt.Text, t.Text)
+			d.S = p.spanFrom(start)
+			return d
+		}
+		dg := p.errorf(diag.EUnexpectedToken, t.Span, "import paths are quoted Go import paths")
+		if p.peek(1).Kind == DOT {
+			// Kotlin-style dotted import.
+			dg.WithHint("write import \"net/http\" (use 'as name' to rename)")
+		} else {
+			dg.WithFix(t.Span, strconv.Quote(t.Text), "write %q", t.Text)
+		}
+		sync()
+		d.S = p.spanFrom(start)
+		return d
+	case DOT:
+		p.errorf(diag.EUnsupported, t.Span, "Lyth has no dot imports").
+			WithHint("import the package and qualify its names: import \"math\", then math.Pi")
+		sync()
 		d.S = p.spanFrom(start)
 		return d
 	default:
 		p.errorf(diag.EUnexpectedToken, t.Span, "expected import path string, found %s", describe(t))
-		p.syncStmt()
+		sync()
 		d.S = p.spanFrom(start)
 		return d
 	}
@@ -371,13 +462,15 @@ func (p *parser) parseImport() *ImportDecl {
 		d.Alias = p.parseIdent("after 'as'")
 	}
 	d.S = p.spanFrom(start)
-	p.endDecl()
 	return d
 }
 
 // docFor returns the doc comment immediately preceding offset off.
 func (p *parser) docFor(off int) string {
 	declLine := p.file.Position(off).Line
+	if strings.TrimSpace(string(p.file.Content[p.file.LineStart(declLine):off])) != "" {
+		return "" // not first on its line (struct T { N: int }): the comment above is not its doc
+	}
 	var lines []string
 	expect := declLine - 1
 	for i := len(p.comments) - 1; i >= 0; i-- {
@@ -477,16 +570,20 @@ func (p *parser) parseDecl() (decl Decl) {
 		p.endDecl()
 		return d
 	case CONST:
-		p.next()
-		d := &ConstDecl{Doc: doc}
-		d.Name = p.parseIdent("in const declaration")
-		if p.accept(COLON) {
-			d.Type = p.parseType()
+		if p.peek(1).Kind == LPAREN {
+			// Go's const ( ... ) group.
+			p.next()
+			open := p.tok().Span
+			p.skipBraces()
+			span := start.Join(p.toks[p.pos-1].Span)
+			p.errorf(diag.EUnsupportedSyntax, open, "Lyth declares one constant per line: const A = 1").
+				WithHint("write each constant as const Name = value; for iota, declare an enum: enum Color { Red, Green }")
+			p.damaged = append(p.damaged, span)
+			p.endDecl()
+			return nil
 		}
-		p.expect(ASSIGN, "in const declaration")
-		p.skipNL()
-		d.Value = p.parseExpr()
-		d.S = p.spanFrom(start)
+		d := p.parseConst(start)
+		d.Doc = doc
 		p.endDecl()
 		return d
 	}
@@ -688,11 +785,17 @@ func (p *parser) goCompositeLit(x Expr) Expr {
 	span := x.Span().Join(p.toks[end].Span)
 	body := p.toks[open].Span.Join(p.toks[end].Span)
 	if !isStruct {
-		// gin.H{"error": msg} -> gin.H(["error": msg])
-		inner := body.Text()
-		repl := x.Span().Text() + "([" + strings.TrimSpace(inner[1:len(inner)-1]) + "])"
-		p.errorf(diag.EUnsupportedSyntax, span, "Lyth converts a literal to a named map type").
-			WithFix(span, repl, "write %s", repl)
+		// gin.H{"error": msg} -> gin.H(["error": msg]); elided element
+		// literals become list or map literals: url.Values{"q": {"go"}} ->
+		// url.Values(["q": ["go"]]).
+		inner, exact := p.elidedToBrackets(open, end)
+		repl := x.Span().Text() + "([" + strings.TrimSpace(inner) + "])"
+		d := p.errorf(diag.EUnsupportedSyntax, span, "Lyth converts a literal to a named map type")
+		if exact {
+			d.WithFix(span, repl, "write %s", repl)
+		} else {
+			d.WithEdit(span, repl, "write %s, with each struct value constructed by calling its type", repl)
+		}
 		p.pos = end + 1
 		return &BadExpr{S: span}
 	}
@@ -708,6 +811,43 @@ func (p *parser) goCompositeLit(x Expr) Expr {
 		WithFix(span, repl, "write %s", repl)
 	p.pos = end + 1
 	return &BadExpr{S: span}
+}
+
+// elidedToBrackets returns the text between the braces at toks[open] and
+// toks[end] with Go's elided element literals ({"go"}, {"a": 1}) written as
+// Lyth's [...] literals. exact is false when an elided literal is a struct
+// ({X: 1}), which has no bracket form.
+func (p *parser) elidedToBrackets(open, end int) (string, bool) {
+	body := p.toks[open].Span.Join(p.toks[end].Span)
+	text := []byte(body.Text())
+	exact := true
+	var stack []int // token indexes of open braces, nil entries for other brackets
+	for i := open + 1; i < end; i++ {
+		switch p.toks[i].Kind {
+		case LBRACE:
+			if len(stack) == 0 || stack[len(stack)-1] >= 0 {
+				if prev := p.toks[i-1].Kind; prev == COLON || prev == COMMA || prev == LBRACE {
+					stack = append(stack, i)
+					if p.toks[i+1].Kind == IDENT && p.toks[i+2].Kind == COLON {
+						exact = false
+					}
+					text[p.toks[i].Span.Start-body.Start] = '['
+					continue
+				}
+			}
+			stack = append(stack, -1)
+		case LPAREN, LBRACK, TEMPLATE_EXPR_START:
+			stack = append(stack, -1)
+		case RBRACE, RPAREN, RBRACK, TEMPLATE_EXPR_END:
+			if n := len(stack); n > 0 {
+				if stack[n-1] >= 0 && p.toks[i].Kind == RBRACE {
+					text[p.toks[i].Span.Start-body.Start] = ']'
+				}
+				stack = stack[:n-1]
+			}
+		}
+	}
+	return string(text[1 : len(text)-1]), exact
 }
 
 // endsInTypeOperand returns the type operand that ends a header expression
@@ -885,21 +1025,30 @@ func (p *parser) parseFunDecl(start source.Span, doc string) *FunDecl {
 			p.next()
 		}
 		recvText := strings.TrimSpace(open.Join(p.tok().Span).Text())
-		fields := strings.Fields(strings.Trim(recvText, "()"))
-		typ := ""
-		if len(fields) > 0 {
-			typ = strings.TrimPrefix(fields[len(fields)-1], ":")
-		}
-		if len(fields) == 2 && strings.HasSuffix(fields[0], ":") {
-			typ = fields[1]
+		inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(recvText, "("), ")"))
+		typ := inner
+		if i := strings.Index(inner, ":"); i >= 0 {
+			typ = strings.TrimSpace(inner[i+1:]) // (h: Handler)
+		} else if f := strings.Fields(inner); len(f) == 2 {
+			typ = f[1] // Go's (s *Server)
 		}
 		end := p.next().Span
-		d2 := p.errorf(diag.EUnsupportedSyntax, open.Join(end), "methods are declared func %s.Name(...); the receiver is self", typ)
-		if p.at(IDENT) && typ != "" {
+		if p.at(DOT) {
+			p.next() // func (T).name(): the receiver in parentheses, then the name
+		}
+		if strings.ContainsAny(typ, " ()") {
+			// func (h: (W, R) -> unit).name(): a function type needs a name.
+			p.errorf(diag.EUnsupportedSyntax, open.Join(end), "an extension is declared func Type.Name(...); the receiver is self").
+				WithHint("name the function type first: typealias Handler = %s, then func Handler.Name(...)", typ)
+		} else if d2 := p.errorf(diag.EUnsupportedSyntax, open.Join(end), "methods are declared func %s.Name(...); the receiver is self", typ); p.at(IDENT) && typ != "" {
 			d2.WithEdit(open.Join(p.tok().Span.At()), typ+".", "write func %s.%s(...) and use self in the body", typ, p.tok().Text)
 		}
 		// The body names the Go receiver; nothing more is reported inside.
 		defer func() { p.damaged = append(p.damaged, d.S) }()
+		// Declare the method anyway, so that calls of it check.
+		if r := p.goReceiver(open, end); r != nil {
+			d.Recv = r
+		}
 	}
 	if p.at(LSS) {
 		d.TypeParams = p.angleTypeParams("after the function name", true)
@@ -946,6 +1095,35 @@ func (p *parser) parseFunDecl(start source.Span, doc string) *FunDecl {
 // function has none. A type parser reads `[]T.Filter` as the qualified type
 // T.Filter, so for a receiver followed by ( the last name is the function's,
 // returned as name.
+// goReceiver reads the receiver type of Go's func (t *T) M() back from the
+// tokens between open and end, or returns nil.
+func (p *parser) goReceiver(open, end source.Span) *Receiver {
+	i := p.pos - 1
+	for i > 0 && p.toks[i].Span.Start != open.Start {
+		i--
+	}
+	j := i + 1
+	if p.toks[j].Kind == IDENT && (p.toks[j+1].Kind == MUL || p.toks[j+1].Kind == IDENT || p.toks[j+1].Kind == COLON) {
+		j++ // the receiver's name
+	}
+	if p.toks[j].Kind == COLON {
+		j++
+	}
+	r := &Receiver{}
+	if p.toks[j].Kind == MUL {
+		r.Pointer = true
+		j++
+	}
+	if p.toks[j].Kind != IDENT || p.toks[j+1].Kind != RPAREN || p.toks[j+1].Span.End != end.End {
+		return nil // generic or unusual receivers: report only
+	}
+	name := &Ident{Name: p.toks[j].Text, S: p.toks[j].Span}
+	r.Type = &NamedType{Name: name, S: name.S}
+	r.Name = name
+	r.S = name.S
+	return r
+}
+
 func (p *parser) parseReceiver() (r *Receiver, name *Ident) {
 	switch {
 	case p.at(MUL), p.at(LBRACK), p.at(MAP), p.at(CHAN):
@@ -1173,7 +1351,12 @@ func (p *parser) parseStructDecl(start source.Span, doc string) *StructDecl {
 				p.visibilityKeyword(kw, "")
 			}
 		}
-		if p.at(VAL) || p.at(VAR) {
+		if (p.at(VAL) || p.at(VAR)) && p.peek(1).Kind == COLON {
+			// val: int names a field val, a reserved word.
+			p.errorf(diag.EUnexpectedToken, p.tok().Span, "%s is a reserved word and cannot name a field", p.tok().Text).
+				WithHint("choose another name, such as Value")
+			p.toks[p.pos].Kind = IDENT
+		} else if p.at(VAL) || p.at(VAR) {
 			p.errorf(diag.EUnexpectedToken, p.tok().Span, "struct fields are declared as name: Type").
 				WithFix(p.tok().Span.Join(p.peek(1).Span.At()), "", "write the field without %s", p.tok().Text)
 			p.next()
@@ -1349,6 +1532,20 @@ func (p *parser) parsePrefixType() TypeExpr {
 			return types[0]
 		}
 		p.errorf(diag.EUnexpectedToken, p.spanFrom(start), "tuple types are only allowed as function results")
+		return &BadType{S: p.spanFrom(start)}
+	case STRUCT:
+		if p.peek(1).Kind == LBRACE && p.peek(2).Kind == RBRACE {
+			p.next()
+			p.next()
+			p.next()
+			return &EmptyStructType{S: p.spanFrom(start)}
+		}
+		p.errorf(diag.EUnsupportedSyntax, p.tok().Span, "anonymous struct types are not supported").
+			WithHint("declare the struct: struct Name { ... }; struct{} is the empty struct")
+		p.next()
+		if p.at(LBRACE) {
+			p.skipBraces()
+		}
 		return &BadType{S: p.spanFrom(start)}
 	case MAP:
 		p.next()
@@ -1566,6 +1763,15 @@ func canStartExpr(k Kind) bool {
 
 func (p *parser) parseStmt() Stmt {
 	t := p.tok()
+	if t.Kind == IDENT && p.peek(1).Kind == COLON && (p.peek(2).Kind == FOR || p.peek(2).Kind == WHILE) {
+		// Go's label outer: for ...: read it as outer@ for ...
+		colon := p.peek(1)
+		p.errorf(diag.EUnsupportedSyntax, t.Span.Join(colon.Span), "labels are written %s@ before the loop", t.Text).
+			WithFix(t.Span.Join(colon.Span), t.Text+"@", "write %s@ for ...", t.Text).
+			WithNote("break and continue then name it: break@%s", t.Text)
+		p.toks[p.pos+1].Kind = AT
+		p.toks[p.pos+1].Span.Start = t.Span.End
+	}
 	if t.Kind == IDENT && p.peek(1).Kind == AT && p.peek(1).Span.Start == t.Span.End {
 		// outer@ for (...) / outer@ while (...)
 		label := p.parseIdent("")
@@ -1583,17 +1789,37 @@ func (p *parser) parseStmt() Stmt {
 		p.errorf(diag.EUnsupportedSyntax, label.S, "labels can only be placed on for and while loops")
 		t = p.tok()
 	}
+	if t.Kind != IDENT && t.Kind != THIS && t.Kind != VAL && t.Kind != VAR && IsKeywordName(t.Text) && (p.peek(1).Kind == DEFINE || p.peek(1).Kind == COLON && t.Kind != CATCH) {
+		// in := 3, select: Time: a keyword cannot name a variable.
+		p.errorf(diag.EUnexpectedToken, t.Span, "%s is a keyword and cannot be a variable name", t.Text).
+			WithHint("choose another name, such as %s", t.Text+"Value")
+		p.syncStmt()
+		bad := &BadStmt{S: p.spanFrom(t.Span)}
+		p.damaged = append(p.damaged, bad.S)
+		return bad
+	}
 	switch t.Kind {
 	case VAL, VAR:
 		return p.parseOldLocalDecl()
 	case CONST:
-		p.errorf(diag.EUnsupported, t.Span, "constants are declared at package level").
-			WithHint("move the const declaration out of the function")
-		p.syncStmt()
-		return &BadStmt{S: p.spanFrom(t.Span)}
+		return p.parseConst(t.Span)
 	case IDENT:
 		if p.peek(1).Kind == COLON {
 			return p.parseTypedLocalDecl()
+		}
+		if t.Text == "switch" && p.goSwitch() {
+			// Go's switch: Lyth's when has -> branches instead of case:.
+			p.errorf(diag.EUnsupportedSyntax, t.Span, "Lyth has no switch: use when").
+				WithHint("write when x { 1, 2 -> ...; in 3..9 -> ...; else -> ... } (without x for boolean conditions)")
+			for !p.at(LBRACE) && !p.at(NEWLINE) && !p.at(EOF) {
+				p.next()
+			}
+			if p.at(LBRACE) {
+				p.skipBraces()
+			}
+			bad := &BadStmt{S: p.spanFrom(t.Span)}
+			p.damaged = append(p.damaged, bad.S)
+			return bad
 		}
 	case FOR:
 		return p.parseFor()
@@ -1636,7 +1862,7 @@ func (p *parser) parseStmt() Stmt {
 	}
 	switch p.tok().Kind {
 	case ASSIGN, ADD_ASSIGN, SUB_ASSIGN, MUL_ASSIGN, QUO_ASSIGN, REM_ASSIGN,
-		AND_ASSIGN, OR_ASSIGN, XOR_ASSIGN, SHL_ASSIGN, SHR_ASSIGN:
+		AND_ASSIGN, OR_ASSIGN, XOR_ASSIGN, SHL_ASSIGN, SHR_ASSIGN, AND_NOT_ASSIGN:
 		op := p.next()
 		p.skipNL()
 		rhs := p.parseExprList()
@@ -1727,6 +1953,14 @@ func (p *parser) parseTypedLocalDecl() Stmt {
 // reporting it with the := or name: Type spelling that replaces it.
 func (p *parser) parseOldLocalDecl() Stmt {
 	kw := p.tok()
+	if kw.Kind == VAR && p.peek(1).Kind == IDENT {
+		switch p.peek(2).Kind {
+		case IDENT, MUL, LBRACK, MAP, CHAN:
+			if p.peek(2).Span.StartPos().Line == kw.Span.StartPos().Line {
+				return p.parseGoVarDecl()
+			}
+		}
+	}
 	d := p.parseLocalDecl()
 	ld, ok := d.(*LocalDecl)
 	if !ok || len(ld.Names) == 0 {
@@ -1750,6 +1984,25 @@ func (p *parser) parseOldLocalDecl() Stmt {
 	ld.Define = ld.Type == nil
 	ld.Mutable = true
 	return ld
+}
+
+// parseGoVarDecl parses Go's var x T [= value] in a function body, reported
+// with the edit to x: T [= value].
+func (p *parser) parseGoVarDecl() Stmt {
+	kw := p.next() // var
+	name := p.parseIdent("")
+	te := p.parseType()
+	d := &LocalDecl{Names: []*Ident{name}, Type: te, Mutable: true}
+	if p.accept(ASSIGN) {
+		p.skipNL()
+		d.Value = p.parseExpr()
+	}
+	d.S = p.spanFrom(kw.Span)
+	head := kw.Span.Join(te.Span())
+	repl := name.Name + ": " + te.Span().Text()
+	p.errorf(diag.EUnsupportedSyntax, head, "local variables are declared with := (or name: Type = value)").
+		WithFix(head, repl, "write %s", repl)
+	return d
 }
 
 func (p *parser) parseLocalDecl() Stmt {
@@ -1835,9 +2088,11 @@ func (p *parser) parseFor() Stmt {
 	switch {
 	case p.at(IN):
 		p.next()
+		p.skipNL()
 		p.noLambda++
 		s.Iter = p.parseExpr()
 		p.noLambda--
+		p.kotlinRange(s)
 	case p.at(DEFINE) && p.peek(1).Kind == IDENT && p.peek(1).Text == "range":
 		// Go's for i, x := range xs. Lyth's in binds the element first.
 		def := p.next()
@@ -1860,9 +2115,21 @@ func (p *parser) parseFor() Stmt {
 			d.WithHint("for %s in %s binds elements; for the index of a slice write for %s, _ in %s, for the numbers 0 to n-1 write for %s in 0..<n", names[0], s.Iter.Span().Text(), names[0], s.Iter.Span().Text(), names[0])
 		}
 	default:
+		if rng, ok := p.goCountingFor(s, LBRACE); ok {
+			header := s.Names[0].S.Join(p.toks[p.pos-1].Span)
+			name, exact := p.countingRewrite(s, rng)
+			repl := name + " in " + rng
+			d := p.errorf(diag.EUnsupportedSyntax, header, "Lyth has no three-part for loop")
+			if exact {
+				d.WithFix(header, repl, "write for %s", repl)
+			} else {
+				d.WithEdit(header, repl, "write for %s if the body does not change the bound (the range is evaluated once), or use while", repl)
+			}
+			break
+		}
 		d := p.errorf(diag.EUnexpectedToken, p.tok().Span, "expected 'in' in for loop, found %s", describe(p.tok()))
 		if p.at(DEFINE) || p.at(ASSIGN) || p.at(SEMI) {
-			d.WithHint("counting loops are written for i in 0..<n { ... }")
+			d.WithHint("counting loops are written for i in 0..<n { ... }; for another step, use while: i := 0; while i < n { ...; i += 2 }")
 		} else {
 			d.WithHint("for iterates (for x in xs { ... }); a loop on a condition is while cond { ... }")
 		}
@@ -1876,6 +2143,135 @@ func (p *parser) parseFor() Stmt {
 		s.Iter = &BadExpr{S: s.S}
 	}
 	return s
+}
+
+// kotlinRange reports Kotlin's infix range functions after a for loop's
+// iterable (for i in 0 until n, n downTo 0, 0..n step 2) and skips them.
+func (p *parser) kotlinRange(s *ForStmt) {
+	t := p.tok()
+	if t.Kind != IDENT || (t.Text != "until" && t.Text != "downTo" && t.Text != "step") {
+		return
+	}
+	p.next()
+	p.noLambda++
+	arg := p.parseExpr()
+	p.noLambda--
+	span := s.Iter.Span().Join(arg.Span())
+	d := p.errorf(diag.EUnsupportedSyntax, t.Span, "Lyth has no %s", t.Text)
+	switch t.Text {
+	case "until":
+		repl := s.Iter.Span().Text() + "..<" + arg.Span().Text()
+		d.WithFix(span, repl, "write %s", repl)
+		s.Iter = &RangeExpr{Lo: s.Iter, Hi: arg, Exclusive: true, S: span}
+		return
+	case "downTo":
+		d.WithHint("count down with while: i := %s; while i >= %s { ...; i-- }", s.Iter.Span().Text(), arg.Span().Text())
+	default:
+		d.WithHint("for another step, use while: i := 0; while i <= n { ...; i += %s }", arg.Span().Text())
+	}
+	p.damaged = append(p.damaged, span)
+	for !p.at(LBRACE) && !p.at(NEWLINE) && !p.at(EOF) {
+		p.next()
+	}
+}
+
+// goCountingFor recognizes Go's counting loop, for i := lo; i < hi; i++,
+// up to closer (the body's { or a parenthesized header's )), and gives s
+// the range lo..<hi. It returns false, having consumed nothing, for any
+// other three-part loop.
+func (p *parser) goCountingFor(s *ForStmt, closer Kind) (string, bool) {
+	if len(s.Names) != 1 || !p.at(DEFINE) {
+		return "", false
+	}
+	save, errs, damaged := p.pos, p.sink.Len(), len(p.damaged)
+	name := s.Names[0]
+	fail := func() (string, bool) {
+		p.pos, p.damaged = save, p.damaged[:damaged]
+		p.sink.Truncate(errs)
+		return "", false
+	}
+	p.next() // :=
+	p.noLambda++
+	lo := p.parseExpr()
+	p.noLambda--
+	if !p.accept(SEMI) {
+		return fail()
+	}
+	p.noLambda++
+	cond := p.parseExpr()
+	p.noLambda--
+	b, ok := cond.(*BinaryExpr)
+	if !ok || (b.Op != LSS && b.Op != LEQ) || !isIdentNamed(b.X, name.Name) || !p.accept(SEMI) {
+		return fail()
+	}
+	if !p.at(IDENT) || p.tok().Text != name.Name || p.peek(1).Kind != INC || p.peek(2).Kind != closer {
+		return fail()
+	}
+	p.next()
+	p.next() // ++
+	if p.sink.Len() != errs {
+		return fail()
+	}
+	s.Iter = &RangeExpr{Lo: lo, Hi: b.Y, Exclusive: b.Op == LSS, S: lo.Span().Join(b.Y.Span())}
+	op := "..<"
+	if b.Op == LEQ {
+		op = ".."
+	}
+	return lo.Span().Text() + op + b.Y.Span().Text(), true
+}
+
+// countingRewrite decides how a Go counting loop recognized by
+// goCountingFor is rewritten: the loop variable's name (_ when the body
+// does not use it), and whether the rewrite is exact. It is not when the
+// body mentions a name the bound uses: for i := 0; i < len(xs); i++ reads
+// len(xs) on every iteration, a Lyth range once. The body starts at the
+// next '{'.
+func (p *parser) countingRewrite(s *ForStmt, rng string) (string, bool) {
+	r, ok := s.Iter.(*RangeExpr)
+	if !ok {
+		return s.Names[0].Name, false
+	}
+	bound := map[string]bool{}
+	Walk(r.Hi, func(n Node) {
+		if id, ok := n.(*Ident); ok {
+			bound[id.Name] = true
+		}
+	})
+	i := p.pos
+	for i < len(p.toks) && p.toks[i].Kind != LBRACE {
+		i++
+	}
+	exact, used := true, false
+	depth := 0
+	for ; i < len(p.toks); i++ {
+		t := p.toks[i]
+		switch t.Kind {
+		case LBRACE:
+			depth++
+		case RBRACE:
+			depth--
+		case IDENT:
+			if bound[t.Text] {
+				exact = false
+			}
+			if t.Text == s.Names[0].Name {
+				used = true
+			}
+		}
+		if depth == 0 || t.Kind == EOF {
+			break
+		}
+	}
+	name := s.Names[0].Name
+	if !used {
+		name = "_"
+	}
+	return name, exact
+}
+
+func isIdentNamed(e Expr, name string) bool {
+	id, ok := e.(*Ident)
+	return ok && id.Name == name
 }
 
 // parseOldFor parses for ((a, b) in e) after reporting the parentheses.
@@ -1897,13 +2293,18 @@ func (p *parser) parseOldFor(start source.Span, s *ForStmt) Stmt {
 			s.Names = append(s.Names, p.parseIdent(""))
 		}
 	}
+	counting := ""
 	if !p.at(IN) {
-		d := p.errorf(diag.EUnexpectedToken, p.tok().Span, "expected 'in' in for loop, found %s", describe(p.tok()))
-		if p.at(DEFINE) || p.at(ASSIGN) || p.at(SEMI) {
-			d.WithHint("counting loops are written for (i in 0..<n) { ... }")
-		}
-		for !p.at(RPAREN) && !p.at(EOF) && !p.at(LBRACE) {
-			p.next()
+		if rng, ok := p.goCountingFor(s, RPAREN); ok {
+			counting = rng
+		} else {
+			d := p.errorf(diag.EUnexpectedToken, p.tok().Span, "expected 'in' in for loop, found %s", describe(p.tok()))
+			if p.at(DEFINE) || p.at(ASSIGN) || p.at(SEMI) {
+				d.WithHint("counting loops are written for i in 0..<n { ... }; for another step, use while: i := 0; while i < n { ...; i += 2 }")
+			}
+			for !p.at(RPAREN) && !p.at(EOF) && !p.at(LBRACE) {
+				p.next()
+			}
 		}
 	} else {
 		p.next()
@@ -1914,12 +2315,25 @@ func (p *parser) parseOldFor(start source.Span, s *ForStmt) Stmt {
 	for i, id := range s.Names {
 		names[i] = id.Name
 	}
-	iter := ""
-	if s.Iter != nil {
+	iter := counting
+	if s.Iter != nil && iter == "" {
 		iter = s.Iter.Span().Text()
 	}
-	p.errorf(diag.EUnsupportedSyntax, open.Span.Join(end.Span), "for loops have no parentheses").
-		WithFix(open.Span.Join(end.Span), strings.Join(names, ", ")+" in "+iter, "write for %s in %s", strings.Join(names, ", "), iter)
+	d := p.errorf(diag.EUnsupportedSyntax, open.Span.Join(end.Span), "for loops have no parentheses")
+	if counting != "" {
+		d.Message = "Lyth has no three-part for loop"
+	}
+	if s.Iter != nil {
+		exact := true
+		if counting != "" {
+			names[0], exact = p.countingRewrite(s, counting)
+		}
+		if exact {
+			d.WithFix(open.Span.Join(end.Span), strings.Join(names, ", ")+" in "+iter, "write for %s in %s", strings.Join(names, ", "), iter)
+		} else {
+			d.WithEdit(open.Span.Join(end.Span), strings.Join(names, ", ")+" in "+iter, "write for %s in %s if the body does not change the bound (the range is evaluated once), or use while", strings.Join(names, ", "), iter)
+		}
+	}
 	p.skipNL()
 	s.Body = p.parseBody()
 	s.S = p.spanFrom(start)
@@ -1961,6 +2375,22 @@ func (p *parser) parseHeaderBody(keyword string, header Expr) *Block {
 		if header != nil {
 			p.damaged = append(p.damaged, header.Span().Join(p.toks[p.pos-1].Span))
 		}
+	}
+	if p.at(LBRACE) && header != nil && endsInTypeOperand(header) == nil {
+		// if xs.Any { x -> x > 0 } { ... }: braces followed by braces are a
+		// trailing lambda and the body. Skip the lambda unparsed: read as a
+		// block, its parameters would only add errors.
+		save := p.pos
+		p.skipBraces()
+		if p.at(LBRACE) {
+			lambda := p.toks[save].Span.Join(p.toks[p.pos-1].Span)
+			full := header.Span().Join(lambda)
+			p.errorf(diag.EUnsupportedSyntax, lambda, "the %s header cannot end in a trailing lambda: its { starts the body", keyword).
+				WithFix(full, "("+full.Text()+")", "parenthesize the header expression: (%s)", full.Text())
+			p.damaged = append(p.damaged, full)
+			return p.parseBlock()
+		}
+		p.pos = save
 	}
 	if p.at(LBRACE) {
 		b := p.parseBlock()
@@ -2015,6 +2445,28 @@ func (p *parser) parseDeferGo() Stmt {
 		}
 		return &GoStmt{Body: b, S: t.Span.Join(b.S)}
 	}
+	if p.at(FUN) && p.peek(1).Kind == LPAREN && p.peek(2).Kind == RPAREN && p.peek(3).Kind == LBRACE {
+		// Go's go func() { ... }(): Lyth's go and defer take the block.
+		fn := p.next()
+		p.next()
+		p.next()
+		b := p.parseBlock()
+		if p.at(LPAREN) && p.peek(1).Kind == RPAREN {
+			p.next()
+			end := p.next()
+			span := fn.Span.Join(end.Span)
+			p.errorf(diag.EUnsupportedSyntax, span, "%s takes a block: %s { ... }", t.Text, t.Text).
+				WithFix(span, b.S.Text(), "write %s { ... }", t.Text)
+			if t.Kind == DEFER {
+				return &DeferStmt{Body: b, S: t.Span.Join(end.Span)}
+			}
+			return &GoStmt{Body: b, S: t.Span.Join(end.Span)}
+		}
+		p.errorf(diag.EUnsupportedSyntax, fn.Span, "anonymous functions are written as lambdas").
+			WithHint("%s takes a block: %s { ... }", t.Text, t.Text)
+		p.syncStmt()
+		return &BadStmt{S: p.spanFrom(t.Span)}
+	}
 	x := p.parseExpr()
 	if t.Kind == DEFER {
 		return &DeferStmt{Call: x, S: t.Span.Join(x.Span())}
@@ -2033,7 +2485,7 @@ var binPrec = map[Kind]int{
 	ELVIS: 6,
 	RANGE: 7, RANGE_EXCL: 7,
 	ADD: 8, SUB: 8, OR: 8, XOR: 8,
-	MUL: 9, QUO: 9, REM: 9, SHL: 9, SHR: 9, AND: 9,
+	MUL: 9, QUO: 9, REM: 9, SHL: 9, SHR: 9, AND: 9, AND_NOT: 9,
 	AS: 10,
 }
 
@@ -2133,7 +2585,7 @@ func isTypeNameExpr(x Expr) bool {
 // startsSliceElem reports whether a token directly after `[]` begins the
 // element type of a slice type rather than following an empty list literal.
 func startsSliceElem(k Kind) bool {
-	return k == IDENT || k == MUL || k == LBRACK || k == LPAREN
+	return k == IDENT || k == MUL || k == LBRACK || k == LPAREN || k == MAP || k == CHAN || k == STRUCT || k == LSS
 }
 
 // canTakeTrailingLambda reports whether `x { ... }` is a call of x with a
@@ -2407,6 +2859,18 @@ func (p *parser) parsePrimary() Expr {
 		// make(map[string]int), make(chan int, n): a type used as an operand.
 		t := p.parseType()
 		return &TypeOperand{Type: t, S: t.Span()}
+	case STRUCT:
+		if p.peek(1).Kind == LBRACE && p.peek(2).Kind == RBRACE {
+			if p.peek(3).Kind == LBRACE && p.peek(4).Kind == RBRACE {
+				// struct{}{}: the empty struct value.
+				for range 5 {
+					p.next()
+				}
+				return &EmptyStructLit{S: p.spanFrom(t.Span)}
+			}
+			st := p.parseType()
+			return &TypeOperand{Type: st, S: st.Span()}
+		}
 	case LSS:
 		if p.peek(1).Kind == SUB && p.peek(2).Kind == CHAN {
 			t := p.parseType()
@@ -2448,12 +2912,24 @@ func (p *parser) parsePrimary() Expr {
 			p.next()
 			j.Label = p.parseIdent("for the loop label")
 			j.S = t.Span.Join(j.Label.S)
+		} else if l := p.tok(); l.Kind == IDENT && p.file.Position(l.Span.Start).Line == p.file.Position(t.Span.Start).Line {
+			// Go's break outer.
+			span := t.Span.Join(l.Span)
+			p.errorf(diag.EUnsupportedSyntax, span, "a label follows %s with @", t.Text).
+				WithFix(span, t.Text+"@"+l.Text, "write %s@%s", t.Text, l.Text)
+			p.next()
+			j.Label = &Ident{Name: l.Text, S: l.Span}
+			j.S = span
 		}
 		return j
 	case FUN:
 		p.errorf(diag.EUnsupportedSyntax, t.Span, "anonymous functions are written as lambdas").
 			WithHint("write { x: int -> x * 2 }")
 		p.next()
+		return &BadExpr{S: t.Span}
+	}
+	if t.Kind == ILLEGAL {
+		p.next() // the lexer reported it
 		return &BadExpr{S: t.Span}
 	}
 	d := p.errorf(diag.EUnexpectedToken, t.Span, "expected expression, found %s", describe(t))
@@ -2529,7 +3005,7 @@ func (p *parser) parseCollectionLit() Expr {
 	}
 	first := p.parseExpr()
 	if p.at(RBRACK) {
-		if k := p.peek(1); k.Span.Start == p.tok().Span.End && (startsSliceElem(k.Kind) || k.Kind == MAP || k.Kind == CHAN) {
+		if k := p.peek(1); k.Span.Start == p.tok().Span.End && startsSliceElem(k.Kind) {
 			// [3]int{1, 2, 3}, [4]byte(b): an array type used as an operand.
 			end := p.next()
 			elem := p.parseType()
@@ -2567,6 +3043,64 @@ func (p *parser) parseCollectionLit() Expr {
 	return l
 }
 
+// goSwitch reports whether the statement at the cursor is Go's switch:
+// switch [x] { case ... }. switch is an ordinary identifier in Lyth, so a
+// call switch { ... } of a function of that name is not one.
+func (p *parser) goSwitch() bool {
+	i := p.pos + 1
+	for i < len(p.toks) && p.toks[i].Kind != LBRACE {
+		if k := p.toks[i].Kind; k == NEWLINE || k == EOF || k == DEFINE || k == ASSIGN {
+			return false
+		}
+		i++
+	}
+	for i++; i < len(p.toks) && p.toks[i].Kind == NEWLINE; i++ {
+	}
+	if i >= len(p.toks) {
+		return false
+	}
+	t := p.toks[i]
+	if t.Kind != IDENT || (t.Text != "case" && t.Text != "default") {
+		return false
+	}
+	// case x: or default: — a ':' ends Go's case clause on its line.
+	line := p.file.Position(t.Span.Start).Line
+	for i++; i < len(p.toks) && p.toks[i].Kind != EOF && p.file.Position(p.toks[i].Span.Start).Line == line; i++ {
+		if p.toks[i].Kind == COLON {
+			return true
+		}
+	}
+	return false
+}
+
+// headerHasInit reports whether the if header starting at the cursor has a
+// Go initializer statement: a ';' before the body's '{' on the same line.
+func (p *parser) headerHasInit() bool {
+	depth := 0
+	for i := p.pos; i < len(p.toks); i++ {
+		switch p.toks[i].Kind {
+		case LPAREN, LBRACK:
+			depth++
+		case RPAREN, RBRACK:
+			depth--
+		case LBRACE:
+			if depth == 0 {
+				return false
+			}
+			depth++
+		case RBRACE:
+			depth--
+		case SEMI:
+			if depth == 0 {
+				return true
+			}
+		case NEWLINE, EOF:
+			return false
+		}
+	}
+	return false
+}
+
 func (p *parser) parseLambda() *LambdaExpr {
 	lb := p.next() // {
 	lam := &LambdaExpr{}
@@ -2596,7 +3130,9 @@ func (p *parser) parseLambda() *LambdaExpr {
 			if !p.accept(COMMA) {
 				break
 			}
+			p.skipNL() // a line may end after a comma (spec §1.3)
 		}
+		p.skipNL()
 		ok := p.at(ARROW) && !scratch.HasErrors()
 		p.sink, p.lastErr = saveSink, saveLast
 		if ok {
@@ -2617,6 +3153,16 @@ func (p *parser) parseLambda() *LambdaExpr {
 func (p *parser) parseIf() Expr {
 	start := p.next().Span // if
 	e := &IfExpr{}
+	if p.headerHasInit() {
+		// Go's if v := f(); v > 0 { }: Lyth declares v on the line before.
+		init := p.parseStmt()
+		semi := p.expect(SEMI, "after the if statement's initializer")
+		line := p.file.LineStart(start.StartPos().Line)
+		indent := string(p.file.Content[line:start.Start])
+		p.errorf(diag.EUnsupportedSyntax, start.Join(semi.Span), "if has no initializer statement in Lyth").
+			WithEdit(start.Join(semi.Span), init.Span().Text()+"\n"+indent+"if", "declare it on the line before: %s, then if ...", init.Span().Text())
+		defer func() { p.damaged = append(p.damaged, e.S) }()
+	}
 	e.Cond = p.parseCondition()
 	e.Then = nested(p, func() *Block { return p.parseHeaderBody("if", e.Cond) })
 	if p.peekPastNL().Kind == ELSE {

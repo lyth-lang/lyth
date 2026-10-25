@@ -699,6 +699,14 @@ func (c *Checker) resolveMethod(d *syntax.FunDecl) {
 	if d.Recv.Name != nil {
 		ts, _ = c.lookup(d.Recv.Name.Name).(*TypeSym)
 	}
+	if ts != nil && ts.Alias != nil && len(d.Recv.TypeArgs) == 0 {
+		// typealias Point = Pt: a method of Point is a method of Pt, as in Go.
+		if n, ok := c.aliasType(ts).(*types.Named); ok && n.Decl != nil && len(n.Args) == 0 {
+			if target, ok := c.pkgScope.LookupLocal(n.Decl.Name).(*TypeSym); ok && target.Decl == n.Decl {
+				ts = target
+			}
+		}
+	}
 	if ts == nil || ts.Decl == nil || ts.Pkg != c.pkg || ts.Decl.Kind == types.InterfaceDecl {
 		c.resolveExtension(d)
 		return
@@ -879,6 +887,16 @@ func (c *Checker) matchReceiver(recv types.Type, tps []*types.TypeParam, t types
 			}
 		}
 	}
+	switch recv.(type) {
+	case *types.Slice, *types.Map:
+		// sort.StringSlice and url.Values are a []string and a map, which a
+		// []T or map[K]V parameter accepts in Go too.
+		if u := collectionOf(t); u != t {
+			if bind, ok := try(recv, u); ok {
+				return bind, &ExtCall{}, true
+			}
+		}
+	}
 	return nil, nil, false
 }
 
@@ -1029,6 +1047,24 @@ func (c *Checker) globalType(v *VarSym) types.Type {
 	return v.Type
 }
 
+// localConst declares a constant in a function body. Its value is checked
+// in the enclosing scope, so it may refer to earlier local constants.
+func (c *Checker) localConst(d *syntax.ConstDecl) {
+	k := &ConstSym{name: d.Name.Name, Span: d.Name.S, GoName: d.Name.Name, Decl: d}
+	c.constInit(k)
+	k.state = 2
+	c.info.Defs[d.Name] = k
+	if d.Name.Name == "_" {
+		return
+	}
+	if old := c.scope.LookupLocal(d.Name.Name); old != nil {
+		c.errorf(diag.EDuplicate, d.Name.S, "%s is already declared in this scope", d.Name.Name).
+			WithRelated(old.DeclSpan(), "previous declaration")
+		return
+	}
+	c.scope.Insert(k)
+}
+
 // constValue resolves a constant's type and value.
 func (c *Checker) constValue(k *ConstSym) {
 	switch k.state {
@@ -1044,6 +1080,15 @@ func (c *Checker) constValue(k *ConstSym) {
 	saveScope, saveFn := c.scope, c.fn
 	c.scope = newScope(c.scopeFor(d.S), FuncScope)
 	c.fn = c.initCtx(d.S)
+	c.constInit(k)
+	c.scope, c.fn = saveScope, saveFn
+	k.state = 2
+}
+
+// constInit checks a constant's initializer in the current scope and sets
+// its type and value.
+func (c *Checker) constInit(k *ConstSym) {
+	d := k.Decl
 	var want types.Type
 	if d.Type != nil {
 		want = c.resolveType(d.Type)
@@ -1053,12 +1098,16 @@ func (c *Checker) constValue(k *ConstSym) {
 	case x.mode == ModeInvalid:
 		k.Type = types.Invalid
 	case x.val == nil:
-		c.errorf(diag.EInvalidUse, d.Value.Span(), "const initializer must be a constant expression").
-			WithHint("use 'var %s = ...' for values computed at run time", k.name)
+		dg := c.errorf(diag.EInvalidUse, d.Value.Span(), "const initializer must be a constant expression")
+		if k.Pkg == nil {
+			dg.WithHint("use '%s := ...' for values computed at run time", k.name)
+		} else {
+			dg.WithHint("use 'var %s = ...' for values computed at run time", k.name)
+		}
 		k.Type = types.Invalid
 	default:
 		if want != nil {
-			if b := types.BasicOf(want); b == nil {
+			if b := types.BasicOf(want); b == nil || types.MayBeNull(want) {
 				c.errorf(diag.ETypeMismatch, d.Type.Span(), "constants must have a basic type, not %s", want)
 				want = types.Invalid
 			} else {
@@ -1071,8 +1120,6 @@ func (c *Checker) constValue(k *ConstSym) {
 		}
 		k.Val = x.val
 	}
-	c.scope, c.fn = saveScope, saveFn
-	k.state = 2
 }
 
 func (c *Checker) convertConst(v constant.Value, t types.Type) constant.Value {
@@ -1231,7 +1278,7 @@ func (c *Checker) exprBody(e syntax.Expr, sym *FuncSym) {
 		}
 	case 1:
 		x := c.expr(e, sig.Results[0])
-		if c.passThrough(x, sig.Results) {
+		if c.passThrough(x, sig.Results) || c.notPassedThrough(x, sig.Results) {
 			return
 		}
 		c.assign(c.singleValue(x), sig.Results[0], "return value")

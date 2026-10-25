@@ -1,0 +1,35 @@
+// A generic function used as a value takes its type arguments from the
+// function type it is passed or assigned to, as in Go.
+import "cmp"
+import "fmt"
+import "slices"
+import "strings"
+import "lyth/coll"
+
+func Ident[T](x: T): T = x
+
+func Max[T: cmp.Ordered](a: T, b: T): T = if a > b { a } else { b }
+
+struct Sorter {
+    compare: (int, int) -> int
+}
+
+func main() {
+    xs := [3, 1, 2]
+    slices.SortFunc(xs, cmp.Compare)
+    fmt.Println(xs)
+    g: (string) -> string = Ident
+    fmt.Println(g("id"))
+    fmt.Println([1, 5, 2].Fold(0, Max))
+    up: (string) -> string = strings.ToUpper
+    fmt.Println(up("x"))
+    s := Sorter(compare = cmp.Compare)
+    fmt.Println(s.compare(1, 2))
+}
+
+// Output:
+// [1 2 3]
+// id
+// 5
+// X
+// -1

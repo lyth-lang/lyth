@@ -199,11 +199,17 @@ func Emit(f *lower.File, opts Options) (*Result, error) {
 	}
 	// Lines whose statement cannot fail at run time (assignments of
 	// literals, branches, plain comparisons) need no directive either.
+	// Glue that can fail (a call hoisted out of an expression, the panic of
+	// !!) does need one: a stack trace must show the Lyth line it came from.
 	quiet := map[int]bool{}
 	ast.Inspect(f2, func(n ast.Node) bool {
 		if st, ok := n.(ast.Stmt); ok {
-			if _, isBlock := st.(*ast.BlockStmt); !isBlock && !stmtMayFail(st) {
-				quiet[tf.Line(st.Pos())] = true
+			if _, isBlock := st.(*ast.BlockStmt); !isBlock {
+				if !stmtMayFail(st) {
+					quiet[tf.Line(st.Pos())] = true
+				} else if l := tf.Line(st.Pos()); l < len(lineSynth) && lineSrc[l] != 0 && hoisted(st) {
+					lineSynth[l] = false
+				}
 			}
 		}
 		return true
@@ -586,4 +592,22 @@ func trimBlockEdges(src []byte, f *ast.File, tf *token.File) []byte {
 		out.Write(ln)
 	}
 	return out.Bytes()
+}
+
+// hoisted reports whether s is glue that runs user code or panics: a call
+// spilled into a variable (v, err := f()) or a panic.
+func hoisted(s ast.Stmt) bool {
+	switch s := s.(type) {
+	case *ast.AssignStmt:
+		if len(s.Rhs) == 1 {
+			_, isCall := s.Rhs[0].(*ast.CallExpr)
+			return isCall
+		}
+	case *ast.ExprStmt:
+		if c, ok := s.X.(*ast.CallExpr); ok {
+			id, ok := c.Fun.(*ast.Ident)
+			return ok && id.Name == "panic"
+		}
+	}
+	return false
 }

@@ -47,7 +47,11 @@ func (fl *fnLower) call(e *syntax.CallExpr) ast.Expr {
 	ops := append([]syntax.Expr{e.Fun}, ci.Args...)
 	var fun ast.Expr
 	var args []ast.Expr
-	if s, ok := syntax.Unparen(e.Fun).(*syntax.SelectorExpr); ok && fl.info.Selections[s] != nil && fl.info.Selections[s].Kind != check.SelPkgMember {
+	if _, pre := fl.pre[e.Fun]; pre {
+		// A deferred call whose function value was read at the defer.
+		xs := fl.exprList(ops, nil)
+		fun, args = xs[0], xs[1:]
+	} else if s, ok := syntax.Unparen(e.Fun).(*syntax.SelectorExpr); ok && fl.info.Selections[s] != nil && fl.info.Selections[s].Kind != check.SelPkgMember {
 		// Method call: receiver first.
 		recvOps := append([]syntax.Expr{s.X}, ci.Args...)
 		mark := len(*fl.stmts)
@@ -261,7 +265,7 @@ func (fl *fnLower) safeCall(e *syntax.CallExpr, s *syntax.SelectorExpr, ci *chec
 	spec := &ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(name)}, Type: fl.l.typeExpr(t)}
 	fl.emitSynth(&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{spec}}}, e.S)
 	var val ast.Expr = call
-	if !types.IsNilable(types.Base(t)) && !types.MayBeNull(ci.Sig.Results[0]) {
+	if types.IsNullable(t) && !types.IsNilable(types.Base(t)) && !types.MayBeNull(ci.Sig.Results[0]) {
 		val = &ast.CallExpr{Fun: ast.NewIdent("new"), Args: []ast.Expr{call}}
 	}
 	body := append(*stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(name)}, Tok: token.ASSIGN, Rhs: []ast.Expr{val}})

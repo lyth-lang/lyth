@@ -124,6 +124,7 @@ type fileLowerer struct {
 	blank       []string
 	decls       []ast.Decl
 	runName     string
+	comments    []*ast.CommentGroup // comments kept inside function bodies (an example's output)
 }
 
 func lowerFile(pkg *check.Package, f *syntax.File, pkgNames map[string]bool) *File {
@@ -155,8 +156,10 @@ func lowerFile(pkg *check.Package, f *syntax.File, pkgNames map[string]bool) *Fi
 	for _, d := range f.Decls {
 		l.decl(d)
 	}
-	file := &ast.File{Name: ast.NewIdent(pkg.Name), Decls: l.importDecls()}
+	file := &ast.File{Name: ast.NewIdent(pkg.Name), Decls: l.importDecls(), Comments: l.comments}
 	file.Decls = append(file.Decls, l.decls...)
+	parenHeaderLiterals(file)
+	flattenElseIf(file)
 	return &File{Src: f.Src, GoName: GoFileName(f.Src.Base()), AST: file, Fset: fset, Spans: l.spans, Synthetic: l.synthetic, Build: f.BuildConstraint}
 }
 
@@ -235,10 +238,20 @@ func (l *fileLowerer) importDecls() []ast.Decl {
 	for _, p := range l.blank {
 		gd.Specs = append(gd.Specs, &ast.ImportSpec{Name: ast.NewIdent("_"), Path: &ast.BasicLit{Kind: token.STRING, Value: strconv.Quote(p)}})
 	}
+	// gofmt sorts an import block by path, blank imports included.
+	sort.SliceStable(gd.Specs, func(i, j int) bool {
+		return gd.Specs[i].(*ast.ImportSpec).Path.Value < gd.Specs[j].(*ast.ImportSpec).Path.Value
+	})
 	if len(gd.Specs) == 1 {
 		gd.Lparen, gd.Rparen = 0, 0
 	}
 	return []ast.Decl{gd}
+}
+
+// emptyStructType returns struct{}. Braces at one position print on one
+// line; without positions go/printer would break the line between them.
+func emptyStructType() *ast.StructType {
+	return &ast.StructType{Fields: &ast.FieldList{Opening: 1, Closing: 1}}
 }
 
 // pkgNameGuess returns the declared name of an imported package if known.
@@ -318,6 +331,9 @@ func (l *fileLowerer) goTypeExpr(t gotypes.Type) ast.Expr {
 		}
 		return it
 	case *gotypes.Struct:
+		if t.NumFields() == 0 {
+			return emptyStructType()
+		}
 		st := &ast.StructType{Fields: &ast.FieldList{}}
 		for i := 0; i < t.NumFields(); i++ {
 			f := t.Field(i)
@@ -679,6 +695,25 @@ func (l *fileLowerer) interfaceDecl(d *syntax.InterfaceDecl) {
 // recvParamName names an extension's receiver parameter as Go code names
 // such a parameter: s for slices and strings, m for maps, ch for channels,
 // and the type name's initial otherwise.
+// freeRecvName returns name, or when the method already uses it (a
+// parameter p in a method of prefixed), a variant Go code would choose.
+func (fl *fnLower) freeRecvName(name string) string {
+	free := func(n string) bool { return !fl.taken[n] && !fl.reserved[n] && !check.IsGoReserved(n) }
+	if free(name) {
+		return name
+	}
+	for _, n := range []string{name + "v", "recv", "self_"} {
+		if free(n) {
+			return n
+		}
+	}
+	for i := 2; ; i++ {
+		if n := fmt.Sprintf("%s%d", name, i); free(n) {
+			return n
+		}
+	}
+}
+
 func recvParamName(t types.Type) string {
 	switch b := types.Base(t).(type) {
 	case *types.Pointer:
@@ -792,19 +827,13 @@ func (l *fileLowerer) funDecl(d *syntax.FunDecl) {
 	var recv *ast.FieldList
 	var extParam *ast.Field // an extension's receiver, its first parameter
 	if fi.Recv != nil && sym.ExtRecv != nil {
-		rname := recvParamName(sym.ExtRecv)
-		if fl.taken[rname] || fl.reserved[rname] || check.IsGoReserved(rname) {
-			rname = "this"
-		}
+		rname := fl.freeRecvName(recvParamName(sym.ExtRecv))
 		fl.recvName = rname
 		fl.locals[fi.Recv] = rname
 		fl.taken[rname] = true
 		extParam = &ast.Field{Names: []*ast.Ident{ast.NewIdent(rname)}, Type: l.typeExpr(sym.ExtRecv)}
 	} else if fi.Recv != nil {
-		rname := strings.ToLower(sym.Recv.Name[:1])
-		if fl.taken[rname] || check.IsGoReserved(rname) {
-			rname = "this"
-		}
+		rname := fl.freeRecvName(strings.ToLower(sym.Recv.Name[:1]))
 		fl.recvName = rname
 		fl.locals[fi.Recv] = rname
 		fl.taken[rname] = true
@@ -851,12 +880,43 @@ func (l *fileLowerer) funDecl(d *syntax.FunDecl) {
 	l.mark(fd, d.S)
 	body := fl.funcBody(d, fi)
 	fd.Body = body
+	if strings.HasPrefix(sym.GoName, "Example") && strings.HasSuffix(l.src.Src.Base(), "_test.lyth") && d.Body != nil {
+		l.exampleOutput(d.Body.S)
+	}
 	l.decls = append(l.decls, fd)
 	if sym.IsMain && sym.Sig.Throws {
 		l.decls = append(l.decls, l.mainWrapper(d, name))
 	}
 	if sym.IsTest && sym.Sig.Throws {
 		l.decls = append(l.decls, l.testWrapper(d, sym, name))
+	}
+}
+
+// exampleOutput keeps the "// Output:" comment of an example test, which go
+// test compares with what the example prints, at its place in the body.
+func (l *fileLowerer) exampleOutput(body source.Span) {
+	var g *ast.CommentGroup
+	next := 0 // the line the next comment of the block must start on
+	for _, c := range l.src.Comments {
+		if c.Span.Start < body.Start || c.Span.End > body.End || !strings.HasPrefix(c.Text, "//") {
+			continue
+		}
+		line := c.Span.StartPos().Line
+		if g == nil {
+			text := strings.TrimSpace(strings.TrimPrefix(c.Text, "//"))
+			lower := strings.ToLower(text)
+			if !strings.HasPrefix(lower, "output:") && !strings.HasPrefix(lower, "unordered output:") {
+				continue
+			}
+			g = &ast.CommentGroup{}
+		} else if line != next {
+			break
+		}
+		g.List = append(g.List, &ast.Comment{Slash: l.pos(c.Span), Text: c.Text})
+		next = line + 1
+	}
+	if g != nil {
+		l.comments = append(l.comments, g)
 	}
 }
 
@@ -1021,10 +1081,15 @@ func needsExplicitType(info *check.Info, e syntax.Expr, t types.Type) bool {
 		tv.Type = r.Raw[0]
 	}
 	want := types.Lower(t)
-	if tv.Value != nil {
-		// Constants take their default Go type with :=.
-		def := gotypes.Default(constKindType(tv.Value))
-		return !gotypes.Identical(def, want)
+	if tv.Value != nil && info.Implicit[e] == check.ConvNone {
+		// Constants take their default Go type with :=, which depends on
+		// how the constant is written (10 is an int even where a float64
+		// is declared). A boxed constant, new(float64(10)), has its type.
+		nat := sourceConstType(info, e)
+		if nat == nil {
+			return true
+		}
+		return !gotypes.Identical(gotypes.Default(nat), want)
 	}
 	if conv, ok := info.Implicit[e]; ok && conv != check.ConvNone {
 		if conv == check.ConvNilIface {
@@ -1061,4 +1126,182 @@ func intLit(n int) ast.Expr {
 		return &ast.UnaryExpr{Op: token.SUB, X: &ast.BasicLit{Kind: token.INT, Value: strconv.Itoa(-n)}}
 	}
 	return &ast.BasicLit{Kind: token.INT, Value: strconv.Itoa(n)}
+}
+
+// sourceConstType returns the Go type that the constant expression e has as
+// written, before any conversion the checker applied: an untyped kind for
+// 10 or 2.5, or the type of a typed constant. It returns nil when it cannot
+// tell.
+func sourceConstType(info *check.Info, e syntax.Expr) gotypes.Type {
+	switch x := syntax.Unparen(e).(type) {
+	case *syntax.BasicLit:
+		switch x.Kind {
+		case syntax.INT:
+			return gotypes.Typ[gotypes.UntypedInt]
+		case syntax.FLOAT:
+			return gotypes.Typ[gotypes.UntypedFloat]
+		case syntax.RUNE:
+			return gotypes.Typ[gotypes.UntypedRune]
+		case syntax.STRING, syntax.RAWSTRING:
+			return gotypes.Typ[gotypes.UntypedString]
+		}
+	case *syntax.TemplateLit:
+		return gotypes.Typ[gotypes.UntypedString]
+	case *syntax.BoolLit:
+		return gotypes.Typ[gotypes.UntypedBool]
+	case *syntax.CallExpr:
+		// int64(5), time.Duration(2), len("abc"): typed constants.
+		if ci := info.Calls[x]; ci != nil {
+			switch {
+			case ci.Kind == check.CallConvert && ci.Target != nil:
+				return types.Lower(ci.Target)
+			case ci.Kind == check.CallBuiltin && (ci.Builtin == check.BuiltinLen || ci.Builtin == check.BuiltinCap):
+				return gotypes.Typ[gotypes.Int]
+			}
+		}
+	case *syntax.UnaryExpr:
+		return sourceConstType(info, x.X)
+	case *syntax.BinaryExpr:
+		switch x.Op {
+		case syntax.EQL, syntax.NEQ, syntax.LSS, syntax.LEQ, syntax.GTR, syntax.GEQ, syntax.LAND, syntax.LOR:
+			return gotypes.Typ[gotypes.UntypedBool]
+		case syntax.SHL, syntax.SHR:
+			return sourceConstType(info, x.X)
+		}
+		a, b := sourceConstType(info, x.X), sourceConstType(info, x.Y)
+		if a == nil || b == nil {
+			return nil
+		}
+		ua, ub := isUntypedGo(a), isUntypedGo(b)
+		switch {
+		case !ua:
+			return a
+		case !ub:
+			return b
+		}
+		// Both untyped: the later kind of int, rune, float, complex wins.
+		if a.(*gotypes.Basic).Kind() > b.(*gotypes.Basic).Kind() {
+			return a
+		}
+		return b
+	case *syntax.Ident:
+		switch s := info.Uses[x].(type) {
+		case *check.ConstSym:
+			if s.Type != nil && !types.IsUntyped(s.Type) {
+				return types.Lower(s.Type)
+			}
+			if s.Decl != nil && s.Decl.Type == nil && (s.Pkg == nil || s.Pkg.Info == info) {
+				return sourceConstType(info, s.Decl.Value)
+			}
+			return nil
+		}
+		if x.Name == "true" || x.Name == "false" {
+			return gotypes.Typ[gotypes.UntypedBool]
+		}
+	case *syntax.SelectorExpr:
+		if info.Entries[x] != nil {
+			return types.Lower(info.TypeOf(x)) // Color.Red
+		}
+		if obj, ok := info.Uses[x.Sel].(*check.GoObj); ok {
+			if k, ok := obj.Obj.(*gotypes.Const); ok {
+				return k.Type()
+			}
+		}
+		if s, ok := info.Uses[x.Sel].(*check.ConstSym); ok && s.Type != nil && !types.IsUntyped(s.Type) {
+			return types.Lower(s.Type)
+		}
+	}
+	return nil
+}
+
+func isUntypedGo(t gotypes.Type) bool {
+	b, ok := t.(*gotypes.Basic)
+	return ok && b.Info()&gotypes.IsUntyped != 0
+}
+
+// parenHeaderLiterals parenthesizes composite literals of a named type in
+// statement headers, where Go would read their { as the body's:
+// if p == (P{X: 1}) { ... }.
+func parenHeaderLiterals(f *ast.File) {
+	var fix func(e ast.Expr) ast.Expr
+	fix = func(e ast.Expr) ast.Expr {
+		switch x := e.(type) {
+		case *ast.CompositeLit:
+			switch x.Type.(type) {
+			case *ast.Ident, *ast.SelectorExpr, *ast.IndexExpr, *ast.IndexListExpr:
+				return &ast.ParenExpr{X: x}
+			}
+		case *ast.BinaryExpr:
+			x.X, x.Y = fix(x.X), fix(x.Y)
+		case *ast.UnaryExpr:
+			x.X = fix(x.X)
+		case *ast.StarExpr:
+			x.X = fix(x.X)
+		case *ast.SelectorExpr:
+			x.X = fix(x.X)
+		case *ast.IndexExpr:
+			x.X = fix(x.X)
+		case *ast.CallExpr:
+			x.Fun = fix(x.Fun) // arguments are inside parentheses already
+		case *ast.TypeAssertExpr:
+			x.X = fix(x.X)
+		}
+		return e
+	}
+	fixStmt := func(s ast.Stmt) {
+		switch s := s.(type) {
+		case *ast.AssignStmt:
+			for i := range s.Rhs {
+				s.Rhs[i] = fix(s.Rhs[i])
+			}
+		case *ast.ExprStmt:
+			s.X = fix(s.X)
+		}
+	}
+	ast.Inspect(f, func(n ast.Node) bool {
+		switch s := n.(type) {
+		case *ast.IfStmt:
+			fixStmt(s.Init)
+			s.Cond = fix(s.Cond)
+		case *ast.ForStmt:
+			fixStmt(s.Init)
+			if s.Cond != nil {
+				s.Cond = fix(s.Cond)
+			}
+			fixStmt(s.Post)
+		case *ast.SwitchStmt:
+			fixStmt(s.Init)
+			if s.Tag != nil {
+				s.Tag = fix(s.Tag)
+			}
+		case *ast.TypeSwitchStmt:
+			fixStmt(s.Init)
+			fixStmt(s.Assign)
+		case *ast.RangeStmt:
+			s.X = fix(s.X)
+		}
+		return true
+	})
+}
+
+// flattenElseIf turns else { if ... } into else if ..., as Go is written:
+// typed catch chains and nested ifs lower to an else holding one if.
+func flattenElseIf(f *ast.File) {
+	ast.Inspect(f, func(n ast.Node) bool {
+		if s, ok := n.(*ast.IfStmt); ok {
+			for {
+				b, ok := s.Else.(*ast.BlockStmt)
+				if !ok || len(b.List) != 1 {
+					break
+				}
+				inner, ok := b.List[0].(*ast.IfStmt)
+				if !ok {
+					break
+				}
+				s.Else = inner
+				s = inner
+			}
+		}
+		return true
+	})
 }

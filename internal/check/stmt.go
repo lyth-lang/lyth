@@ -2,10 +2,12 @@ package check
 
 import (
 	"go/constant"
+	"go/token"
 	gotypes "go/types"
 	"strings"
 
 	"github.com/lyth-lang/lyth/internal/diag"
+	"github.com/lyth-lang/lyth/internal/source"
 	"github.com/lyth-lang/lyth/internal/syntax"
 	"github.com/lyth-lang/lyth/internal/types"
 )
@@ -83,6 +85,14 @@ func (c *Checker) blockValue(b *syntax.Block, want types.Type, needValue bool) b
 			res.terminates = false
 			return
 		}
+		if op.mode == ModeValue && isStatementCall(x, op) {
+			// fmt.Println(e) yields (int, error), not a value: the block
+			// ends in a statement, which the caller reports if it needs one.
+			if r, ok := op.typ.(*types.Result); ok && !c.errorIgnorable(callOf(x)) {
+				c.unhandledError(callOf(x), r)
+			}
+			return
+		}
 		op = c.singleValue(op)
 		if isNothing(op.typ) {
 			res.terminates = true
@@ -99,6 +109,8 @@ func (c *Checker) stmt(s syntax.Stmt) bool {
 	switch s := s.(type) {
 	case *syntax.LocalDecl:
 		return c.localDecl(s)
+	case *syntax.ConstDecl:
+		c.localConst(s)
 	case *syntax.AssignStmt:
 		c.assignStmt(s)
 	case *syntax.IncDecStmt:
@@ -319,7 +331,7 @@ func (c *Checker) destructure(s *syntax.LocalDecl) bool {
 		// v, ok := m[k]: Go's comma-ok form.
 		x := c.expr(s.Value, nil)
 		if xt := c.info.TypeOf(ix.X); xt != nil {
-			if m, ok := types.Base(xt).(*types.Map); ok && x.mode != ModeInvalid {
+			if m, ok := collectionOf(xt).(*types.Map); ok && x.mode != ModeInvalid {
 				vt := m.Elem
 				if !types.Zeroable(vt) {
 					vt = types.MakeNullable(vt)
@@ -554,6 +566,8 @@ func compoundOp(k syntax.Kind) syntax.Kind {
 		return syntax.SHL
 	case syntax.SHR_ASSIGN:
 		return syntax.SHR
+	case syntax.AND_NOT_ASSIGN:
+		return syntax.AND_NOT
 	}
 	return k
 }
@@ -636,7 +650,11 @@ func (c *Checker) unhandledError(call *syntax.CallExpr, r *types.Result) {
 	} else {
 		d.WithHint("propagate it with %s? (inside a function that throws)", text)
 	}
-	d.WithHint("handle it: %s catch (err) { ... }", text)
+	binder := "err"
+	if c.lookup("err") != nil {
+		binder = "e" // inside catch (err) { ... }, a new err would hide it
+	}
+	d.WithHint("handle it: %s catch (%s) { ... }", text, binder)
 	if len(r.Success) == 0 {
 		d.WithHint("or discard it explicitly: _ = %s", text)
 	}
@@ -767,6 +785,16 @@ func (c *Checker) when(e *syntax.WhenExpr, want types.Type, needValue bool) (*op
 		}
 	}
 	covered := map[string]bool{}
+	// Conditions already seen: Go's switch rejects duplicate cases.
+	seen := map[string]source.Span{}
+	dup := func(key, what string, span source.Span) {
+		if prev, ok := seen[key]; ok {
+			c.errorf(diag.EDuplicate, span, "duplicate when condition %s", what).
+				WithRelated(prev, "already handled here")
+			return
+		}
+		seen[key] = span
+	}
 	allTerminate := true
 	for i, br := range e.Branches {
 		if hasElse {
@@ -807,6 +835,20 @@ func (c *Checker) when(e *syntax.WhenExpr, want types.Type, needValue bool) (*op
 						if entry := c.info.Entries[cond.X]; entry != nil && enum != nil && entry.Decl == enum {
 							covered[entry.Name] = true
 						}
+						switch {
+						case c.info.Entries[cond.X] != nil:
+							entry := c.info.Entries[cond.X]
+							dup("entry "+entry.Decl.Name+"."+entry.Name, cond.X.Span().Short(), cond.S)
+						case x.mode != ModeInvalid && x.typ == types.Null:
+							dup("null", "null", cond.S)
+							if v := whenSubjectVar(c, e); v != nil && len(br.Conds) == 1 && types.MayBeNull(v.Type) {
+								// when s { null -> ...; else -> s is not null }
+								nf = narrowing{v: types.Base(v.Type)}
+							}
+						case x.mode != ModeInvalid && x.val != nil:
+							// 1 and 1.0 differ in a when over any: the key has the type.
+							dup("value "+types.DefaultType(x.typ).String()+" "+x.val.ExactString(), cond.X.Span().Short(), cond.S)
+						}
 						if x.mode != ModeInvalid && subject.mode != ModeInvalid {
 							bin := &syntax.BinaryExpr{Op: syntax.EQL, X: e.Subject, Y: cond.X, OpSpan: cond.S, S: cond.S}
 							s2 := &operand{mode: ModeValue, typ: subject.typ, expr: e.Subject}
@@ -816,7 +858,7 @@ func (c *Checker) when(e *syntax.WhenExpr, want types.Type, needValue bool) (*op
 				case syntax.WhenIs, syntax.WhenNotIs:
 					t := c.resolveType(cond.Type)
 					if subject == nil {
-						c.errorf(diag.EInvalidUse, cond.S, "is conditions need a when subject: when (x) { is T -> ... }")
+						c.errorf(diag.EInvalidUse, cond.S, "is conditions need a when subject: when x { is T -> ... }")
 						continue
 					}
 					if subject.mode == ModeInvalid || t == types.Invalid {
@@ -826,6 +868,9 @@ func (c *Checker) when(e *syntax.WhenExpr, want types.Type, needValue bool) (*op
 						continue
 					}
 					c.info.TypeTests[cond] = t
+					if cond.Kind == syntax.WhenIs {
+						dup("is "+t.String(), "is "+t.String(), cond.S)
+					}
 					if cond.Kind == syntax.WhenIs && sealed != nil {
 						covered[t.String()] = true
 					}
@@ -836,7 +881,7 @@ func (c *Checker) when(e *syntax.WhenExpr, want types.Type, needValue bool) (*op
 					}
 				default: // in, !in
 					if subject == nil {
-						c.errorf(diag.EInvalidUse, cond.S, "in conditions need a when subject: when (x) { in 1..9 -> ... }")
+						c.errorf(diag.EInvalidUse, cond.S, "in conditions need a when subject: when x { in 1..9 -> ... }")
 						c.value(cond.X, nil)
 						continue
 					}
@@ -844,7 +889,12 @@ func (c *Checker) when(e *syntax.WhenExpr, want types.Type, needValue bool) (*op
 						c.value(cond.X, nil)
 						continue
 					}
-					c.membership(cond, subject, cond.X, false)
+					subj := subject
+					if n, ok := subject.typ.(*types.Nullable); ok && !types.IsNilable(n.Elem) {
+						// when n { in 1..9 -> } on an int?: null is in nothing.
+						subj = &operand{mode: subject.mode, typ: n.Elem, expr: subject.expr}
+					}
+					c.membership(cond, subj, cond.X, false)
 				}
 			}
 		})
@@ -937,11 +987,17 @@ func (c *Checker) forStmt(s *syntax.ForStmt) {
 			if types.IsNullable(x.typ) {
 				c.nullableUse(x, "iterate over")
 			}
-			switch t := types.Base(x.typ).(type) {
+			switch t := collectionOf(x.typ).(type) {
 			case *types.Slice:
 				info.Kind, keyT, valT = ForSlice, types.Int, t.Elem
 			case *types.Array:
 				info.Kind, keyT, valT = ForArray, types.Int, t.Elem
+			case *types.Pointer:
+				if a, ok := types.Base(t.Elem).(*types.Array); ok {
+					info.Kind, keyT, valT = ForArray, types.Int, a.Elem
+				} else {
+					c.errorf(diag.EInvalidOp, s.Iter.Span(), "cannot iterate over a value of type %s", x.typ)
+				}
 			case *types.Map:
 				info.Kind, keyT, valT = ForMap, t.Key, t.Elem
 			case *types.Chan:
@@ -953,12 +1009,27 @@ func (c *Checker) forStmt(s *syntax.ForStmt) {
 					if types.IsUntyped(x.typ) {
 						c.assign(x, types.String, "")
 					}
+				} else if yield := iteratorYield(x.typ); yield != nil {
+					// Go's range-over-func: iter.Seq[V] binds V, iter.Seq2[K, V]
+					// binds K or K and V.
+					info.Kind = ForFunc
+					switch len(yield.Params) {
+					case 0:
+						if len(s.Names) != 1 || s.Names[0].Name != "_" {
+							c.errorf(diag.EInvalidUse, s.Names[0].S, "this iterator yields no values; write for _ in ...")
+						}
+					case 1:
+						keyT, valT = yield.Params[0], yield.Params[0]
+						twoAllowed = false
+					case 2:
+						keyT, valT = yield.Params[0], yield.Params[1]
+					}
 				} else if _, isSig := types.Lower(t).Underlying().(*gotypes.Signature); isSig {
-					c.errorf(diag.EUnsupported, s.Iter.Span(), "iterating over Go iterator functions is not supported yet").
-						WithHint("collect it into a slice or map first: slices.Collect(...) or maps.Collect(...)")
+					c.errorf(diag.EInvalidOp, s.Iter.Span(), "cannot iterate over a function of type %s", x.typ).
+						WithHint("for loops iterate over iterator functions such as iter.Seq[V] and iter.Seq2[K, V]: func(yield func(V) bool)")
 				} else {
 					c.errorf(diag.EInvalidOp, s.Iter.Span(), "cannot iterate over a value of type %s", x.typ).
-						WithHint("for loops iterate over slices, arrays, maps, strings, channels, and ranges like 0..<n")
+						WithHint("for loops iterate over slices, arrays, maps, strings, channels, Go iterators, and ranges like 0..<n")
 				}
 			}
 		}
@@ -972,7 +1043,7 @@ func (c *Checker) forStmt(s *syntax.ForStmt) {
 	var varTypes []types.Type
 	switch len(s.Names) {
 	case 1:
-		if info.Kind == ForMap {
+		if info.Kind == ForMap || info.Kind == ForFunc {
 			varTypes = []types.Type{keyT}
 		} else {
 			varTypes = []types.Type{valT}
@@ -1020,6 +1091,14 @@ func (c *Checker) rangeType(lo, hi *operand, r *syntax.RangeExpr) types.Type {
 	}
 	if !types.IsInteger(types.Base(t)) {
 		c.errorf(diag.ETypeMismatch, r.S, "range bounds must be integers, not %s", t)
+		return types.Invalid
+	}
+	if !r.Exclusive && hi.val != nil && !c.representable(constant.BinaryOp(hi.val, token.ADD, constant.MakeInt64(1)), types.Base(t)) {
+		// for i := lo; i <= 255; i++ never ends for a byte: i wraps to 0.
+		d := c.errorf(diag.EOverflow, r.Hi.Span(), "a range of %s up to %s never ends: %s is the largest %s, so the counter wraps around", t, hi.val, hi.val, t)
+		if b := types.BasicOf(t); b != nil && b.Kind != types.IntKind && b.Kind != types.Int64Kind && b.Kind != types.UIntKind && b.Kind != types.UInt64Kind && b.Kind != types.UIntPtrKind {
+			d.WithHint("count with an int and convert: for i in int(%s)..%s { v := %s(i) ... }", r.Lo.Span().Short(), hi.val, t)
+		}
 		return types.Invalid
 	}
 	return types.Base(t)
@@ -1127,95 +1206,30 @@ func (c *Checker) selectOp(sc *syntax.SelectCase) {
 // unlabeled breaks outside nested loops, and break@label anywhere inside.
 func (c *Checker) countBreaks(b *syntax.Block, label *syntax.Ident) int {
 	n := 0
-	var walk func(s syntax.Stmt)
-	targets := func(j *syntax.JumpExpr) bool {
-		if j.Kind != syntax.JumpBreak {
-			return false
-		}
-		return j.Label == nil || label != nil && j.Label.Name == label.Name
-	}
-	walkExpr := func(e syntax.Expr) {
-		switch x := e.(type) {
-		case *syntax.JumpExpr:
-			if targets(x) {
-				n++
-			}
-		case *syntax.IfExpr:
-			for _, s := range x.Then.Stmts {
-				walk(s)
-			}
-			if x.Else != nil {
-				for _, s := range x.Else.Stmts {
-					walk(s)
-				}
-			}
-		case *syntax.WhenExpr:
-			for _, br := range x.Branches {
-				for _, s := range br.Body.Stmts {
-					walk(s)
-				}
-			}
-		case *syntax.ElvisExpr:
-			if j, ok := x.Y.(*syntax.JumpExpr); ok && targets(j) {
-				n++
-			}
-		}
-	}
-	walk = func(s syntax.Stmt) {
-		switch s := s.(type) {
-		case *syntax.ExprStmt:
-			walkExpr(s.X)
-		case *syntax.Block:
-			for _, x := range s.Stmts {
-				walk(x)
-			}
-		case *syntax.SelectStmt:
-			// Lyth's break inside select exits the loop, as inside when.
-			for _, sc := range s.Cases {
-				walk(sc.Body)
-			}
-		case *syntax.LocalDecl:
-			if s.Value != nil {
-				walkExpr(s.Value)
-			}
+	var visit func(nd syntax.Node, nested bool)
+	visit = func(nd syntax.Node, nested bool) {
+		switch x := nd.(type) {
+		case *syntax.LambdaExpr:
+			return // a break cannot leave a lambda
 		case *syntax.ForStmt, *syntax.WhileStmt:
 			// Nested loops have their own unlabeled breaks; break@label
 			// still exits this loop.
-			if label != nil {
-				var body *syntax.Block
-				switch s := s.(type) {
-				case *syntax.ForStmt:
-					body = s.Body
-				case *syntax.WhileStmt:
-					body = s.Body
-				}
-				n += countLabeledBreaks(body, label.Name)
-			}
-		}
-	}
-	for _, s := range b.Stmts {
-		walk(s)
-	}
-	return n
-}
-
-// countLabeledBreaks counts break@name anywhere under n, lambdas excluded.
-func countLabeledBreaks(n syntax.Node, name string) int {
-	count := 0
-	var visit func(syntax.Node)
-	visit = func(n syntax.Node) {
-		switch x := n.(type) {
-		case *syntax.LambdaExpr:
-			return
+			nested = true
 		case *syntax.JumpExpr:
-			if x.Kind == syntax.JumpBreak && x.Label != nil && x.Label.Name == name {
-				count++
+			if x.Kind == syntax.JumpBreak {
+				if x.Label != nil {
+					if label != nil && x.Label.Name == label.Name {
+						n++
+					}
+				} else if !nested {
+					n++
+				}
 			}
 		}
-		syntax.Children(n, visit)
+		syntax.Children(nd, func(ch syntax.Node) { visit(ch, nested) })
 	}
-	visit(n)
-	return count
+	visit(b, false)
+	return n
 }
 
 // ---------------------------------------------------------------------------
@@ -1252,14 +1266,14 @@ func (c *Checker) deferGo(call syntax.Expr, body *syntax.Block, isGo bool) {
 				WithHint("use a block: %s { %s }", kw, call.Span().Text())
 			return
 		}
-		if r, ok := op.typ.(*types.Result); ok && op.mode != ModeInvalid {
-			d := c.errorf(diag.EUnhandledError, call.Span(), "the error returned by deferred call %s would be discarded", x.Fun.Span().Short())
+		if r, ok := op.typ.(*types.Result); ok && op.mode != ModeInvalid && !c.errorIgnorable(x) {
 			if isGo {
-				d = c.errorf(diag.EUnhandledError, call.Span(), "the error returned by %s would be lost in the goroutine", x.Fun.Span().Short())
-				d.WithHint("handle it inside: go { %s catch (err) { ... } }", call.Span().Short())
+				c.errorf(diag.EUnhandledError, call.Span(), "the error returned by %s would be lost in the goroutine", x.Fun.Span().Short()).
+					WithHint("handle it inside: go { %s catch (err) { ... } }", call.Span().Short())
 				return
 			}
-			d.WithHint("handle it: defer %s catch (err) { log(err) }", call.Span().Short())
+			d := c.errorf(diag.EUnhandledError, call.Span(), "the error returned by deferred call %s would be discarded", x.Fun.Span().Short())
+			d.WithHint("handle it: defer %s catch (err) { ... }", call.Span().Short())
 			if len(r.Success) == 0 {
 				d.WithHint("or discard it explicitly: defer { _ = %s }", call.Span().Short())
 			}
@@ -1282,7 +1296,7 @@ func (c *Checker) commaOk(e syntax.Expr, x *operand) types.Type {
 	switch e := syntax.Unparen(e).(type) {
 	case *syntax.IndexExpr:
 		if xt := c.info.TypeOf(e.X); xt != nil {
-			if m, ok := types.Base(xt).(*types.Map); ok {
+			if m, ok := collectionOf(xt).(*types.Map); ok {
 				vt := m.Elem
 				if !types.Zeroable(vt) {
 					vt = types.MakeNullable(vt)
@@ -1296,4 +1310,19 @@ func (c *Checker) commaOk(e syntax.Expr, x *operand) types.Type {
 		}
 	}
 	return nil
+}
+
+// iteratorYield returns the yield function's signature when t is a Go
+// iterator, func(yield func(...) bool) with at most two yielded values.
+func iteratorYield(t types.Type) *types.Signature {
+	sig, ok := underlyingSignature(t).(*types.Signature)
+	if !ok || len(sig.Params) != 1 || len(sig.Results) != 0 || sig.Throws || sig.Variadic {
+		return nil
+	}
+	yield, ok := underlyingSignature(sig.Params[0]).(*types.Signature)
+	if !ok || len(yield.Params) > 2 || len(yield.Results) != 1 || yield.Throws || yield.Variadic ||
+		!types.Identical(types.Base(yield.Results[0]), types.Bool) {
+		return nil
+	}
+	return yield
 }

@@ -134,6 +134,9 @@ type InInfo struct {
 	Kind  InKind
 	Rune  bool              // InString with a Rune element
 	Range *syntax.RangeExpr // InRange
+	// Optional is the element type of a list of boxed optionals ([]int?),
+	// searched by content.
+	Optional types.Type
 }
 
 // SelKind classifies selector expressions.
@@ -193,6 +196,7 @@ const (
 	ForMap
 	ForString
 	ForChan
+	ForFunc // a Go iterator function (iter.Seq, iter.Seq2)
 )
 
 // ForInfo describes a for loop.
@@ -245,6 +249,10 @@ type Info struct {
 	// FuncInsts records the type arguments of explicitly instantiated
 	// generic functions (errors.AsType<*NotFound>).
 	FuncInsts map[*syntax.InstantiateExpr][]types.Type
+	// ValueInsts records the type arguments inferred for a generic function
+	// used as a value outside a call's arguments (S(f = cmp.Compare)), which
+	// the lowering writes: cmp.Compare[int].
+	ValueInsts map[syntax.Expr][]types.Type
 	// IndexInsts maps an index expression that is an instantiation (f[int])
 	// to the instantiation the checker read it as.
 	IndexInsts map[*syntax.IndexExpr]*syntax.InstantiateExpr
@@ -284,6 +292,7 @@ func newInfo() *Info {
 		IfaceTargets: map[syntax.Expr]types.Type{},
 		TypeTests:    map[syntax.Node]types.Type{},
 		FuncInsts:    map[*syntax.InstantiateExpr][]types.Type{},
+		ValueInsts:   map[syntax.Expr][]types.Type{},
 		IndexInsts:   map[*syntax.IndexExpr]*syntax.InstantiateExpr{},
 		Ins:          map[syntax.Node]*InInfo{},
 		PassThrough:  map[syntax.Expr]bool{},

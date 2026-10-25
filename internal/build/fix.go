@@ -65,20 +65,31 @@ func (s *Session) fixes() map[string][]*diag.Edit {
 			}
 		}
 	}
-	// An error without a fix where a fix would apply means the parser was
-	// recovering there, and the fix may be computed from a misreading.
+	out := map[string][]*diag.Edit{}
+	for _, e := range ApplicableFixes(s.Sink.All()) {
+		if path := e.Span.File.Path; files[path] {
+			out[path] = append(out[path], e)
+		}
+	}
+	return out
+}
+
+// ApplicableFixes returns the fix edits of ds that lyth fix applies. A
+// syntax error without a fix where a fix would apply means the parser was
+// recovering there, and the fix may be computed from a misreading, so such
+// fixes wait for the next pass.
+func ApplicableFixes(ds []*diag.Diagnostic) []*diag.Edit {
 	var unfixed []*diag.Diagnostic
-	all := s.Sink.All()
-	for _, d := range all {
-		if d.Severity == diag.Error && len(d.Fixes()) == 0 && d.Span.IsValid() {
+	for _, d := range ds {
+		if d.Severity == diag.Error && len(d.Fixes()) == 0 && d.Span.IsValid() && d.Code.IsSyntax() {
 			unfixed = append(unfixed, d)
 		}
 	}
-	out := map[string][]*diag.Edit{}
-	for _, d := range all {
+	var out []*diag.Edit
+	for _, d := range ds {
 		for _, e := range d.Fixes() {
-			if path := e.Span.File.Path; files[path] && !overlapsAny(e, unfixed) {
-				out[path] = append(out[path], e)
+			if !overlapsAny(e, unfixed) {
+				out = append(out, e)
 			}
 		}
 	}

@@ -1,0 +1,24 @@
+// A lambda without an expected type that ends in a statement (an if
+// without else, a call returning (int, error), catch {}) returns nothing.
+import "fmt"
+import "strconv"
+
+func main() {
+    check := { s: string ->
+        if s == "" { panic("empty") }
+    }
+    g := { fmt.Println("hi") }
+    h := { x: int -> fmt.Println(x) }
+    k := { s: string -> strconv.Atoi(s) catch {} }
+    m := { s: string -> strconv.Atoi(s) catch { 0 } }
+    check("a")
+    g()
+    h(2)
+    k("x")
+    fmt.Println(m("7"), m("z"))
+}
+
+// Output:
+// hi
+// 2
+// 7 0

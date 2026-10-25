@@ -23,6 +23,12 @@ func (c *Checker) assign(x *operand, target types.Type, context string) bool {
 		c.errorf(diag.EInvalidUse, x.expr.Span(), "%s does not produce a value", x.expr.Span().Short())
 		return false
 	}
+	if isGenericFunc(x.typ) && !c.instantiateFuncValue(x, target, true) {
+		// g: (string) -> string = Ident instantiates Ident; any other use
+		// needs the type arguments.
+		c.genericFuncValue(x)
+		return false
+	}
 	// Untyped constants and untyped bools.
 	if types.IsUntyped(x.typ) {
 		tb := types.Base(target)
@@ -155,7 +161,7 @@ func (c *Checker) assignable(src, dst types.Type) (bool, ConversionKind, string)
 		return true, ConvNone, ""
 	}
 	if src == types.Null {
-		switch types.Base(dst).(type) {
+		switch collectionOf(dst).(type) {
 		case *types.Slice, *types.Map:
 			return true, ConvNone, ""
 		}
@@ -487,12 +493,15 @@ func (c *Checker) mutablePath(e syntax.Expr, verb string, code diag.Code) bool {
 		if _, isPtr := types.Base(recvType).(*types.Pointer); isPtr {
 			return true // mutation through a pointer
 		}
+		if c.optionalValue(x.X, x.Sel.Name, verb) {
+			return false
+		}
 		if id, ok := syntax.Unparen(x.X).(*syntax.ThisExpr); ok && c.fn != nil && c.fn.recv != nil {
 			return c.receiverMutable(c.fn.recv, id.S, x.Sel.Name, verb)
 		}
 		return c.mutablePathFor(x.X, x.Sel.Name, verb)
 	case *syntax.IndexExpr:
-		t := types.Base(c.info.TypeOf(x.X))
+		t := collectionOf(c.info.TypeOf(x.X))
 		switch t.(type) {
 		case *types.Map:
 			if code == diag.EAddressOfVal || code == diag.EPtrMethodVal {
@@ -523,6 +532,24 @@ func (c *Checker) mutablePath(e syntax.Expr, verb string, code diag.Code) bool {
 	return false
 }
 
+// optionalValue reports (and returns true) when e reads an optional value
+// (P? smart-cast to P): its box may be shared by copies of the variable, so
+// changing it in place would change them too.
+func (c *Checker) optionalValue(e syntax.Expr, member, verb string) bool {
+	if c.info.Implicit[e] != ConvUnbox {
+		return false
+	}
+	name := e.Span().Short()
+	if verb == "call" {
+		c.errorf(diag.EPtrMethodVal, e.Span(), "cannot call %s on %s: the method modifies its receiver, and %s is an optional value, which copies share", member, name, name).
+			WithHint("call it on a copy and store that back: v := %s; v.%s(...); %s = v", name, member, name)
+		return true
+	}
+	c.errorf(diag.EMutateVal, e.Span(), "cannot %s %s.%s: %s is an optional value, which copies share", verb, name, member, name).
+		WithHint("change a copy and store it back: v := %s; v.%s = ...; %s = v", name, member, name)
+	return true
+}
+
 // mutablePathFor checks the container of a field or array element.
 func (c *Checker) mutablePathFor(container syntax.Expr, member, verb string) bool {
 	inner := syntax.Unparen(container)
@@ -551,7 +578,7 @@ func (c *Checker) mutablePathFor(container syntax.Expr, member, verb string) boo
 		c.errorf(diag.EMutateVal, container.Span(), "cannot %s a field of a call result; store it in a variable first", verb)
 		return false
 	case *syntax.IndexExpr:
-		if _, isMap := types.Base(c.info.TypeOf(x.X)).(*types.Map); isMap {
+		if _, isMap := collectionOf(c.info.TypeOf(x.X)).(*types.Map); isMap {
 			c.errorf(diag.EMutateVal, container.Span(), "cannot %s %s of a map element: map elements are not addressable", verb, member).
 				WithHint("copy it into a variable, change that, and store it back: v := %s; v.%s = ...; %s = v", x.S.Text(), member, x.S.Text())
 			return false

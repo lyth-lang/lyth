@@ -1,0 +1,65 @@
+// defer with catch evaluates the receiver, function value, and arguments at
+// the defer, as Go does: a value method gets the copy made then, a pointer
+// method sees later changes.
+struct S {
+    n: int
+}
+
+struct T {
+    n: int
+    cb: () -> error?
+}
+
+func T.Show(): error? {
+    println("T show", n)
+    return null
+}
+
+func pointers() {
+    p := &T(1, { f1(9) })
+    defer p.Show() catch {}
+    defer p.cb() catch {}
+    hs := [{ f2(8) }]
+    defer hs[0]() catch {}
+    hs[0] = { f2(0) }
+    p.cb = { f1(0) }
+    p.n = 2
+}
+func S.Show(): error? {
+    println("show val", n)
+    return null
+}
+func *S.Bump(): error? {
+    println("bump ptr", n)
+    return null
+}
+func f1(n: int): error? {
+    println("f1", n)
+    return null
+}
+func f2(n: int): error? {
+    println("f2", n)
+    return null
+}
+func main() {
+    pointers()
+    s := S(1)
+    defer s.Show() catch {}
+    defer s.Bump() catch {}
+    g := f1
+    defer g(1) catch {}
+    g = f2
+    xs := [S(7)]
+    defer xs[0].Show() catch {}
+    xs[0] = S(8)
+    s.n = 2
+}
+
+// Output:
+// f2 8
+// f1 9
+// T show 1
+// show val 7
+// f1 1
+// bump ptr 2
+// show val 1

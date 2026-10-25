@@ -1,0 +1,25 @@
+// Inside a lambda or a go/defer block in a method, a parameter or local
+// hides a field of the same name, as it does in the method's body.
+struct C {
+    total: int
+    name: string
+}
+func *C.reset(total: int) {
+    defer { self.total = total }
+}
+func C.describe(name: string): string {
+    f := { "${name}/${self.name}" }
+    return f()
+}
+func C.fieldInLambda(): string {
+    f := { "${name}:${total}" }
+    return f()
+}
+func main() {
+    c := &C(total = 1, name = "field")
+    c.reset(42)
+    println(c.total, c.describe("param"), c.fieldInLambda())
+}
+
+// Output:
+// 42 param/field field:42

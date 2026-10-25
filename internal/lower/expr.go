@@ -18,7 +18,22 @@ import (
 // expr lowers e, emitting any statements it needs first, and applies the
 // implicit conversion recorded for e.
 func (fl *fnLower) expr(e syntax.Expr) ast.Expr {
+	if x, ok := fl.pre[e]; ok {
+		return x
+	}
 	x := fl.expr0(e)
+	if targs := fl.info.ValueInsts[e]; targs != nil {
+		// A generic function value: cmp.Compare[int].
+		idx := make([]ast.Expr, len(targs))
+		for i, t := range targs {
+			idx[i] = fl.l.typeExpr(t)
+		}
+		if len(idx) == 1 {
+			x = &ast.IndexExpr{X: x, Index: idx[0]}
+		} else {
+			x = &ast.IndexListExpr{X: x, Indices: idx}
+		}
+	}
 	fl.l.mark(x, e.Span())
 	return fl.convert(e, x)
 }
@@ -103,7 +118,7 @@ func (fl *fnLower) box(e syntax.Expr, x ast.Expr) ast.Expr {
 	if tv := fl.info.Types[e]; tv.Value != nil {
 		// Typed constant: make the type explicit unless it is the default.
 		want := types.Lower(tv.Type)
-		if !gotypes.Identical(gotypes.Default(constKindTypeFor(fl.info, e)), want) {
+		if nat := sourceConstType(fl.info, e); nat == nil || !gotypes.Identical(gotypes.Default(nat), want) {
 			x = &ast.CallExpr{Fun: fl.l.typeExpr(tv.Type), Args: []ast.Expr{x}}
 		}
 	}
@@ -181,6 +196,25 @@ func (fl *fnLower) pure(e syntax.Expr, x ast.Expr) bool {
 			return true
 		}
 		return x.Name == "nil" || x.Name == "true" || x.Name == "false"
+	case *ast.SelectorExpr:
+		// fmt.Println, time.Second: a package's function or constant.
+		if sel, ok := syntax.Unparen(e).(*syntax.SelectorExpr); ok {
+			if id := identOf(sel.X); id != nil {
+				if _, isPkg := fl.info.Uses[id].(*check.PkgSym); isPkg {
+					if obj, ok := fl.info.Uses[sel.Sel].(*check.GoObj); ok {
+						switch obj.Obj.(type) {
+						case *gotypes.Func, *gotypes.Const, *gotypes.TypeName:
+							return true
+						}
+						return false
+					}
+					switch fl.info.Uses[sel.Sel].(type) {
+					case *check.FuncSym, *check.ConstSym:
+						return true
+					}
+				}
+			}
+		}
 	}
 	return false
 }
@@ -206,6 +240,8 @@ func (fl *fnLower) expr0(e syntax.Expr) ast.Expr {
 			return ast.NewIdent(strconv.FormatBool(constant.BoolVal(tv.Value)))
 		}
 		return ast.NewIdent(strconv.FormatBool(e.Value))
+	case *syntax.EmptyStructLit:
+		return &ast.CompositeLit{Type: emptyStructType()}
 	case *syntax.NullLit:
 		return ast.NewIdent("nil")
 	case *syntax.ThisExpr:
@@ -414,16 +450,25 @@ func (fl *fnLower) basicLit(e *syntax.BasicLit) ast.Expr {
 		r, _ := utf8.DecodeRuneInString(e.Value)
 		return &ast.BasicLit{Kind: token.CHAR, Value: strconv.QuoteRune(r)}
 	}
+	if e.Kind == syntax.RAWSTRING {
+		return goRawString(e.Value)
+	}
 	return goString(e.Value)
 }
 
-// goString returns a Go string literal, using a raw string for multi-line
-// text when possible.
+// goString returns an interpreted Go string literal: "line\n".
 func goString(s string) *ast.BasicLit {
-	if strings.Contains(s, "\n") && strconv.CanBackquote(strings.ReplaceAll(s, "\n", "")) && !strings.Contains(s, "`") && !strings.Contains(s, "\r") {
-		return &ast.BasicLit{Kind: token.STRING, Value: "`" + s + "`"}
-	}
 	return &ast.BasicLit{Kind: token.STRING, Value: strconv.Quote(s)}
+}
+
+// goRawString returns a Go raw string literal for the text of a Lyth raw
+// string, keeping its line breaks, or an interpreted one when Go's raw
+// strings cannot hold the text.
+func goRawString(s string) *ast.BasicLit {
+	if strings.ContainsAny(s, "`\r") || !utf8.ValidString(s) {
+		return goString(s)
+	}
+	return &ast.BasicLit{Kind: token.STRING, Value: "`" + s + "`"}
 }
 
 // template lowers a string template to concatenation, converting numbers
@@ -453,7 +498,7 @@ func (fl *fnLower) template(e *syntax.TemplateLit) ast.Expr {
 		tv := fl.info.Types[p.X]
 		x := lowered[k]
 		k++
-		if tv.Value != nil {
+		if tv.Value != nil && fl.foldableConst(p.X, tv.Type) {
 			switch tv.Value.Kind() {
 			case constant.String:
 				text.WriteString(constant.StringVal(tv.Value))
@@ -593,7 +638,7 @@ func (fl *fnLower) unary(e *syntax.UnaryExpr) ast.Expr {
 
 var goBinOps = map[syntax.Kind]token.Token{
 	syntax.ADD: token.ADD, syntax.SUB: token.SUB, syntax.MUL: token.MUL, syntax.QUO: token.QUO, syntax.REM: token.REM,
-	syntax.AND: token.AND, syntax.OR: token.OR, syntax.XOR: token.XOR, syntax.SHL: token.SHL, syntax.SHR: token.SHR,
+	syntax.AND: token.AND, syntax.AND_NOT: token.AND_NOT, syntax.OR: token.OR, syntax.XOR: token.XOR, syntax.SHL: token.SHL, syntax.SHR: token.SHR,
 	syntax.EQL: token.EQL, syntax.NEQ: token.NEQ, syntax.LSS: token.LSS, syntax.LEQ: token.LEQ,
 	syntax.GTR: token.GTR, syntax.GEQ: token.GEQ, syntax.LAND: token.LAND, syntax.LOR: token.LOR,
 }
@@ -658,7 +703,15 @@ func (fl *fnLower) optionalEquality(e *syntax.BinaryExpr) ast.Expr {
 		return nil
 	}
 	xs := fl.exprList([]syntax.Expr{e.X, e.Y}, nil)
-	a, b := fl.stash(e.X, xs[0]), fl.stash(e.Y, xs[1])
+	// An optional operand is read twice; the other once, after the nil
+	// check, so only an impure one is evaluated first: n == 3 stays n == 3.
+	keep := func(e syntax.Expr, x ast.Expr, opt bool) ast.Expr {
+		if opt || !fl.pure(e, x) {
+			return fl.stash(e, x)
+		}
+		return x
+	}
+	a, b := keep(e.X, xs[0], isOpt(xt)), keep(e.Y, xs[1], isOpt(yt))
 	var eq ast.Expr
 	switch {
 	case isOpt(xt) && isOpt(yt):
@@ -667,10 +720,18 @@ func (fl *fnLower) optionalEquality(e *syntax.BinaryExpr) ast.Expr {
 		both := &ast.BinaryExpr{X: &ast.BinaryExpr{X: nilCmp(a, token.NEQ), Op: token.LAND, Y: nilCmp(b, token.NEQ)}, Op: token.LAND,
 			Y: &ast.BinaryExpr{X: &ast.StarExpr{X: a}, Op: token.EQL, Y: &ast.StarExpr{X: b}}}
 		eq = &ast.BinaryExpr{X: &ast.ParenExpr{X: bothNil}, Op: token.LOR, Y: &ast.ParenExpr{X: both}}
-	case isOpt(xt):
-		eq = &ast.BinaryExpr{X: nilCmp(a, token.NEQ), Op: token.LAND, Y: &ast.BinaryExpr{X: &ast.StarExpr{X: a}, Op: token.EQL, Y: b}}
-	default:
-		eq = &ast.BinaryExpr{X: nilCmp(b, token.NEQ), Op: token.LAND, Y: &ast.BinaryExpr{X: a, Op: token.EQL, Y: &ast.StarExpr{X: b}}}
+	case isOpt(xt), isOpt(yt):
+		// n == 3: n != nil && *n == 3; n != 3: n == nil || *n != 3.
+		opt := a
+		var lhs, rhs ast.Expr = &ast.StarExpr{X: a}, b
+		if !isOpt(xt) {
+			opt = b
+			lhs, rhs = a, &ast.StarExpr{X: b}
+		}
+		if e.Op == syntax.NEQ {
+			return &ast.BinaryExpr{X: nilCmp(opt, token.EQL), Op: token.LOR, Y: &ast.BinaryExpr{X: lhs, Op: token.NEQ, Y: rhs}}
+		}
+		return &ast.BinaryExpr{X: nilCmp(opt, token.NEQ), Op: token.LAND, Y: &ast.BinaryExpr{X: lhs, Op: token.EQL, Y: rhs}}
 	}
 	if e.Op == syntax.NEQ {
 		return &ast.UnaryExpr{Op: token.NOT, X: &ast.ParenExpr{X: eq}}
@@ -702,6 +763,13 @@ func (fl *fnLower) elvisInto(e *syntax.ElvisExpr, target ast.Expr, targetType ty
 		return
 	}
 	xt := fl.info.TypeOf(e.X)
+	if xt != nil && !types.MayBeNull(xt) && !types.IsNilable(xt) && !isCollection(xt) {
+		// The checker warned that the left side is never null (a string,
+		// a struct): Go cannot compare it with nil, and the right side
+		// never runs.
+		fl.emitSynth(&ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: token.ASSIGN, Rhs: []ast.Expr{fl.expr(e.X)}}, e.S)
+		return
+	}
 	x := fl.stash(e.X, fl.expr(e.X))
 	unbox := xt != nil && types.IsNullable(xt) && !types.IsNilable(xt)
 	val := ast.Expr(cloneIdentExpr(x))
@@ -1236,7 +1304,7 @@ func (fl *fnLower) safeSelect(e *syntax.SelectorExpr, recv ast.Expr, sel *check.
 	spec := &ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(name)}, Type: fl.l.typeExpr(t)}
 	fl.emitSynth(&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{spec}}}, e.S)
 	var val ast.Expr = &ast.SelectorExpr{X: cloneIdentExpr(x), Sel: ast.NewIdent(sel.GoName)}
-	if !types.IsNilable(types.Base(t)) && !types.MayBeNull(sel.Type) {
+	if types.IsNullable(t) && !types.IsNilable(types.Base(t)) && !types.MayBeNull(sel.Type) {
 		val = &ast.CallExpr{Fun: ast.NewIdent("new"), Args: []ast.Expr{val}}
 	}
 	ifs := &ast.IfStmt{Cond: nilCmp(x, token.NEQ), Body: &ast.BlockStmt{List: []ast.Stmt{
@@ -1359,4 +1427,32 @@ func nullHandler(e *syntax.CatchExpr) bool {
 	}
 	_, isNull := syntax.Unparen(es.X).(*syntax.NullLit)
 	return isNull
+}
+
+// foldableConst reports whether a constant in a template may be written
+// into the text: not a named type's (Color.Green, time.Second print through
+// String), and not one naming a package, whose import would go unused.
+func (fl *fnLower) foldableConst(e syntax.Expr, t types.Type) bool {
+	if _, basic := types.Base(t).(*types.Basic); !basic {
+		return false
+	}
+	foldable := true
+	syntax.Walk(e, func(n syntax.Node) {
+		if sel, ok := n.(*syntax.SelectorExpr); ok {
+			if id := identOf(sel.X); id != nil {
+				if _, isPkg := fl.info.Uses[id].(*check.PkgSym); isPkg {
+					foldable = false
+				}
+			}
+		}
+		if fl.info.Entries[asExpr(n)] != nil {
+			foldable = false
+		}
+	})
+	return foldable
+}
+
+func asExpr(n syntax.Node) syntax.Expr {
+	e, _ := n.(syntax.Expr)
+	return e
 }

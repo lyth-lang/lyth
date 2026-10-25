@@ -1,0 +1,32 @@
+// More Go habits: const groups, Go labels, keyword names, returning errors
+// from callbacks, and an inference error hidden behind an undefined name.
+import "io/fs"
+import "path/filepath"
+import "slices"
+
+const ( // ERROR E0008 "Lyth declares one constant per line"
+    A = 1
+    B = 2
+)
+
+func f(in: int): int = 1 // ERROR E0003 "in is a keyword and cannot be a name"
+
+func walk() {
+    filepath.WalkDir(".", { path, d, err ->
+        if d.IsDir() {
+            return filepath.SkipDir // ERROR E0207 "lambda does not return a value"
+        }
+        return null // ERROR E0207 "lambda does not return a value"
+    }) catch {}
+}
+
+func main() {
+    outer: for i in 0..<3 { // ERROR E0008 "labels are written outer@ before the loop"
+        break outer // ERROR E0008 "a label follows break with @"
+    }
+    e: error? = null
+    n := e catch { 0 } // ERROR E0306 "e is an error value"
+    m := ["a": 1]
+    ks := slices.Sorted(maps.Keys(m)) // ERROR E0101 "undefined: maps"
+    println(n, ks)
+}

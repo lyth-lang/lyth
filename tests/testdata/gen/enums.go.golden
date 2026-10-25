@@ -39,6 +39,7 @@ func (s Status) active() bool {
 	case StatusDone:
 		return false
 	default:
+//line enums.lyth:4
 		panic("lyth: no when branch for this Status (enums.lyth:4:30)")
 	}
 }
@@ -84,6 +85,7 @@ func describe(e Event) string {
 //line enums.lyth:28
 		return "failed: " + e.Reason
 	default:
+//line enums.lyth:26
 		panic("lyth: no when branch for this Event (enums.lyth:26:35)")
 	}
 }

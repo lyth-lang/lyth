@@ -1,0 +1,85 @@
+// for over Go iterator functions: iter.Seq, iter.Seq2, and the standard
+// library's iterators (maps.Keys, strings.Lines, slices.All). Imports are
+// grouped as in Go.
+import (
+    "fmt"
+    "iter"
+    "maps"
+    "slices"
+    "strings"
+)
+
+struct Item {
+    Name: string
+    Loc: string?
+}
+
+func countdown(n: int): iter.Seq[int] = { yield ->
+    for i in 0..<n {
+        if !yield(n - i) {
+            return
+        }
+    }
+}
+
+func pairs(): iter.Seq2[string, int] = { yield ->
+    _ = yield("a", 1) && yield("b", 2)
+}
+
+func main() {
+    m := ["b": 2, "a": 1, "c": 3]
+    for k in slices.Sorted(maps.Keys(m)) {
+        fmt.Println(k)
+    }
+    total := 0
+    for v in maps.Values(m) {
+        total += v
+    }
+    fmt.Println(total)
+    for line in strings.Lines("x\ny\n") {
+        fmt.Print("> ", line)
+    }
+    for i, s in slices.All(["p", "q"]) {
+        fmt.Println(i, s)
+    }
+    for v in countdown(5) {
+        if v == 2 {
+            break
+        }
+        fmt.Println(v)
+    }
+    for k, v in pairs() {
+        fmt.Println(k, v)
+    }
+    for k in pairs() {
+        fmt.Println(k)
+    }
+    for _ in countdown(2) {
+        fmt.Println("tick")
+    }
+    // The loop variable keeps Lyth's types: Loc is a string?.
+    for it in slices.Values([Item(Name = "a"), Item(Name = "b", Loc = "x")]) {
+        fmt.Println(it.Name, it.Loc ?: "none")
+    }
+}
+
+// Output:
+// a
+// b
+// c
+// 6
+// > x
+// > y
+// 0 p
+// 1 q
+// 5
+// 4
+// 3
+// a 1
+// b 2
+// a
+// b
+// tick
+// tick
+// a none
+// b x
