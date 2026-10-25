@@ -1,6 +1,6 @@
 # ADR 0016: Type tests are type assertions, with smart casts
 
-**Status:** Accepted; smart casts of locals amended by [0031](0031-go-spelling.md)
+**Status:** Accepted; smart casts of locals amended by [0031](0031-go-spelling.md); on errors, a warning added by [0041](0041-type-tests-on-errors.md)
 
 ## Context
 Go code inspects dynamic types with type assertions (`v, ok := x.(T)`) and

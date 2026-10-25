@@ -1,6 +1,6 @@
 # ADR 0007: `val`/`var` and value immutability
 
-**Status:** Superseded for local variables by [0031](0031-go-spelling.md) (`:=` declares mutable locals); parameters, loop variables, and value receivers stay immutable
+**Status:** Superseded for local variables by [0031](0031-go-spelling.md) (`:=` declares mutable locals); parameters, loop variables, and value receivers stay immutable; parameters may be replaced by `:=` with a value derived from them since [0039](0039-rebinding-parameters.md)
 
 ## Context
 Go has no immutable local variables. Kotlin's `val` freezes only the reference,

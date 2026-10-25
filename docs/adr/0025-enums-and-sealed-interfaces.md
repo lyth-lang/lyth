@@ -1,6 +1,6 @@
 # ADR 0025: Enums and sealed interfaces
 
-**Status:** Accepted
+**Status:** Accepted; enums on the wire and string-backed enums added by [0035](0035-enums-on-the-wire.md)
 
 ## Context
 Closed sets of values and closed sets of types are the feature most often

@@ -1,6 +1,6 @@
 # ADR 0018: Typed `catch` clauses match with `errors.AsType`
 
-**Status:** Accepted (extends 0008)
+**Status:** Accepted (extends 0008); confirmed by [0041](0041-type-tests-on-errors.md)
 
 ## Context
 Backend code handles specific errors all the time: a missing row becomes a

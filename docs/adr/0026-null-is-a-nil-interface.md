@@ -1,6 +1,6 @@
 # ADR 0026: Null converts to a nil interface
 
-**Status:** Accepted (completes 0009; leaves 0017 unchanged)
+**Status:** Accepted (completes 0009; leaves 0017 unchanged); extended to Go parameters by [0040](0040-optionals-into-any.md)
 
 ## Context
 Go converts a nil pointer to a non-nil interface that holds a nil pointer.
