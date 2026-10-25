@@ -408,6 +408,45 @@ func main() {
 	}
 }
 
+// The generated Go imports packages the Lyth source does not (context, net,
+// io/fs for these lambdas' Go signatures). A warm cache loads only the
+// imported packages completely, so validation must complete the others.
+func TestGoTypeCacheDependencyImports(t *testing.T) {
+	root := writeModule(t, "cachedeps", map[string]string{
+		"p/p.lyth": `import "net/http"
+
+func Transport(dials: *int): *http.Transport {
+    base := (http.DefaultTransport as *http.Transport).DialContext
+    return &http.Transport(DialContext = { ctx, network, addr ->
+        *dials = *dials + 1
+        base(ctx, network, addr)
+    })
+}
+`,
+		"w/w.lyth": `import "path/filepath"
+
+func Count(dir: string): int throws {
+    n := 0
+    filepath.WalkDir(dir) { _, _, _ ->
+        n++
+        return
+    }?
+    return n
+}
+`,
+	})
+	if compileModule(t, root, false).TypesCached() {
+		t.Fatal("first build cannot be served from the cache")
+	}
+	second := compileModule(t, root, false)
+	if !second.TypesCached() {
+		t.Fatal("second build should load Go types from the cache")
+	}
+	if ok, err := second.GoBuild("", []string{"./..."}, nil); err != nil || !ok {
+		t.Fatalf("build failed: %v\n%s", err, render(second.Sink.All()))
+	}
+}
+
 // testModule compiles a module with its tests and runs go test on it.
 func testModule(t *testing.T, root string, flags ...string) (int, string) {
 	t.Helper()

@@ -39,6 +39,8 @@ type Loader struct {
 	Fset *token.FileSet
 
 	cache       map[string]*Package
+	view        map[string]*gotypes.Package // packages read from the persistent cache
+	deps        map[string]string           // export data of their dependencies
 	sizes       gotypes.Sizes
 	envKeyCache string
 	goarch      string
