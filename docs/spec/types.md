@@ -185,7 +185,9 @@ This is the idiomatic Go representation for optional JSON fields (`*int` with
   (`*p`). Optional values are never mutated through the pointer, so sharing the
   box is unobservable from Lyth: assigning a field of a smart-cast optional
   (`o.X = 1` for `o: P?`) is E0502, and calling a pointer method on one
-  (`o.Inc()`, `o?.Inc()`) is E0504. Change a copy and store it back.
+  (`o.Inc()`, `o?.Inc()`) is E0504. Change a copy and store it back. For the
+  same reason a smart-cast optional stored as `T?` again (`return pct` in
+  `if pct != null { ... }`) is the original pointer, not a new box.
 - `*T?` (nullable pointer) and `T?` (optional value) are different Lyth types
   with the same Go type. `*T`/`*T?` converts implicitly to `T?`, which is a
   read-only view and safe. The reverse is rejected (E0201): it would allow writes

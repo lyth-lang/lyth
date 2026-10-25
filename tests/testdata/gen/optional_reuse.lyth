@@ -1,0 +1,41 @@
+// A smart-cast optional stored as an optional again is the same pointer, not
+// new(...); `a ?: b` over two optionals keeps the box it picks.
+
+struct Patch {
+    DiscountPct: int?
+    Phone: string?
+}
+
+func Clamp(pct: int?): int? {
+    if pct != null {
+        if pct > 100 {
+            return 100
+        }
+        return pct
+    }
+    return null
+}
+
+func Merge(out: Patch, patch: Patch): Patch {
+    o := out
+    pct := patch.DiscountPct
+    if pct != null {
+        o.DiscountPct = Clamp(pct)
+    }
+    o.Phone = patch.Phone ?: out.Phone
+    return o
+}
+
+func Either(a: int?, b: int?): int? = if a == null { b } else { a }
+
+func Pick(a: string?, b: string?): string? = a ?: b
+
+func Phone(raw: string): string? {
+    p := if raw != "" { raw } else { null }
+    return p
+}
+
+func Size(s: string): int? {
+    n := if s == "" { null } else { len(s) }
+    return n
+}

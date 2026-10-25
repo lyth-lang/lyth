@@ -771,7 +771,8 @@ func (fl *fnLower) elvisInto(e *syntax.ElvisExpr, target ast.Expr, targetType ty
 		return
 	}
 	x := fl.stash(e.X, fl.expr(e.X))
-	unbox := xt != nil && types.IsNullable(xt) && !types.IsNilable(xt)
+	// a ?: b with b optional too is optional: it keeps a's box.
+	unbox := optionalValue(xt) && !optionalValue(fl.info.TypeOf(e))
 	val := ast.Expr(cloneIdentExpr(x))
 	if unbox {
 		val = &ast.StarExpr{X: cloneIdentExpr(x)}

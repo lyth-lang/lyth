@@ -8,3 +8,9 @@ func nothing() = null // ERROR E0208 "cannot infer a type from null"
 func use() {
     println(Visible(1), countdown(3), parse("1"), nothing())
 }
+
+func allNull(c: bool) {
+    n := if c { null } else { null } // ERROR E0208 "cannot infer a type from null"
+    xs := [null, null] // ERROR E0208 "cannot infer the list element type from null"
+    println(n, xs)
+}

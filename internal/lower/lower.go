@@ -1105,7 +1105,7 @@ func needsExplicitType(info *check.Info, e syntax.Expr, t types.Type) bool {
 
 func convertedType(t types.Type, conv check.ConversionKind) types.Type {
 	switch conv {
-	case check.ConvBox:
+	case check.ConvBox, check.ConvReuse:
 		return &types.Nullable{Elem: t}
 	case check.ConvUnbox:
 		return types.Base(t)

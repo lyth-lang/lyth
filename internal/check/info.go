@@ -37,6 +37,7 @@ const (
 	ConvUnbox                   // smart-cast optional value read as T: *x
 	ConvAssert                  // smart cast by a type test: x.(T), see Info.Asserts
 	ConvNilIface                // T? or *T? to a nullable interface: null is a nil interface, see Info.IfaceTargets
+	ConvReuse                   // smart-cast optional value used as T? again: the original box, x
 )
 
 // CallKind classifies call expressions.

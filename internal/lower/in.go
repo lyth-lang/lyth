@@ -37,10 +37,14 @@ func (fl *fnLower) membership(in *check.InInfo, elem ast.Expr, elemSyn syntax.Ex
 	}
 	var y ast.Expr
 	if elem == nil {
-		if in.Optional != nil && fl.info.Implicit[elemSyn] == check.ConvBox {
+		if conv := fl.info.Implicit[elemSyn]; in.Optional != nil && (conv == check.ConvBox || conv == check.ConvReuse) {
 			// Search by content: keep the element unboxed.
-			delete(fl.info.Implicit, elemSyn)
-			defer func() { fl.info.Implicit[elemSyn] = check.ConvBox }()
+			if conv == check.ConvReuse {
+				fl.info.Implicit[elemSyn] = check.ConvUnbox
+			} else {
+				delete(fl.info.Implicit, elemSyn)
+			}
+			defer func() { fl.info.Implicit[elemSyn] = conv }()
 		}
 		xs := fl.exprList([]syntax.Expr{elemSyn, container}, nil)
 		elem, y = xs[0], xs[1]

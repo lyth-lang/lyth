@@ -1429,7 +1429,7 @@ func (fl *fnLower) evalOperandsNow(e syntax.Expr) {
 		return
 	}
 	spill := func(x syntax.Expr, name string, copyValue bool) {
-		if fl.info.Implicit[x] == check.ConvUnbox {
+		if c := fl.info.Implicit[x]; c == check.ConvUnbox || c == check.ConvReuse {
 			return // a smart-cast optional: its box never changes
 		}
 		if t := fl.info.TypeOf(x); fl.stableField(x) && (!copyValue || t == nil || types.IsNilable(t) || isScalar(t)) {

@@ -1232,6 +1232,9 @@ func (c *Checker) elvis(e *syntax.ElvisExpr, want types.Type) *operand {
 // operand y, converting y as needed.
 func (c *Checker) join(t types.Type, y *operand, ye syntax.Expr) (types.Type, bool) {
 	if isNothing(t) {
+		if y.typ == types.Null {
+			return types.Null, true // a later branch gives the T of T?
+		}
 		return c.defaultValueType(y, ""), true
 	}
 	if isNothing(y.typ) {
@@ -1478,6 +1481,16 @@ func typeOr(t, def types.Type) types.Type {
 	return def
 }
 
+// allNull reports whether every operand is the null literal.
+func allNull(ops []*operand) bool {
+	for _, o := range ops {
+		if o.typ != types.Null {
+			return false
+		}
+	}
+	return true
+}
+
 // commonType finds a type all operands are assignable to.
 func (c *Checker) commonType(ops []*operand, what string) types.Type {
 	var t types.Type
@@ -1501,7 +1514,7 @@ func (c *Checker) commonType(ops []*operand, what string) types.Type {
 			}
 		}
 		t = types.DefaultType(untypedOfKind(kind))
-		if ops[0].typ == types.Null {
+		if allNull(ops) {
 			c.errorf(diag.ECannotInfer, ops[0].expr.Span(), "cannot infer the %s type from null", what)
 			return nil
 		}

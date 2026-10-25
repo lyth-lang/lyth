@@ -64,6 +64,9 @@ func (c *Checker) assign(x *operand, target types.Type, context string) bool {
 		c.reportMismatchReason(x, target, context, reason)
 		return false
 	}
+	if conv == ConvBox && c.reuseBox(x.expr) {
+		return true
+	}
 	if conv != ConvNone {
 		c.info.Implicit[x.expr] = conv
 		if conv == ConvNilIface {
@@ -71,6 +74,20 @@ func (c *Checker) assign(x *operand, target types.Type, context string) bool {
 		}
 	}
 	return true
+}
+
+// reuseBox reports whether e is a smart-cast optional value (a T? read as T)
+// and, if so, marks it to be stored as the box it came from. Optional values
+// are immutable, so `return pct` returns pct rather than a copy, new(*pct).
+func (c *Checker) reuseBox(e syntax.Expr) bool {
+	inner := syntax.Unparen(e)
+	switch c.info.Implicit[inner] {
+	case ConvUnbox, ConvReuse:
+		c.info.Implicit[inner] = ConvReuse
+		c.info.Implicit[e] = ConvReuse
+		return true
+	}
+	return false
 }
 
 // assignableQuiet reports assignability without diagnostics.

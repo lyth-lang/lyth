@@ -740,6 +740,13 @@ func (c *Checker) joinBranches(results []blockResult, blocks []*syntax.Block, wa
 		}
 		t = nt
 	}
+	// A branch joined before a later one widened the type (T, then null or
+	// T?) converts to the result too: if c { n } else { null } boxes n.
+	for _, r := range results {
+		if r.op != nil && t != types.Null && !types.Identical(r.op.typ, t) {
+			c.assign(r.op, t, "branch value")
+		}
+	}
 	return &operand{mode: ModeValue, typ: t}
 }
 
