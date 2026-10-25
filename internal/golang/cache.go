@@ -36,15 +36,24 @@ import (
 // Export files are content-addressed by the go command, so a recorded path
 // always names the same data; if one was removed (go clean -cache, cache
 // trimming), the entry is ignored and the packages are loaded normally.
+//
+// A hit reads only the requested packages' export data. The packages they
+// depend on are then partial: they hold just the declarations the requested
+// packages mention, and go/types ignores an import of a partial package.
+// Generated Go imports some of them (a lambda passed as an http.Transport's
+// DialContext is a func(context.Context, ...) (net.Conn, error)), so the
+// entry also records the export data of the rest of the closure, and
+// Complete reads it for the packages actually imported.
 
-const cacheVersion = 1
+const cacheVersion = 2
 
 type cacheEntry struct {
 	Version  int
 	Key      string
 	GOARCH   string
-	Packages []cachedPackage // requested packages, dependencies first
-	Local    []localPackage  // fingerprints of local packages in the closure
+	Packages []cachedPackage   // requested packages, dependencies first
+	Deps     map[string]string // export data of the other packages in the closure
+	Local    []localPackage    // fingerprints of local packages in the closure
 }
 
 type cachedPackage struct {
@@ -144,20 +153,15 @@ func (l *Loader) readCache(paths []string) (map[string]*Package, bool) {
 				return nil, false
 			}
 		}
+		for _, export := range e.Deps {
+			if _, err := os.Stat(export); err != nil {
+				return nil, false
+			}
+		}
 		view := map[string]*gotypes.Package{}
 		out := map[string]*Package{}
 		for _, cp := range e.Packages {
-			f, err := os.Open(cp.Export)
-			if err != nil {
-				return nil, false
-			}
-			r, err := gcexportdata.NewReader(bufio.NewReader(f))
-			if err != nil {
-				f.Close()
-				return nil, false
-			}
-			pkg, err := gcexportdata.Read(r, l.Fset, view, cp.Path)
-			f.Close()
+			pkg, err := l.readExport(view, cp.Path, cp.Export)
 			if err != nil {
 				return nil, false
 			}
@@ -169,9 +173,40 @@ func (l *Loader) readCache(paths []string) (map[string]*Package, bool) {
 			}
 		}
 		l.sizes = gotypes.SizesFor("gc", e.GOARCH)
+		l.view, l.deps = view, e.Deps
 		return out, true
 	}
 	return nil, false
+}
+
+// Complete returns pkg, a package in the dependency closure of the loaded
+// packages, with complete type information. Packages loaded from the
+// persistent cache depend on partial packages (see the comment at the top
+// of this file); Complete reads their export data into the same view, so
+// the declarations they already hold keep their identity.
+func (l *Loader) Complete(pkg *gotypes.Package) (*gotypes.Package, error) {
+	if pkg.Complete() {
+		return pkg, nil
+	}
+	path := pkg.Path()
+	export, ok := l.deps[path]
+	if !ok || l.view[path] != pkg {
+		return nil, fmt.Errorf("package %s has no complete type information", path)
+	}
+	return l.readExport(l.view, path, export)
+}
+
+func (l *Loader) readExport(view map[string]*gotypes.Package, path, export string) (*gotypes.Package, error) {
+	f, err := os.Open(export)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	r, err := gcexportdata.NewReader(bufio.NewReader(f))
+	if err != nil {
+		return nil, err
+	}
+	return gcexportdata.Read(r, l.Fset, view, path)
 }
 
 // writeCache records a successful load. Only loads without errors are
@@ -187,7 +222,7 @@ func (l *Loader) writeCache(paths []string, roots []*packages.Package) {
 			return
 		}
 	}
-	e := cacheEntry{Version: cacheVersion, Key: requestKey(envKey, paths), GOARCH: goarch}
+	e := cacheEntry{Version: cacheVersion, Key: requestKey(envKey, paths), GOARCH: goarch, Deps: map[string]string{}}
 	requested := map[string]bool{}
 	for _, p := range paths {
 		requested[p] = true
@@ -224,6 +259,8 @@ func (l *Loader) writeCache(paths []string, roots []*packages.Package) {
 				return false
 			}
 			e.Packages = append(e.Packages, cachedPackage{Path: p.PkgPath, Name: p.Name, Export: p.ExportFile})
+		} else if p.ExportFile != "" {
+			e.Deps[p.PkgPath] = p.ExportFile
 		}
 		return true
 	}

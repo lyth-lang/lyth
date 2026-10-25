@@ -64,7 +64,7 @@ func (s *Session) validate() {
 					return nil, fmt.Errorf("package %s has no type information", path)
 				}
 				if t := goTypes[path]; t != nil {
-					return t, nil
+					return s.loader.Complete(t)
 				}
 				return nil, fmt.Errorf("package %s not loaded", path)
 			}),
