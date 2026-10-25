@@ -122,9 +122,10 @@ export default {
 				5: { patterns: [{ include: '#type-parameters' }] },
 			},
 		},
-		// struct User, sealed interface Shape, enum Color, typealias Handler, struct Circle : Shape
+		// struct User, sealed interface Shape, enum Color, enum Plan: string, type UserID int64,
+		// type Handler = ..., struct Circle : Shape
 		'type-declaration': {
-			match: String.raw`\b(?:(sealed)\s+)?(struct|interface|enum|typealias)\s+(${ident})(?:(\[[^\]\n]*\]))?(?:\s*(:)\s*((?:${type})(?:\s*,\s*${type})*))?`,
+			match: String.raw`\b(?:(sealed)\s+)?(struct|interface|enum|type|typealias)\s+(${ident})(?:(\[[^\]\n]*\]))?(?:\s*(:)\s*((?:${type})(?:\s*,\s*${type})*))?`,
 			captures: {
 				1: { name: 'storage.modifier.lyth' },
 				2: { patterns: [{ include: '#type-keywords' }] },
@@ -186,7 +187,8 @@ export default {
 		keywords: {
 			patterns: [
 				{
-					match: String.raw`\b(break|catch|continue|defer|else|for|go|if|in|is|as|return|select|throw|when|while)\b`,
+					// in is a name after a dot (tc.in), as in Go code (ADR 0044)
+					match: String.raw`(?<!\.)\b(break|catch|continue|defer|else|for|go|if|in|is|as|return|select|throw|when|while)\b`,
 					name: 'keyword.control.lyth',
 				},
 				{ match: String.raw`!(?:in|is)\b`, name: 'keyword.control.lyth' },
@@ -205,7 +207,7 @@ export default {
 			patterns: [
 				{ match: String.raw`\bstruct\b`, name: 'keyword.struct.lyth' },
 				{ match: String.raw`\binterface\b`, name: 'keyword.interface.lyth' },
-				{ match: String.raw`\b(enum|typealias)\b`, name: 'keyword.type.lyth' },
+				{ match: String.raw`\b(enum|type|typealias)\b`, name: 'keyword.type.lyth' },
 				{ match: String.raw`\bmap\b`, name: 'keyword.map.lyth' },
 				{ match: String.raw`\bchan\b`, name: 'keyword.channel.lyth' },
 			],

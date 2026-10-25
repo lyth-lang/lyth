@@ -222,3 +222,80 @@ import (
     (string
       (string_content))
     (identifier)))
+
+================================================================================
+Import aliases, defined types, aliases, and string-backed enums
+================================================================================
+
+import h "net/http"
+
+type UserID int64
+
+type Handler = (h.ResponseWriter) -> unit
+
+enum Plan: string { Free = "free", Pro = "pro" }
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (import_declaration
+    (identifier)
+    (string
+      (string_content)))
+  (type_definition
+    (type_identifier)
+    (primitive_type))
+  (type_alias
+    (type_identifier)
+    (function_type
+      (qualified_type
+        (identifier)
+        (type_identifier))
+      (primitive_type)))
+  (enum_declaration
+    (type_identifier)
+    (primitive_type)
+    (enum_body
+      (enum_entry
+        (identifier)
+        (string
+          (string_content)))
+      (enum_entry
+        (identifier)
+        (string
+          (string_content))))))
+
+================================================================================
+in as a field, parameter, and member name
+================================================================================
+
+struct Case {
+    in: string
+}
+
+func stage(in: int) {
+    println(tc.in)
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (struct_declaration
+    (type_identifier)
+    (field_list
+      (field_declaration
+        (identifier)
+        (primitive_type))))
+  (function_declaration
+    (identifier)
+    (parameters
+      (parameter
+        (identifier)
+        (primitive_type)))
+    (block
+      (call_expression
+        (identifier)
+        (parenthesized
+          (identifier)
+          (member_access
+            (identifier)))))))

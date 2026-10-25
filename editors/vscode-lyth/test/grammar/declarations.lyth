@@ -28,3 +28,16 @@ func *User.rename(name: string): string throws {
     return name
 //  ^^^^^^ keyword.control.lyth
 }
+
+type UserID int64
+// <---- keyword.type.lyth
+//   ^^^^^^ entity.name.type.lyth
+//          ^^^^^ storage.type.numeric.lyth
+
+enum Plan: string { Free = "free" }
+// <---- keyword.type.lyth
+//   ^^^^ entity.name.type.lyth
+//         ^^^^^^ storage.type.string.lyth
+
+func stage(in: int): int = in
+//         ^^ variable.parameter.lyth
