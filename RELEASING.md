@@ -18,9 +18,28 @@ Where Lyth and its editor extensions are published, and how each is released.
 The Kuana extension (`editors/kuana-lyth`, regenerated with `editors/build-kuana-extension.sh`)
 is not published anywhere yet.
 
+## Release notes
+
+Both release workflows write the notes with `.github/release-notes.sh`: every commit since the
+previous release tag, whether pushed to `main` or merged from a pull request, grouped by its
+Conventional Commits type (`feat` Features, `fix` Fixes, `perf`, `docs`, `test`, `build`/`ci`,
+anything else Other changes), with the scope in bold and a compare link. A commit marked
+breaking (`feat(syntax)!: ...`, or a `BREAKING CHANGE:` line in its body) goes under "Breaking
+changes". So the notes are only as good as the commit subjects: write them for users. The
+extension's notes list only commits that touch `editors/vscode-lyth` or the grammar.
+
+Preview the notes of the next release before tagging it:
+
+```bash
+.github/release-notes.sh v0.3.0
+.github/release-notes.sh vscode-v0.2.0 'vscode-v*' editors/vscode-lyth website/src/lyth-grammar.mjs
+```
+
+To change the notes after the fact, edit the release on GitHub.
+
 ## Lyth
 
-1. Make sure `main` builds and passes `go test ./...`.
+1. Make sure `main` builds and passes `go test ./...`, and preview the release notes.
 2. Tag and push: `git tag -a v0.3.0 -m "Lyth 0.3.0" && git push origin v0.3.0`.
 3. `.github/workflows/release.yml` runs the tests, creates the GitHub release, and commits the
    new formula to the Homebrew tap (repository secret `HOMEBREW_TAP_TOKEN`: a fine-grained
