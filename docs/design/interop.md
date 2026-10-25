@@ -182,14 +182,16 @@ Each row names the test that demonstrates it.
 | Go `(T, error)` with `?`, `catch`, destructuring | ✅ | `run/errors`, `TestThirdPartyModule` |
 | Lyth types implementing Go interfaces (`http.Handler`, `fmt.Stringer`, `error`, `sort.Interface`) | ✅ | `run/interop_http`, `run/interop_interfaces` |
 | Go values through Lyth interfaces, interface embedding | ✅ | `run/interop_interfaces`, `run/advanced` |
+| Go types embedded in Lyth structs (`http.ResponseWriter`, `sync.Mutex`, gRPC's `Unimplemented…Server`), promoted members and method sets (ADR 0043) | ✅ | `run/embedding`, `TestEmbeddingAcrossPackages` |
 | Generic Go functions with inference, incl. core-type inference for lambdas (`slices.SortFunc`) | ✅ | `run/collections`, `run/lambdas` |
 | Explicit type arguments on generic Go functions, called or as values (`errors.AsType[*E](err)`, `pgx.RowToStructByName[T]`) | ✅ | `examples/todoapi` |
 | Lambdas converted to named Go function types (`http.HandlerFunc({ w, r -> ... })`) | ✅ | `examples/todoapi` |
-| Nullable Lyth values passed to Go parameters (`*T` to `...any`, read as NULL by pgx) | ✅ | `pgstore_test.lyth` (ADR 0017) |
+| Nullable Lyth values passed to Go interface parameters (`any`, `...any`): the value, or a nil interface that pgx reads as NULL (ADR 0040) | ✅ | `run/optionals_any`, `pgstore_test.lyth` |
+| Nullable pointers passed to Go pointer parameters (ADR 0017) | ✅ | `run/optionals_any` |
 | Go constants (typed and untyped) and package variables | ✅ | `run/interop_http` (`time.Second`), `TestThirdPartyModule` (`uuid.Nil`) |
 | Callbacks: Lyth lambdas as Go funcs, incl. fallible callbacks | ✅ | `run/lambdas`, `run/advanced` |
 | Named map types and conversions (`fstest.MapFS(...)`, `[]byte(s)`) | ✅ | `run/advanced`, `run/structs`, `run/slicetypes` |
-| `encoding/json` on Lyth structs (auto tags, explicit tags, `json:"-"`) | ✅ | `run/structs` |
+| `encoding/json` on Lyth structs (auto tags, explicit tags, `json:"-"`, `omitzero` on optionals; enums by name) | ✅ | `run/structs`, `run/jsonkeys`, `run/jsonv2`, `run/enumwire` |
 | `errors.Is` / `errors.As` with Lyth error types | ✅ | `run/errors`, `run/interop_interfaces` |
 | Go 1.22 `ServeMux` patterns, `httptest` | ✅ | `run/interop_http` |
 | Third-party modules (`github.com/google/uuid`, `github.com/jackc/pgx/v5`) | ✅ | `TestThirdPartyModule`, `examples/todoapi` |

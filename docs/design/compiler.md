@@ -99,7 +99,8 @@ reported (E0008) with the bracket form as the edit.
 
 Old spellings the parser understands (`fun`, local `val`/`var`, Go receivers
 `func (s *S) M()`, `for (x in xs)`, `for i, x := range xs`, `Map<K, V>`,
-`<T>`) are reported with their replacement, and parsing continues normally
+`<T>`, `typealias`, `type X struct { ... }`, `import "x" as y`, Go's
+`Name Type` fields) are reported with their replacement, and parsing continues normally
 after them: they do not count as damage (diagnostics.md §1).
 
 The AST is a syntax tree only: no types, no resolved symbols. Those live in

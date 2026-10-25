@@ -305,8 +305,10 @@ A value of Lyth type `S` is assignable to Lyth type `D` if one of these holds:
 6. `S` or `D` is a platform type and the types are assignable once nullability
    is ignored on the platform side. In particular, a nullable `T?` may be passed
    where a platform `U!` is expected (a Go parameter) when `T` is assignable to
-   `U`; it goes in its Go representation, `*T` for an optional value type
-   ([ADR 0017](../adr/0017-nullable-values-into-go.md)).
+   `U`. When `U` is an interface it converts as for `U?`: the value, or a nil
+   interface when null ([ADR 0040](../adr/0040-optionals-into-any.md));
+   otherwise it goes in its Go representation, as a nullable pointer passed
+   to a pointer parameter ([ADR 0017](../adr/0017-nullable-values-into-go.md)).
 7. `S` is `*T` or `*T?` and `D` is `T?` for a value type `T` (read-only view).
 8. Nullability is compatible (non-null → anything, nullable → nullable only) and
    `lower(S)` is assignable to `lower(D)` under Go's rules, for example

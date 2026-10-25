@@ -293,8 +293,10 @@ casts apply to parameters and to local variables the function never
 reassigns; for a field or a reassigned variable, copy the value into a new
 local first. `?.` reads through a possible null, `?:` supplies a default or
 exits early (`?: return`), and `!!` asserts. In Go, `User?` is `*User` and
-`string?` is `*string`, which `encoding/json` reads as `null` and omits with
-`omitempty`. Values from Go APIs have unknown nullability; see
+`string?` is `*string`, and the automatic `json` tag of an optional field
+adds `omitzero`, so a null value is left out of the JSON. Passed to a Go `any`
+parameter (`fmt`, `slog`), an optional goes in as its value, or as nil when
+null. Values from Go APIs have unknown nullability; see
 [Go interop](go-interop.md#nil-and-platform-types).
 
 ## Errors

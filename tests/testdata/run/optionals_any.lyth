@@ -6,6 +6,7 @@ import "database/sql"
 import "encoding/json"
 import "fmt"
 import "log/slog"
+import "net/url"
 import "os"
 
 struct User {
@@ -38,6 +39,11 @@ func main() throws {
     fmt.Printf("%T %T %T %T %T\n", u.Email, none.Email, none.Next, linked.Next, email(none))
     arg := sql.NamedArg(Name = "e", Value = none.Email)
     fmt.Println(arg.Value == null, sql.NamedArg(Name = "e", Value = u.Age).Value)
+
+    // A nullable pointer passed to a Go pointer parameter goes in as itself.
+    base := url.Parse("https://example.com/a/b")?
+    ref: *url.URL? = url.Parse("../c") catch { null }
+    fmt.Println(base.ResolveReference(ref).String())
 }
 
 // Output:
@@ -48,3 +54,4 @@ func main() throws {
 // filled
 // string <nil> <nil> *main.User <nil>
 // true 36
+// https://example.com/c
