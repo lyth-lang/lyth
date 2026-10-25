@@ -33,6 +33,7 @@ go install ./cmd/lyth
 | `lyth check [packages]` | Parses and type-checks, test files included, without running the Go compiler on the result. The fastest feedback loop. |
 | `lyth test [packages] [go test flags]` | Compiles packages with their `_test.lyth` files and runs `go test` ([testing](testing.md)). |
 | `lyth vet [packages]` | Runs `go vet` on the generated code and maps findings to `.lyth` positions. |
+| `lyth cover -func=c.out` | Prints the coverage of each function in a profile written by `lyth test -coverprofile` ([testing](testing.md#coverage)). Other modes, such as `-html=c.out`, run `go tool cover`. |
 | `lyth gen [-stdout \| -in-tree] [packages]` | Writes the generated Go: to stdout, or next to the sources as `*.lyth.go` files. |
 | `lyth fix [packages]` | Rewrites older Lyth syntax, and Go and Kotlin spellings of Lyth constructs, in the packages' files, test files included, then reports the errors left ([below](#lyth-fix)). |
 | `lyth mod tidy` | `go mod tidy` that also sees imports in `.lyth` files ([interop](go-interop.md#modules-and-third-party-packages)). |
@@ -94,7 +95,10 @@ vim.lsp.enable("lyth")
 `lyth build` never writes into your source tree. It generates Go into `.lyth/gen`
 at the module root and builds with `go build -overlay=.lyth/overlay.json`, so
 the `go` command sees each `x.lyth` as a Go file `x.lyth.go` in the same
-directory. The `.lyth/` directory ignores itself in git. If you want the
+directory. The `.lyth/` directory ignores itself in git. The one exception is
+`lyth test` with coverage flags: Go's cover tool ignores the overlay, so the
+generated files sit beside their sources until `go test` exits
+([coverage](testing.md#coverage)). If you want the
 generated code committed, for example so that users of a library need no Lyth
 toolchain, use `lyth gen -in-tree`.
 
@@ -181,7 +185,11 @@ main.main()
 
 The same goes for `go vet` findings, race reports, `pprof` profiles, test
 failures, and breakpoints in delve, which resolves Lyth lines through the line
-tables the directives produce. Local variables keep their Lyth names.
+tables the directives produce. Local variables keep their Lyth names. Builds put
+a directive wherever the Lyth line changes, so every statement has its exact
+line; `lyth gen` writes them only before lines that can fail at run time, which
+is easier to read. Coverage profiles get Lyth positions another way: `lyth test`
+rewrites them through the source map ([coverage](testing.md#coverage)).
 
 ## Build tags, platforms, and Go flags
 

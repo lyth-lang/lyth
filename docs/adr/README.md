@@ -9,8 +9,8 @@ Accepted ADRs are immutable; a superseding ADR links back.
 | [0002](0002-implementation-language-and-deps.md) | Compiler in Go; dependencies | Accepted |
 | [0003](0003-go-type-information.md) | Go type information via `go/packages` | Accepted |
 | [0004](0004-two-level-type-checking.md) | Lyth checker plus `go/types` validation | Accepted |
-| [0005](0005-source-maps-and-line-directives.md) | Exact source maps plus column-less `//line` | Accepted |
-| [0006](0006-overlay-builds.md) | Overlay builds; in-tree generation on request | Accepted |
+| [0005](0005-source-maps-and-line-directives.md) | Exact source maps plus column-less `//line` | Accepted (directives in builds and coverage amended by 0034) |
+| [0006](0006-overlay-builds.md) | Overlay builds; in-tree generation on request | Accepted (coverage runs amended by 0034) |
 | [0007](0007-val-var-and-immutability.md) | `val`/`var` and value immutability | Superseded for locals by 0031 |
 | [0008](0008-error-handling.md) | Error handling: `throws`, `?`, `catch`, `throw` | Accepted |
 | [0009](0009-nullability.md) | Nullability with platform types and boxed optionals | Accepted (smart casts amended by 0031) |
@@ -38,3 +38,4 @@ Accepted ADRs are immutable; a superseding ADR links back.
 | [0031](0031-go-spelling.md) | Go's spelling for what Go already has: `func`, `:=`, Go types, `[T]`, headers, `self` | Accepted (supersedes 0007 for locals and parts of 0011; amends 0009, 0012, 0016, 0023, 0024, 0028, 0029) |
 | [0032](0032-typed-literals.md) | Go's typed literals for slices, arrays, and maps | Accepted (extends 0031) |
 | [0033](0033-agents-learn-from-the-compiler.md) | Coding agents learn Lyth from the installed compiler: `lyth guide`, `lyth fix` | Accepted |
+| [0034](0034-coverage-and-dense-line-directives.md) | Coverage in Lyth positions; `//line` on every line of build output | Accepted (amends 0005, 0006) |

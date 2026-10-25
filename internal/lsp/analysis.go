@@ -67,9 +67,11 @@ type occurrence struct {
 	id         *syntax.Ident
 }
 
-// compile analyzes u with the given editor contents and writes nothing.
+// compile analyzes u with the given editor contents and writes nothing. The
+// generated Go is for reading (hover, lyth.showGo), so its //line directives
+// stay sparse, as in lyth gen.
 func compile(u unit, overlay map[string][]byte) *analysis {
-	cfg := &build.Config{WorkDir: u.workDir, Tests: true, NoWrite: true, Overlay: overlay, Stdout: io.Discard, Stderr: io.Discard}
+	cfg := &build.Config{WorkDir: u.workDir, Tests: true, NoWrite: true, SparseLineDirectives: true, Overlay: overlay, Stdout: io.Discard, Stderr: io.Discard}
 	sess, err := build.Compile(cfg, u.target)
 	a := &analysis{sess: sess, err: err, files: map[string]*fileData{}, occ: map[string][]*occurrence{}, defs: map[any][]*occurrence{}}
 	if sess == nil {

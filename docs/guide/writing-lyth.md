@@ -23,7 +23,8 @@ you remember about Lyth, they are right.
   shows many errors after a Lyth upgrade, run `lyth fix` first, then fix the rest by hand.
 - `lyth run` runs a program (`lyth run file.lyth`, or a package directory; program arguments go
   after `--`), `lyth test` runs the tests (`go test` flags work), `lyth vet` runs `go vet` on the
-  generated code.
+  generated code. A profile from `lyth test -coverprofile=c.out` names `.lyth` files: read it
+  with `lyth cover -func=c.out` (`go tool cover -func` cannot parse Lyth).
 - `lyth gen -stdout file.lyth` prints the Go a file becomes. Use it when you are unsure what a
   construct does.
 - Keep the work in `.lyth` files. Don't edit the generated Go (in `.lyth/gen`), and don't write

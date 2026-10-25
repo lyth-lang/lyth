@@ -124,6 +124,7 @@ has the exact rules.
 | `lyth check` | type-check only, no build |
 | `lyth fix` | rewrite older Lyth syntax and Go and Kotlin spellings |
 | `lyth gen -stdout` | print the generated Go |
+| `lyth cover -func=c.out` | `go tool cover -func` for a profile of Lyth code |
 | `lyth mod tidy` | `go mod tidy` that also sees imports in `.lyth` files |
 
 See [tooling](tooling.md) for flags and the build layout.
