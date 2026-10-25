@@ -1,0 +1,16 @@
+package main
+
+import "fmt"
+import "net/http"
+import "net/url"
+import "sort"
+
+func accept(h: http.Header): string = h.Get("Accept")
+
+func main() {
+    h: http.Header = ["Accept": ["text/plain"]]
+    q := url.Values(["q": ["go"]])
+    empty: url.Values = [:]
+    names := sort.StringSlice(["b", "a"])
+    fmt.Println(h, q, empty, names, accept(["Accept": ["text/html"]]))
+}

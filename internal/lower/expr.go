@@ -1089,7 +1089,7 @@ func (fl *fnLower) listLit(e *syntax.ListLit) ast.Expr {
 	t := fl.info.TypeOf(e)
 	elts := fl.exprList(e.Elems, nil)
 	var elem types.Type
-	switch b := types.Base(t).(type) {
+	switch b := collectionShape(t).(type) {
 	case *types.Slice:
 		elem = b.Elem
 	case *types.Array:
@@ -1099,6 +1099,24 @@ func (fl *fnLower) listLit(e *syntax.ListLit) ast.Expr {
 		elts[i] = elideType(fl.adaptConst(x, elts[i], elem), fl.info.TypeOf(x), elem)
 	}
 	return &ast.CompositeLit{Type: fl.l.typeExpr(t), Elts: elts}
+}
+
+// collectionShape returns the slice, array, or map type of a literal of
+// type t, looking through a named type such as gin.H.
+func collectionShape(t types.Type) types.Type {
+	if n, ok := types.Base(t).(*types.Named); ok && n.Go != nil {
+		return types.Base(types.Lift(n.Go.Underlying()))
+	}
+	return types.Base(t)
+}
+
+// isLit reports whether e is a Lyth collection literal ([a, b], [k: v]).
+func isLit(e syntax.Expr) bool {
+	switch syntax.Unparen(e).(type) {
+	case *syntax.ListLit, *syntax.MapLit:
+		return true
+	}
+	return false
 }
 
 // elideType drops the type of a composite literal element whose type is the
@@ -1120,7 +1138,7 @@ func (fl *fnLower) mapLit(e *syntax.MapLit) ast.Expr {
 	xs := fl.exprList(ops, nil)
 	cl := &ast.CompositeLit{Type: fl.l.typeExpr(t)}
 	var kt, vt types.Type
-	if m, ok := types.Base(t).(*types.Map); ok {
+	if m, ok := collectionShape(t).(*types.Map); ok {
 		kt, vt = m.Key, m.Elem
 	}
 	for i := 0; i < len(xs); i += 2 {

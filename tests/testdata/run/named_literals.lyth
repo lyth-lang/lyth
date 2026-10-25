@@ -1,0 +1,50 @@
+// Literals take an expected Go named collection type (gin.H, http.Header)
+// from declarations, arguments, results, and conversions.
+import "fmt"
+import "net/http"
+import "net/url"
+import "os"
+import "sort"
+import "strings"
+import "text/template"
+
+func accept(h: http.Header): string = h.Get("Accept")
+
+func defaults(): url.Values = ["page": ["1"], "sort": ["name"]]
+
+func call(f: () -> unit) { f() }
+
+func main() throws {
+    // Declaration, including an empty literal.
+    h: http.Header = ["Accept": ["text/plain"]]
+    h.Add("Accept", "text/html")
+    fmt.Println(h.Values("Accept"))
+    q: url.Values = [:]
+    q.Set("q", "go")
+    fmt.Println(q.Encode())
+
+    // Argument and result.
+    fmt.Println(accept(["Accept": ["application/json"]]))
+    fmt.Println(defaults().Encode())
+
+    // Conversion: element types come from the target, so values of
+    // different types share an any or func map.
+    funcs := template.FuncMap(["up": strings.ToUpper, "n": { 42 }])
+    t := template.New("t").Funcs(funcs).Parse("{{up \"hi\"}} {{n}}\n")?
+    t.Execute(os.Stdout, null)?
+    names := sort.StringSlice(["carol", "alice", "bob"])
+    names.Sort()
+    fmt.Println(names)
+
+    // A trailing lambda without a space stays a lambda.
+    call{ a := 1; b: int = a + 1; fmt.Println(a, b) }
+}
+
+// Output:
+// [text/plain text/html]
+// q=go
+// application/json
+// page=1&sort=name
+// HI 42
+// [alice bob carol]
+// 1 2

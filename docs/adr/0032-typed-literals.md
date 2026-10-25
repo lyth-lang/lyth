@@ -21,8 +21,15 @@ default arguments (ADR 0019).
   Go; `[...]T` takes the length from the elements.
 - Only these type forms take braces. They cannot be called with a trailing
   lambda or be a struct, so `[]int{` is never ambiguous; a named type
-  (`http.Header`) is converted from a Lyth literal instead:
-  `http.Header(["Accept": ["text/plain"]])`.
+  (`http.Header`, `gin.H`) is converted from a Lyth literal instead:
+  `http.Header(["Accept": ["text/plain"]])`. The literal takes the named
+  type, so its elements are typed by the type's elements
+  (`gin.H(["error": msg, "code": 7])` is a `map[string]any`), and it lowers
+  to Go's literal of that type, `gin.H{"error": msg, "code": 7}`. The same
+  holds wherever the named type is expected: `h: http.Header = [...]`, an
+  argument, a result. Go's `gin.H{"k": v}` is E0008 with the conversion as its
+  edit; a parser cannot tell a named map from a struct, and `T {` is a
+  trailing lambda, so the braces stay reserved for the type forms above.
 - Elements are ordinary expressions, typed by the element type: an inner
   collection is written `[1, 2]` or with its own type, and a struct element
   is a construction call. Go's elided inner literals (`{1, 2}`, `{X: 1}`) are

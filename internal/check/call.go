@@ -508,11 +508,22 @@ func (c *Checker) typeCall(e *syntax.CallExpr, t types.Type, args []*syntax.Arg,
 	}
 	c.info.Calls[e] = &CallInfo{Kind: CallConvert, Target: t, Args: []syntax.Expr{args[0].Value}}
 	var want0 types.Type
-	if _, ok := syntax.Unparen(args[0].Value).(*syntax.LambdaExpr); ok {
+	switch a := syntax.Unparen(args[0].Value).(type) {
+	case *syntax.LambdaExpr:
 		// A lambda converted to a named function type, as in
 		// http.HandlerFunc({ w, r -> ... }), takes its parameter types from
 		// the type's signature.
 		want0 = underlyingSignature(t)
+	case *syntax.ListLit:
+		// gin.H(["error": msg]): a literal converted to a collection type is
+		// a literal of that type.
+		if a.Type == nil {
+			want0 = t
+		}
+	case *syntax.MapLit:
+		if a.Type == nil {
+			want0 = t
+		}
 	}
 	x := c.value(args[0].Value, want0)
 	if x.mode == ModeInvalid {

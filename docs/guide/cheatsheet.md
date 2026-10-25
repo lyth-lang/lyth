@@ -55,6 +55,7 @@ has the exact rules.
 | `&User(Name = "a")` | `&User{Name: "a"}` |
 | `[1, 2, 3]`, `["a": 1]`, `[:]` | `[]int{1, 2, 3}`, `map[string]int{"a": 1}`, `map[K]V{}` |
 | `[]int64{1, 2}`, `map[string]any{"ok": true}`, `[3]int{1, 2}` (typed literals) | the same |
+| `gin.H(["ok": true])`, `h: http.Header = ["Accept": ["text/plain"]]` | `gin.H{"ok": true}`, `h := http.Header{"Accept": {"text/plain"}}` |
 | `[][]int{[1, 2]}`, `[]Point{Point(1, 2)}` | `[][]int{{1, 2}}`, `[]Point{{X: 1, Y: 2}}` |
 | `if c { a } else { b }` (as a value) | an `if` statement assigning (or returning) the value |
 | `when x { 1, 2 -> a; else -> b }` | `switch x { case 1, 2: ...; default: ... }` |

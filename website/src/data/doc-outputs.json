@@ -16,6 +16,11 @@
   },
   {
     "file": "docs/guide/go-interop.md",
+    "source": "import \"fmt\"\nimport \"net/http\"\nimport \"net/url\"\nimport \"sort\"\n\nfunc accept(h: http.Header): string = h.Get(\"Accept\")\n\nfunc main() {\n    h: http.Header = [\"Accept\": [\"text/plain\"]]\n    h.Add(\"Accept\", \"text/html\")\n    fmt.Println(h.Values(\"Accept\"), accept([\"Accept\": [\"application/json\"]]))\n\n    q := url.Values([\"q\": [\"lyth\"], \"page\": [\"2\"]])\n    fmt.Println(q.Encode())\n\n    names := sort.StringSlice([\"carol\", \"alice\", \"bob\"])\n    names.Sort()\n    fmt.Println(names)\n}\n",
+    "output": "[text/plain text/html] application/json\npage=2\u0026q=lyth\n[alice bob carol]\n"
+  },
+  {
+    "file": "docs/guide/go-interop.md",
     "source": "import \"fmt\"\nimport \"sort\"\n\nstruct Temperature {\n    Celsius: float64\n}\n\nfunc Temperature.String(): string = \"${Celsius}°C\"\n\nstruct NotFound {\n    Key: string\n}\n\nfunc *NotFound.Error(): string = \"not found: ${Key}\"\n\nstruct byLength : sort.Interface {\n    Words: []string\n}\n\nfunc byLength.Len(): int = len(Words)\nfunc byLength.Less(i: int, j: int): bool = len(Words[i]) \u003c len(Words[j])\nfunc byLength.Swap(i: int, j: int) {\n    Words[i], Words[j] = Words[j], Words[i]\n}\n\nfunc lookup(key: string): int throws {\n    throw \u0026NotFound(Key = key)\n}\n\nfunc main() {\n    fmt.Println(Temperature(Celsius = 21.5))\n    words := [\"banana\", \"fig\", \"kiwi\"]\n    sort.Sort(byLength(Words = words))\n    println(words)\n    lookup(\"answer\") catch (e: *NotFound) {\n        println(\"missing\", e.Key)\n    } catch {\n        println(\"lookup failed\")\n    }\n}\n",
     "output": "21.5°C\n[fig kiwi banana]\nmissing answer\n"
   },

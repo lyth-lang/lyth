@@ -631,9 +631,10 @@ func typeParamText(tps []*TypeParam) string {
 	return strings.Join(parts, ", ")
 }
 
-// goCompositeLit reports Go's struct literal Point{X: 1} with Lyth's
-// construction call, and returns a BadExpr covering it; it returns nil when
-// the braces are not one (a trailing lambda).
+// goCompositeLit reports Go's literal of a named type with Lyth's spelling,
+// and returns a BadExpr covering it: a struct literal Point{X: 1} with the
+// construction call, a map literal gin.H{"k": v} with a conversion of a Lyth
+// literal. It returns nil when the braces are neither (a trailing lambda).
 func (p *parser) goCompositeLit(x Expr) Expr {
 	name := x
 	switch g := x.(type) {
@@ -645,18 +646,19 @@ func (p *parser) goCompositeLit(x Expr) Expr {
 	if !isTypeNameExpr(name) || p.tok().Span.Start != x.Span().End {
 		return nil // f { ... } is a trailing lambda; Point{ needs no space
 	}
-	if p.peek(1).Kind != IDENT || p.peek(2).Kind != COLON {
-		return nil
-	}
+	isStruct := p.peek(1).Kind == IDENT && p.peek(2).Kind == COLON
 	// Find the closing brace; an arrow at the top level makes it a lambda.
 	open := p.pos
 	depth, end := 0, -1
 	var keys []Token
+	// A map's first key is one expression; a statement break before the
+	// first colon makes the braces a lambda body (run{ a := 1; b: int = a }).
+	isMap, broken := false, false
 	for i := open; i < len(p.toks) && end < 0; i++ {
 		switch t := p.toks[i]; t.Kind {
-		case LBRACE, LPAREN, LBRACK:
+		case LBRACE, LPAREN, LBRACK, TEMPLATE_EXPR_START:
 			depth++
-		case RBRACE, RPAREN, RBRACK:
+		case RBRACE, RPAREN, RBRACK, TEMPLATE_EXPR_END:
 			depth--
 			if depth == 0 {
 				end = i
@@ -665,19 +667,35 @@ func (p *parser) goCompositeLit(x Expr) Expr {
 			if depth == 1 {
 				return nil
 			}
+		case NEWLINE, SEMI:
+			if depth == 1 && !isMap && i > open+1 && p.toks[i-1].Kind != NEWLINE {
+				broken = true
+			}
 		case COLON:
-			if depth == 1 && p.toks[i-1].Kind == IDENT {
-				keys = append(keys, t)
+			if depth == 1 {
+				isMap = isMap || !broken
+				if p.toks[i-1].Kind == IDENT {
+					keys = append(keys, t)
+				}
 			}
 		case EOF:
 			return nil
 		}
 	}
-	if end < 0 {
+	if end < 0 || !isStruct && !isMap {
 		return nil
 	}
 	span := x.Span().Join(p.toks[end].Span)
 	body := p.toks[open].Span.Join(p.toks[end].Span)
+	if !isStruct {
+		// gin.H{"error": msg} -> gin.H(["error": msg])
+		inner := body.Text()
+		repl := x.Span().Text() + "([" + strings.TrimSpace(inner[1:len(inner)-1]) + "])"
+		p.errorf(diag.EUnsupportedSyntax, span, "Lyth converts a literal to a named map type").
+			WithEdit(span, repl, "write %s", repl)
+		p.pos = end + 1
+		return &BadExpr{S: span}
+	}
 	// Point{X: 1, Y: 2} -> Point(X = 1, Y = 2)
 	args := body.Text()
 	args = args[1 : len(args)-1]
