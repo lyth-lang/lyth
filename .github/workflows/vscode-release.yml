@@ -27,7 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # the history and tags the release notes are made from
+          fetch-depth: 0 # git-cliff needs the history and tags since the previous release
 
       - uses: actions/setup-go@v5
         with:
@@ -62,14 +62,27 @@ jobs:
           name: lyth-vscode-${{ env.VERSION }}
           path: editors/vscode-lyth/lyth-${{ env.VERSION }}.vsix
 
+      # The commits since the previous extension release that touch the extension or its
+      # grammar, written by git-cliff with Lyth's cliff.toml and the extension's tags.
+      - id: notes
+        name: Write the release notes
+        if: github.event_name == 'push'
+        uses: orhun/git-cliff-action@v4
+        with:
+          version: v2.14.2
+          args: >-
+            --latest --strip header --tag-pattern '^vscode-v'
+            --include-path 'editors/vscode-lyth/**' --include-path 'website/src/lyth-grammar.mjs'
+        # the action pastes args into a bash command line, so the quotes keep bash from
+        # expanding the globs into file names
+        env:
+          OUTPUT: release-notes.md
+
       - name: Create the GitHub release
         if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          # the commits since the previous extension release that touch the extension or its grammar
-          "$GITHUB_WORKSPACE/.github/release-notes.sh" "$GITHUB_REF_NAME" 'vscode-v*' editors/vscode-lyth website/src/lyth-grammar.mjs > "$RUNNER_TEMP/notes.md"
-          gh release create "$GITHUB_REF_NAME" "lyth-$VERSION.vsix" --title "Lyth for VS Code $VERSION" --notes-file "$RUNNER_TEMP/notes.md"
+        run: gh release create "$GITHUB_REF_NAME" "lyth-$VERSION.vsix" --title "Lyth for VS Code $VERSION" --notes-file "${{ steps.notes.outputs.changelog }}"
 
       - name: Publish to Open VSX
         if: github.event_name == 'push'

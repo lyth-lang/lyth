@@ -1,0 +1,94 @@
+# Release notes, written by git-cliff (https://git-cliff.org) in the release workflows:
+# `git cliff --latest --strip header` gives the notes of the newest tag (RELEASING.md has the
+# commands, also for previewing a release before tagging it).
+#
+# Every commit since the previous release tag, pushed to main or merged from a pull request,
+# grouped by its Conventional Commits type, with its scope in bold. A pull request is one line
+# (its first commit's subject, its author, its number), however it was merged. A breaking
+# commit (feat(syntax)!: ..., or a BREAKING CHANGE: footer) is listed under "Breaking changes"
+# instead of its group. GitHub logins and pull request data come from the API (GITHUB_TOKEN), so
+# people get @mentioned and listed under the release, and first-time contributors get their own
+# section. Merge commits and the "start 0.x development" version bumps are left out.
+
+[remote.github]
+owner = "lyth-lang"
+repo = "lyth"
+
+[changelog]
+header = ""
+body = """
+{#- A commit's GitHub login and pull request; without the API (--offline), neither. -#}
+{%- macro entry(commit) -%}
+{%- set username = "" -%}{%- set pr = "" -%}
+{%- if commit.remote is defined -%}
+  {%- if commit.remote.username %}{% set username = commit.remote.username %}{% endif -%}
+  {%- if commit.remote.pr_number %}{% set pr = commit.remote.pr_number %}{% endif -%}
+{%- endif -%}
+* {% if commit.scope %}**{{ commit.scope }}:** {% endif %}{{ commit.message | split(pat="\n") | first | trim }}\
+  {%- if username %} by @{{ username }}{% endif -%}
+  {%- if pr %} in #{{ pr }}{% else %} ({{ commit.id | truncate(length=7, end="") }}){% endif %}
+{% endmacro entry -%}
+
+{%- set_global seen = [] -%}
+{%- set breaking = commits | filter(attribute="breaking", value=true) -%}
+{%- if breaking %}
+## Breaking changes
+
+{% for commit in breaking -%}
+{{ self::entry(commit=commit) }}
+{%- endfor -%}
+{%- endif -%}
+
+{#- a commit without a type has no breaking field, so skip breaking ones rather than filter -#}
+{%- for group, group_commits in commits | group_by(attribute="group") -%}
+{%- set_global listed = 0 -%}
+{%- for commit in group_commits %}{% if not commit.breaking %}{% set_global listed = listed + 1 %}{% endif %}{% endfor -%}
+{%- if listed == 0 %}{% continue %}{% endif %}
+## {{ group | striptags | trim }}
+
+{% for commit in group_commits -%}
+  {%- if commit.breaking %}{% continue %}{% endif -%}
+  {%- set pr = "" -%}
+  {%- if commit.remote is defined and commit.remote.pr_number %}{% set pr = commit.remote.pr_number %}{% endif -%}
+  {%- if pr and pr in seen %}{% continue %}{% endif -%}
+  {%- if pr %}{% set_global seen = seen | concat(with=pr) %}{% endif -%}
+{{ self::entry(commit=commit) }}
+{%- endfor -%}
+{%- endfor -%}
+
+{%- set newcomers = [] -%}
+{%- if github is defined and github.contributors %}{% set newcomers = github.contributors | filter(attribute="is_first_time", value=true) %}{% endif -%}
+{%- if newcomers %}
+## New contributors
+
+{% for person in newcomers -%}
+* @{{ person.username }} made their first contribution\
+  {%- if person.pr_number %} in #{{ person.pr_number }}{% endif %}
+{% endfor -%}
+{%- endif %}
+{% if previous.version and version -%}
+**Full changelog:** https://github.com/lyth-lang/lyth/compare/{{ previous.version }}...{{ version }}
+{% endif -%}
+"""
+trim = true
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+split_commits = false
+protect_breaking_commits = true
+filter_commits = false
+topo_order = false
+# Lyth's release tags; the VS Code extension's workflow passes its own (vscode-v...)
+tag_pattern = '^v[0-9]+\.[0-9]+\.[0-9]+$'
+commit_parsers = [
+  { message = "^Merge (pull request|branch|remote-tracking branch)", skip = true },
+  { message = '^chore(\(.*\))?: start .* development', skip = true },
+  { message = "^feat", group = "<!-- 1 -->Features" },
+  { message = "^fix", group = "<!-- 2 -->Fixes" },
+  { message = "^perf", group = "<!-- 3 -->Performance" },
+  { message = "^docs", group = "<!-- 4 -->Documentation" },
+  { message = "^test", group = "<!-- 5 -->Tests" },
+  { message = "^(build|ci)", group = "<!-- 6 -->Build and releases" },
+  { message = ".*", group = "<!-- 7 -->Other changes" },
+]

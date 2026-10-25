@@ -20,19 +20,24 @@ is not published anywhere yet.
 
 ## Release notes
 
-Both release workflows write the notes with `.github/release-notes.sh`: every commit since the
-previous release tag, whether pushed to `main` or merged from a pull request, grouped by its
-Conventional Commits type (`feat` Features, `fix` Fixes, `perf`, `docs`, `test`, `build`/`ci`,
-anything else Other changes), with the scope in bold and a compare link. A commit marked
-breaking (`feat(syntax)!: ...`, or a `BREAKING CHANGE:` line in its body) goes under "Breaking
-changes". So the notes are only as good as the commit subjects: write them for users. The
-extension's notes list only commits that touch `editors/vscode-lyth` or the grammar.
+Both release workflows write the notes with [git-cliff](https://git-cliff.org) (`cliff.toml`,
+the same tool as Kuana's releases): every commit since the previous release tag, whether pushed
+to `main` or merged from a pull request, grouped by its Conventional Commits type (`feat`
+Features, `fix` Fixes, `perf`, `docs`, `test`, `build`/`ci`, anything else Other changes),
+with the scope in bold, the author's GitHub login (`by @name`), and a compare link. A pull
+request is one line with its number, and first-time contributors get a "New contributors"
+section. A breaking commit (`feat(syntax)!: ...`, or a `BREAKING CHANGE:` footer) goes under
+"Breaking changes". So the notes are only as good as the commit subjects: write them for
+users. The extension's notes list only commits that touch `editors/vscode-lyth` or the grammar,
+since the previous `vscode-v*` tag.
 
-Preview the notes of the next release before tagging it:
+Preview the notes of the next release before tagging it (`brew install git-cliff`; without a
+token, add `--offline`, which leaves out the logins and pull request numbers):
 
 ```bash
-.github/release-notes.sh v0.3.0
-.github/release-notes.sh vscode-v0.2.0 'vscode-v*' editors/vscode-lyth website/src/lyth-grammar.mjs
+GITHUB_TOKEN=... git cliff --unreleased --tag v0.3.0 --strip header
+git cliff --unreleased --tag vscode-v0.2.0 --strip header --tag-pattern '^vscode-v' \
+  --include-path 'editors/vscode-lyth/**' --include-path 'website/src/lyth-grammar.mjs' --offline
 ```
 
 To change the notes after the fact, edit the release on GitHub.

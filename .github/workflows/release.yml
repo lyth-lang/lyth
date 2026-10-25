@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # the history and tags the release notes are made from
+          fetch-depth: 0 # git-cliff needs the history and tags since the previous release
 
       - uses: actions/setup-go@v5
         with:
@@ -30,13 +30,21 @@ jobs:
           go vet ./...
           go test ./...
 
+      # Every commit since the previous release, not only merged pull requests, grouped
+      # by type, with contributors @mentioned (see cliff.toml).
+      - id: notes
+        name: Write the release notes
+        uses: orhun/git-cliff-action@v4
+        with:
+          version: v2.14.2
+          args: --latest --strip header
+        env:
+          OUTPUT: release-notes.md
+
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          # every commit since the previous release, not only merged pull requests
-          .github/release-notes.sh "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
-          gh release create "$GITHUB_REF_NAME" --verify-tag --title "Lyth ${GITHUB_REF_NAME#v}" --notes-file "$RUNNER_TEMP/notes.md"
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --title "Lyth ${GITHUB_REF_NAME#v}" --notes-file "${{ steps.notes.outputs.changelog }}"
 
       - name: Update the Homebrew formula
         env:
