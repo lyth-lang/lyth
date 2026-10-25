@@ -1,9 +1,13 @@
 // Optional fields round-trip through encoding/json and encoding/json/v2
 // alike (ADR 0036): a null optional is left out, a set one keeps its value
 // even when it is the zero value, and a missing key reads back as null.
+// Enums encode as the same names in both (ADR 0035).
+// Requires: go1.27
 import "encoding/json"
 import jsonv2 "encoding/json/v2"
 import "fmt"
+
+enum Status { Active, PendingReview }
 
 struct Profile {
     Name: string
@@ -29,6 +33,9 @@ func main() throws {
         jsonv2.Unmarshal(v2, &back2)?
         show(back2)
     }
+    s1 := json.Marshal([Status.PendingReview: 1])?
+    s2 := jsonv2.Marshal([Status.PendingReview: 1])?
+    fmt.Println(string(s1), string(s1) == string(s2))
 }
 
 // Output:
@@ -40,3 +47,4 @@ func main() throws {
 // {"name":"bo","email":"","age":0,"tags":["x"]}
 // bo  0 1
 // bo  0 1
+// {"pendingReview":1} true

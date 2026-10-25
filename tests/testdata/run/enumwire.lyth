@@ -2,7 +2,6 @@
 // under the json key rule, decoding rejects anything else, and a
 // string-backed enum is Go's type T string with exactly its values.
 import "encoding/json"
-import jsonv2 "encoding/json/v2"
 import "fmt"
 import "log/slog"
 import "os"
@@ -45,7 +44,11 @@ struct Report {
 
 func decode(s: string) {
     t := Task(Status = Status.Active, Plan = Plan.Free)
-    json.Unmarshal([]byte(s), &t) catch (err) {
+    // encoding/json words its own error differently in each Go release.
+    json.Unmarshal([]byte(s), &t) catch (e: *json.UnmarshalTypeError) {
+        fmt.Println("rejected:", e.Value, "for", e.Field)
+        return
+    } catch (err) {
         fmt.Println("rejected:", err)
         return
     }
@@ -55,9 +58,7 @@ func decode(s: string) {
 func main() throws {
     t := Task(Status = Status.PendingReview, Plan = Plan.InProgress, Visibility = Visibility.Public, Priority = Priority.High)
     v1 := json.Marshal(t)?
-    v2 := jsonv2.Marshal(t)?
     fmt.Println(string(v1))
-    fmt.Println(string(v1) == string(v2))
 
     decode(`{"status":"suspended","plan":"pro","next":"free","priority":0}`)
     decode(`{"status":1}`)
@@ -85,9 +86,8 @@ func main() throws {
 
 // Output:
 // {"status":"pendingReview","plan":"in_progress","visibility":"public","priority":1}
-// true
 // decoded: Suspended pro free [] Low
-// rejected: json: cannot unmarshal number into Go struct field Task.status of type main.Status: JSON value must be string type
+// rejected: number for status
 // rejected: invalid Status "Suspended"
 // rejected: invalid Plan "gold"
 // rejected: invalid Visibility "secret"

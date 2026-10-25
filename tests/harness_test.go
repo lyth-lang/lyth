@@ -28,6 +28,7 @@ import (
 	"github.com/lyth-lang/lyth/internal/build"
 	"github.com/lyth-lang/lyth/internal/diag"
 	"github.com/lyth-lang/lyth/internal/emit"
+	"github.com/lyth-lang/lyth/internal/golang"
 )
 
 var update = flag.Bool("update", false, "update golden files")
@@ -111,12 +112,37 @@ func parseRunExpect(src string) runExpect {
 	return e
 }
 
+// requiredGo returns N of a "// Requires: go1.N" line: the program uses a
+// package that older toolchains lack (encoding/json/v2 before Go 1.27).
+func requiredGo(src string) int {
+	for _, l := range strings.Split(src, "\n") {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(l), "// Requires: go1."); ok {
+			n, _ := strconv.Atoi(v)
+			return n
+		}
+	}
+	return 0
+}
+
 func TestRun(t *testing.T) {
 	files, _ := filepath.Glob("testdata/run/*.lyth")
 	sort.Strings(files)
 	if len(files) == 0 {
 		t.Skip("no run tests")
 	}
+	// The programs build as one module, so one that needs a newer Go than
+	// the toolchain at hand is left out, and reported as skipped.
+	_, minor, _ := golang.GoVersion(".")
+	kept := files[:0]
+	for _, f := range files {
+		src, _ := os.ReadFile(f)
+		if n := requiredGo(string(src)); minor != 0 && n > minor {
+			t.Run(filepath.Base(f), func(t *testing.T) { t.Skipf("needs Go 1.%d; the toolchain is Go 1.%d", n, minor) })
+			continue
+		}
+		kept = append(kept, f)
+	}
+	files = kept
 	root, dirs := newModule(t, files, "lythtest")
 	cfg := &build.Config{WorkDir: root, Stdout: os.Stdout, Stderr: os.Stderr}
 	s, err := build.Compile(cfg, build.Target{})
