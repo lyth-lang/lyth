@@ -1,0 +1,27 @@
+// Templates format values as fmt does: Error before String, then the value.
+struct Code {
+    N: int
+}
+
+func Code.Error(): string = "error ${self.N}"
+func Code.String(): string = "Code(${self.N})"
+
+struct Name {
+    S: string
+}
+
+func Name.String(): string = "<${self.S}>"
+
+func main() {
+    c := Code(N = 3)
+    n := Name(S = "ada")
+    println("${c} ${n}")
+    println(c, n)
+    r: rune = 'x'
+    println("${r}", r)
+}
+
+// Output:
+// error 3 <ada>
+// error 3 <ada>
+// x 120

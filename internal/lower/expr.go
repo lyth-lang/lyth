@@ -646,10 +646,15 @@ func (fl *fnLower) template(e *syntax.TemplateLit) ast.Expr {
 
 // stringify converts a lowered value to a string expression.
 func (fl *fnLower) stringify(e syntax.Expr, x ast.Expr, t types.Type) ast.Expr {
-	if !types.IsNullable(t) && hasStringMethod(t) {
-		// Like fmt, a type with its own String method (time.Duration,
-		// slog.Level, a Lyth type implementing fmt.Stringer) prints with it.
-		return &ast.CallExpr{Fun: &ast.SelectorExpr{X: x, Sel: ast.NewIdent("String")}}
+	if !types.IsNullable(t) {
+		// Like fmt, a type with its own Error or String method (an error
+		// type, time.Duration, slog.Level, a Lyth type implementing
+		// fmt.Stringer) prints with it, Error first.
+		for _, m := range []string{"Error", "String"} {
+			if hasStringMethod(t, m) {
+				return &ast.CallExpr{Fun: &ast.SelectorExpr{X: x, Sel: ast.NewIdent(m)}}
+			}
+		}
 	}
 	if types.IsNullable(t) {
 		// Lyth prints null for absent values.
@@ -1437,14 +1442,15 @@ func blanks(n int) []ast.Expr {
 	return out
 }
 
-// hasStringMethod reports whether values of t have a String() string method
-// (the method fmt uses), excluding interfaces, whose dynamic values may not.
-func hasStringMethod(t types.Type) bool {
+// hasStringMethod reports whether values of t have a method name() string
+// (Error or String, the methods fmt uses), excluding interfaces, whose
+// dynamic values may not.
+func hasStringMethod(t types.Type, name string) bool {
 	if types.IsInterface(t) {
 		return false
 	}
 	gt := types.Lower(types.Base(t))
-	obj, _, _ := gotypes.LookupFieldOrMethod(gt, false, nil, "String")
+	obj, _, _ := gotypes.LookupFieldOrMethod(gt, false, nil, name)
 	fn, ok := obj.(*gotypes.Func)
 	if !ok {
 		return false

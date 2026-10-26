@@ -144,6 +144,11 @@ raw_string = "`" { any char except "`" } "`" .
   they mean different things ([ADR 0042](../adr/0042-dollar-names-in-strings.md)).
   So declaring a variable can turn a literal `$name` that matches it into an
   error; write `\$name` there. `\$` is a literal `$` everywhere.
+  A value is formatted as `fmt`'s `%v` formats it (an `Error` method first,
+  then `String`), except that a null value or optional prints `null`, an
+  optional prints its value, and a `rune` prints as its character
+  (`println(r)` prints its number, as Go does). Collections print as `fmt`
+  prints them, so a `[]int?` shows its elements' pointers.
 - **Raw strings** use backticks, exactly as in Go: no escapes, no templates, may
   span lines. They are also the syntax for struct tags.
 - Integer and float literals are *untyped constants* (Go semantics).
