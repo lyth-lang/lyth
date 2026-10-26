@@ -209,6 +209,7 @@ func (s *Server) initialize(params json.RawMessage) any {
 // documents
 
 func (s *Server) notification(method string, params json.RawMessage) {
+	defer s.survive(method)
 	var p struct {
 		TextDocument struct {
 			URI  string `json:"uri"`
@@ -328,9 +329,8 @@ func (s *Server) analyze(path string, wholeModule bool) *analysis {
 	}
 	gen, overlay := s.gen, s.overlayLocked()
 	s.mu.Unlock()
-	s.compileMu.Lock()
-	a := compile(u, overlay)
-	s.compileMu.Unlock()
+	var a *analysis
+	s.compiling(func() { a = compile(u, overlay) })
 	a.gen = gen
 	s.mu.Lock()
 	s.cache[u.key] = a
@@ -379,7 +379,24 @@ func (s *Server) schedule(path string) {
 }
 
 // check analyzes path's package and publishes the diagnostics of its files.
+// compiling runs fn holding the compilation lock, which a panic in fn
+// releases too: the next request must not wait forever.
+func (s *Server) compiling(fn func()) {
+	s.compileMu.Lock()
+	defer s.compileMu.Unlock()
+	fn()
+}
+
+// survive logs a panic of a background task instead of ending the server:
+// one bad edit must not take the editor's language support down.
+func (s *Server) survive(task string) {
+	if r := recover(); r != nil {
+		s.logf("lyth lsp: %s failed: %v\n%s", task, r, debug.Stack())
+	}
+}
+
 func (s *Server) check(path string) {
+	defer s.survive("checking " + path)
 	a := s.analyze(path, false)
 	byFile := map[string][]Diagnostic{}
 	for p := range a.files {
@@ -495,15 +512,16 @@ func (s *Server) vet(path string) {
 		return
 	}
 	go func() {
+		defer s.survive("go vet")
 		s.vetMu.Lock()
 		defer s.vetMu.Unlock()
 		u := unitFor(path, false)
 		s.notify("$/progress", map[string]any{"token": "lyth-vet", "value": map[string]any{"kind": "begin", "title": "go vet"}})
 		defer s.notify("$/progress", map[string]any{"token": "lyth-vet", "value": map[string]any{"kind": "end"}})
-		s.compileMu.Lock()
 		cfg := &build.Config{WorkDir: u.workDir, Stdout: io.Discard, Stderr: io.Discard}
-		sess, err := build.Compile(cfg, u.target)
-		s.compileMu.Unlock()
+		var sess *build.Session
+		var err error
+		s.compiling(func() { sess, err = build.Compile(cfg, u.target) })
 		if err != nil || sess == nil || sess.Sink.HasErrors() {
 			return // the check reports these
 		}

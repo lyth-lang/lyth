@@ -178,6 +178,9 @@ func (a *analysis) index() {
 			case *syntax.StructDecl:
 				if td != nil {
 					for _, f := range d.Fields {
+						if f.Name == nil {
+							continue // a line being typed: * or []int alone
+						}
 						if tf := td.LookupField(f.Name.Name); tf != nil {
 							add(f.Name, tf, true)
 						}
@@ -186,6 +189,9 @@ func (a *analysis) index() {
 			case *syntax.InterfaceDecl:
 				if td != nil {
 					for _, m := range d.Methods {
+						if m.Name == nil {
+							continue
+						}
 						for _, tm := range td.Methods {
 							if tm.Name == m.Name.Name {
 								add(m.Name, key(tm), true)

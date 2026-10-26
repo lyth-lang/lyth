@@ -505,3 +505,39 @@ func TestEditorPaths(t *testing.T) {
 		t.Errorf("uri of the opened file: %s, want %s", got, pathToURI(editor))
 	}
 }
+
+// TestIncompleteCode keeps the server answering while code is being typed:
+// a struct line that is only the start of a type (* of *sync.Mutex, map,
+// []int) once crashed the index, and a panic during a request kept the
+// compilation lock. Formatting leaves such a file alone.
+func TestIncompleteCode(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/typing\n\ngo 1.26\n"), 0o644)
+	path := filepath.Join(root, "counter.lyth")
+	good := "struct Counter {\n    n: int\n}\n"
+	_ = os.WriteFile(path, []byte(good), 0o644)
+	c := newClient(t)
+	c.mustCall("initialize", map[string]any{"capabilities": map[string]any{}, "initializationOptions": map[string]any{"vet": false}}, nil)
+	uri := pathToURI(path)
+	open(c, uri, good)
+	for i, typed := range []string{"*", "map", "chan", "[]int", "map[string]int"} {
+		text := "struct Counter {\n    " + typed + "\n    n: int\n}\n"
+		c.notify("textDocument/didChange", map[string]any{"textDocument": map[string]any{"uri": uri, "version": i + 2}, "contentChanges": []map[string]any{{"text": text}}})
+		var hover any
+		c.mustCall("textDocument/hover", tdp(uri, Position{Line: 2, Character: 4}), &hover)
+		var edits []TextEdit
+		c.mustCall("textDocument/formatting", map[string]any{"textDocument": map[string]any{"uri": uri}, "options": map[string]any{"tabSize": 4, "insertSpaces": true}}, &edits)
+		if len(edits) != 0 {
+			t.Errorf("formatting a file with a syntax error: %v", edits)
+		}
+	}
+	c.notify("textDocument/didChange", map[string]any{"textDocument": map[string]any{"uri": uri, "version": 10}, "contentChanges": []map[string]any{{"text": "struct Counter {\n  n:int\n}\n"}}})
+	var edits []TextEdit
+	c.mustCall("textDocument/formatting", map[string]any{"textDocument": map[string]any{"uri": uri}}, &edits)
+	if len(edits) != 1 || edits[0].NewText != good {
+		t.Errorf("formatting: %+v", edits)
+	}
+}
