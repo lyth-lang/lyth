@@ -619,7 +619,9 @@ implementation of it.
 interface must cover every entry or member type, or have an `else`
 (E0216 names what is missing): adding an entry or member is a compile error at
 every `when` that does not handle it. An exhaustive `when` needs no `else`,
-as a value or as a statement that terminates. Inside such a `when`, entries
+as a value or as a statement that terminates. A `when` over a nullable enum or
+sealed interface need not cover anything as a statement, and is exhaustive when
+it covers every entry or member type and `null`. Inside such a `when`, entries
 may be written unqualified (`Red -> ...`), also when the subject is a
 nullable enum. The generated `switch` gets a `default` that panics with the
 Lyth position, because Go cannot see that it is exhaustive and a converted
@@ -964,7 +966,8 @@ unless it is exhaustive: a `when` over an enum or a sealed interface must
 cover every entry or member type or have an `else`
 ([§3.7](#37-enums-and-sealed-interfaces)).
 
-A `when` whose conditions are all `is` tests lowers to a Go type switch;
+A `when` whose conditions are all `is` tests (and `null` over an interface
+subject, Go's `case nil`) lowers to a Go type switch;
 `when r := f() { ... }` binds the subject for the branches. Other `when`s lower to a Go `switch`, or
 to an `if`/`else` chain when a condition needs statements (a `?`, a mix of `is`
 and value conditions). When an `if` or `when` value is returned, each branch

@@ -61,6 +61,7 @@ type Result struct {
 // Emit prints a lowered file.
 func Emit(f *lower.File, opts Options) (*Result, error) {
 	var body bytes.Buffer
+	placeSentinels(f.AST)
 	cfg := printer.Config{Mode: printer.UseSpaces | printer.TabIndent, Tabwidth: 8}
 	if err := cfg.Fprint(&body, f.Fset, f.AST); err != nil {
 		return nil, fmt.Errorf("printing %s: %w", f.GoName, err)
@@ -617,6 +618,34 @@ func hoisted(s ast.Stmt) bool {
 		}
 	}
 	return false
+}
+
+// placeSentinels moves the placeholder position (1) that lowering gives the
+// tokens of chan and struct{} types, so that struct{} prints on one line, to
+// the position of the code around them: go/printer reads the lines between
+// position 1 and the next node as a gap, and fills it with a blank line (after
+// a struct field) or a line break (before a literal's closing brace).
+func placeSentinels(root ast.Node) {
+	last := token.NoPos
+	ast.Inspect(root, func(n ast.Node) bool {
+		switch x := n.(type) {
+		case nil:
+			return false
+		case *ast.ChanType:
+			if x.Begin == 1 {
+				x.Begin, x.Arrow = last, last
+			}
+		case *ast.StructType:
+			if x.Fields != nil && x.Fields.Opening == 1 && last.IsValid() {
+				x.Fields.Opening, x.Fields.Closing = last, last
+			}
+		default:
+			if p := n.Pos(); p > 1 {
+				last = p
+			}
+		}
+		return true
+	})
 }
 
 // isDirective reports whether a comment is a directive in gofmt's sense

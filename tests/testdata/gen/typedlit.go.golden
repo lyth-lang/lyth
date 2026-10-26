@@ -42,9 +42,11 @@ func main() {
 	nested := map[string][]Point{"a": {{X: 5, Y: 6}}}
 	empty := []string{}
 	emptyMap := map[string]int{}
-	multi := map[string]int{"one": 1, "two": 2}
+	multi := map[string]int{
+		"one": 1,
+		"two": 2,
+	}
 	for _, x := range []int{7, 8} {
-//line typedlit.lyth:34
 		fmt.Println(x)
 	}
 	fmt.Println(ids, args, len(status), grid, arr, sized, len(sized), pts, nested)

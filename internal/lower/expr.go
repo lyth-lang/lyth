@@ -52,18 +52,19 @@ func (fl *fnLower) adaptConst(e syntax.Expr, x ast.Expr, want types.Type) ast.Ex
 
 // convert applies an implicit conversion recorded for e.
 func (fl *fnLower) convert(e syntax.Expr, x ast.Expr) ast.Expr {
-	switch fl.info.Implicit[e] {
+	conv := fl.info.Implicit[e]
+	if conv != check.ConvAssert && fl.info.Asserts[e] != nil {
+		// A value smart-cast by a type test and then converted
+		// (return n as a Lit?): the cast value is what converts.
+		x = fl.castValue(e, x)
+	}
+	switch conv {
 	case check.ConvBox:
 		return fl.box(e, x)
 	case check.ConvUnbox:
 		return &ast.StarExpr{X: x}
 	case check.ConvAssert:
-		// Smart cast by a type test: the assertion cannot fail here.
-		if b := fl.castFor(e); b != nil {
-			b.used = true
-			return ast.NewIdent(b.ident.Name)
-		}
-		return &ast.TypeAssertExpr{X: x, Type: fl.l.typeExpr(fl.info.Asserts[e])}
+		return fl.castValue(e, x)
 	case check.ConvNilIface:
 		src := fl.stash(e, x)
 		name := fl.temp("v")
@@ -71,6 +72,16 @@ func (fl *fnLower) convert(e syntax.Expr, x ast.Expr) ast.Expr {
 		return ast.NewIdent(name)
 	}
 	return x
+}
+
+// castValue is e smart-cast by a type test: the variable the test bound, or
+// an assertion that cannot fail here.
+func (fl *fnLower) castValue(e syntax.Expr, x ast.Expr) ast.Expr {
+	if b := fl.castFor(e); b != nil {
+		b.used = true
+		return ast.NewIdent(b.ident.Name)
+	}
+	return &ast.TypeAssertExpr{X: x, Type: fl.l.typeExpr(fl.info.Asserts[e])}
 }
 
 // exprRaw lowers e without its implicit conversion.
@@ -888,6 +899,9 @@ func (fl *fnLower) elvisInto(e *syntax.ElvisExpr, target ast.Expr, targetType ty
 	if fl.elvisSafeChain(e, target, targetType) {
 		return
 	}
+	if fl.elvisSafeCast(e, target, targetType) {
+		return
+	}
 	xt := fl.info.TypeOf(e.X)
 	if xt != nil && !types.MayBeNull(xt) && !types.IsNilable(xt) && !isCollection(xt) {
 		// The checker warned that the left side is never null (a string,
@@ -920,6 +934,30 @@ func (fl *fnLower) elvisInto(e *syntax.ElvisExpr, target ast.Expr, targetType ty
 	markTree(fl.l, then, e.OpSpan)
 	ifs := &ast.IfStmt{If: fl.l.pos(e.S), Cond: nilCmp(x, token.NEQ), Body: then, Else: &ast.BlockStmt{List: *stmts}}
 	fl.emitSynthShallow(ifs, e.OpSpan)
+}
+
+// elvisSafeCast lowers `x as? T ?: d` for a value type T without boxing:
+//
+//	if s, ok := x.(T); ok { target = s } else { target = d }
+func (fl *fnLower) elvisSafeCast(e *syntax.ElvisExpr, target ast.Expr, targetType types.Type) bool {
+	as, ok := syntax.Unparen(e.X).(*syntax.AsExpr)
+	if !ok || !as.Safe || fl.info.TypeOf(e.Y) == types.Nothing || fl.info.Implicit[e.X] != check.ConvNone {
+		return false
+	}
+	t := fl.info.TypeTests[as]
+	if t == nil || types.IsNilable(types.Base(t)) || targetType == nil || types.MayBeNull(targetType) {
+		return false
+	}
+	x := fl.expr(as.X)
+	val, okName := fl.bindingName(t), fl.temp("ok")
+	then := &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(val)}}}}
+	sub, stmts := fl.sub()
+	sub.exprInto(e.Y, cloneIdentExpr(target), targetType)
+	markTree(fl.l, then, e.OpSpan)
+	ifs := &ast.IfStmt{If: fl.l.pos(e.S), Init: fl.typeAssign(ast.NewIdent(val), okName, x, t), Cond: ast.NewIdent(okName), Body: then, Else: &ast.BlockStmt{List: *stmts}}
+	fl.emitSynthShallow(ifs, e.OpSpan)
+	fl.release(val, okName)
+	return true
 }
 
 // elvisSafeChain lowers `a?.f ?: y` without boxing f: the last hop of the
@@ -1297,7 +1335,30 @@ func (fl *fnLower) listLit(e *syntax.ListLit) ast.Expr {
 	for i, x := range e.Elems {
 		elts[i] = elideType(fl.adaptConst(x, elts[i], elem), fl.info.TypeOf(x), elem)
 	}
-	return &ast.CompositeLit{Type: fl.l.typeExpr(t), Elts: elts}
+	lit := &ast.CompositeLit{Type: fl.l.typeExpr(t), Elts: elts}
+	fl.keepLines(lit, e.S, e.Elems)
+	return lit
+}
+
+// keepLines lays out a composite literal one element per line when the
+// Lyth literal at span is written that way (its first element below the
+// bracket): go/printer follows the positions of the braces and elements.
+func (fl *fnLower) keepLines(lit *ast.CompositeLit, span source.Span, elems []syntax.Expr) {
+	if len(elems) == 0 || !span.IsValid() || elems[0].Span().StartPos().Line == span.StartPos().Line {
+		return
+	}
+	lit.Lbrace, lit.Rbrace = fl.l.pos(span), fl.l.endPos(span)
+	for i, x := range elems {
+		elt := lit.Elts[i]
+		if kv, ok := elt.(*ast.KeyValueExpr); ok {
+			elt = kv.Key // a map entry starts with its key
+		}
+		if cl, ok := elt.(*ast.CompositeLit); ok && cl.Type == nil && !cl.Lbrace.IsValid() {
+			cl.Lbrace = fl.l.pos(x.Span()) // an elided {X: 1}
+			continue
+		}
+		setPos(elt, fl.l.pos(x.Span()))
+	}
 }
 
 // collectionShape returns the slice, array, or map type of a literal of
@@ -1345,6 +1406,7 @@ func (fl *fnLower) mapLit(e *syntax.MapLit) ast.Expr {
 		val := elideType(xs[i+1], fl.info.TypeOf(ops[i+1]), vt)
 		cl.Elts = append(cl.Elts, &ast.KeyValueExpr{Key: key, Value: val})
 	}
+	fl.keepLines(cl, e.S, e.Keys)
 	return cl
 }
 

@@ -381,6 +381,9 @@ func (fl *fnLower) classifyWhen(e *syntax.WhenExpr) whenKind {
 			case syntax.WhenNotIs, syntax.WhenIn, syntax.WhenNotIn:
 				anyTest, allIs = true, false
 			default:
+				if isNull(c.X) && e.Subject != nil && types.IsInterface(fl.info.TypeOf(e.Subject)) {
+					continue // case nil: in a type switch
+				}
 				allIs = false
 				// A Go case expression cannot run statements first; any
 				// condition but the first one evaluated would run them
@@ -398,6 +401,11 @@ func (fl *fnLower) classifyWhen(e *syntax.WhenExpr) whenKind {
 		return whenChain
 	}
 	return whenSwitch
+}
+
+func isNull(e syntax.Expr) bool {
+	_, ok := syntax.Unparen(e).(*syntax.NullLit)
+	return ok
 }
 
 // needsStmts reports whether lowering x may emit statements. It is a
@@ -504,13 +512,17 @@ func (fl *fnLower) typeSwitch(e *syntax.WhenExpr, target ast.Expr, targetType ty
 		cc := &ast.CaseClause{Case: fl.l.pos(br.S), Colon: fl.l.pos(br.S)}
 		if !br.Else {
 			for _, c := range br.Conds {
+				if c.Kind != syntax.WhenIs && isNull(c.X) {
+					cc.List = append(cc.List, ast.NewIdent("nil"))
+					continue
+				}
 				cc.List = append(cc.List, fl.l.typeExpr(fl.info.TypeTests[c]))
 			}
 		}
 		lower := func() {
 			fl.breakable(&breakCtx{}, func() { cc.Body = fl.branch(br.Body, target, targetType).List })
 		}
-		if name != nil && len(cc.List) == 1 {
+		if name != nil && len(cc.List) == 1 && br.Conds[0].Kind == syntax.WhenIs {
 			b := &castBinding{typ: fl.info.TypeTests[br.Conds[0]], ident: name}
 			fl.withCast(v, b, lower)
 			used = used || b.used

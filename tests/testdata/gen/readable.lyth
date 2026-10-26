@@ -1,0 +1,71 @@
+// Generated Go that reads like Go written by hand.
+import "context"
+import "errors"
+import "net/http"
+
+type Middleware = (http.Handler) -> http.Handler
+
+// Status is where an order is.
+enum Status {
+    // Pending orders wait for payment.
+    Pending,
+    // Paid orders are being packed.
+    Paid
+}
+
+struct Worker {
+    jobs: <-chan int
+    stop: chan struct{}
+    mws: []Middleware
+}
+
+func *Worker.Use(w: Middleware) {
+    self.mws = append(self.mws, w)
+}
+
+func *Worker.Count(): int = len(self.mws)
+
+struct ridKey {}
+
+func requestID(ctx: context.Context): string = ctx.Value(ridKey()) as? string ?: ""
+
+func kind(v: any?): string = when v {
+    is string -> "string"
+    null -> "null"
+    else -> "other"
+}
+
+func first[T](xs: []T, ok: (T) -> bool): T throws {
+    for x in xs {
+        if ok(x) {
+            return x
+        }
+    }
+    throw errors.New("none")
+}
+
+struct Node {
+    V: int
+    Next: *Node?
+}
+
+func sum(head: *Node?): int {
+    total := 0
+    cur := head
+    while true {
+        c := cur ?: break
+        total += c.V
+        cur = c.Next
+    }
+    return total
+}
+
+func main() throws {
+    w := &Worker(jobs = make(chan int), stop = make(chan struct{}), mws = [])
+    w.Use { it }
+    ports := [
+        8080,
+        8443,
+    ]
+    println(w.Count(), requestID(context.Background()), kind(null), first(ports) { it > 8100 }?, sum(null), Status.Paid)
+}

@@ -40,10 +40,15 @@ type fnLower struct {
 	recvVar     *check.VarSym // the receiver, which self names
 	initializer bool
 	parent      *fnLower
-	casts       map[*check.VarSym]*castBinding // smart casts served by a binding, see typetest.go
-	breaks      *[]*breakCtx                   // enclosing loops and switches, innermost last
-	labels      map[string]bool                // Go labels used in this function
-	pre         map[syntax.Expr]ast.Expr       // operands already evaluated into temporaries (deferred calls)
+	// zeros are the variables holding a type parameter's zero value that
+	// failing returns use (var zero T), declared at the start of the body;
+	// nil where *new(T) is written instead (lambdas).
+	zeros     map[string]string
+	zeroDecls *[]ast.Stmt                    // shared with sub-lowerers of nested blocks
+	casts     map[*check.VarSym]*castBinding // smart casts served by a binding, see typetest.go
+	breaks    *[]*breakCtx                   // enclosing loops and switches, innermost last
+	labels    map[string]bool                // Go labels used in this function
+	pre       map[syntax.Expr]ast.Expr       // operands already evaluated into temporaries (deferred calls)
 	// assignedFields names the fields the function assigns (x.f = ...), so
 	// that reading resp.Body at a defer and at exit is known to agree.
 	assignedFields map[string]bool
@@ -367,6 +372,9 @@ func (fl *fnLower) sub() (*fnLower, *[]ast.Stmt) {
 func (fl *fnLower) funcBody(d *syntax.FunDecl, fi *check.FuncInfo) *ast.BlockStmt {
 	var stmts []ast.Stmt
 	fl.stmts = &stmts
+	fl.zeros = map[string]string{}
+	var zeroDecls []ast.Stmt
+	fl.zeroDecls = &zeroDecls
 	if d.Body != nil {
 		fl.castScope(func() {
 			for _, s := range d.Body.Stmts {
@@ -387,6 +395,7 @@ func (fl *fnLower) funcBody(d *syntax.FunDecl, fi *check.FuncInfo) *ast.BlockStm
 		end = d.Body.Rbrace
 	}
 	fl.finish(&stmts, end)
+	stmts = append(zeroDecls, stmts...)
 	b := &ast.BlockStmt{List: stmts}
 	if d.Body != nil {
 		b.Lbrace, b.Rbrace = fl.l.pos(d.Body.Lbrace), fl.l.pos(d.Body.Rbrace)
@@ -623,6 +632,24 @@ func (fl *fnLower) localDecl(s *syntax.LocalDecl) {
 		fl.boxInto(name, read, s.S)
 		fl.useIfUnused(v, name, s.S)
 		return
+	}
+	if el, ok := value.(*syntax.ElvisExpr); ok && conv == check.ConvNone && s.Type == nil && fl.info.TypeOf(el.Y) == types.Nothing {
+		// c := cur ?: break: the check, then the declaration of what is
+		// left, as Go code writes it: if cur == nil { break }; c := cur.
+		if xt := fl.info.TypeOf(el.X); xt != nil && (types.MayBeNull(xt) || types.IsNilable(xt)) {
+			x := fl.stash(el.X, fl.expr(el.X))
+			sub, stmts := fl.sub()
+			sub.exprStmt(el.Y)
+			fl.emitSynthShallow(&ast.IfStmt{If: fl.l.pos(el.S), Cond: nilCmp(x, token.EQL), Body: &ast.BlockStmt{List: *stmts}}, el.OpSpan)
+			val := ast.Expr(cloneIdentExpr(x))
+			if optionalValue(xt) && !optionalValue(v.Type) {
+				val = &ast.StarExpr{X: cloneIdentExpr(x)}
+			}
+			name := fl.declareLocal(v)
+			fl.emit(&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(name)}, Tok: token.DEFINE, TokPos: fl.l.pos(s.S), Rhs: []ast.Expr{val}}, s.S)
+			fl.useIfUnused(v, name, s.S)
+			return
+		}
 	}
 	if conv == check.ConvNone && fl.intoTargetForm(value) {
 		name := fl.declareLocal(v)
@@ -1079,6 +1106,19 @@ func (fl *fnLower) failResults(err ast.Expr) []ast.Expr {
 		results = results[:len(results)-1]
 	}
 	for _, r := range results {
+		if _, ok := types.Lower(r).(*gotypes.TypeParam); ok && fl.zeros != nil {
+			// var zero T at the start of the body, as Go code writes it.
+			key := types.Lower(r).String()
+			name, ok := fl.zeros[key]
+			if !ok {
+				name = fl.alloc("zero")
+				fl.zeros[key] = name
+				spec := &ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(name)}, Type: fl.l.typeExpr(r)}
+				*fl.zeroDecls = append(*fl.zeroDecls, &ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{spec}}})
+			}
+			out = append(out, ast.NewIdent(name))
+			continue
+		}
 		out = append(out, fl.l.zeroValue(r))
 	}
 	return append(out, err)

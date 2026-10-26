@@ -1,0 +1,124 @@
+// Code the checker rejected or lowered to invalid Go: lambdas in variables of
+// a named function type, values smart-cast by is and then boxed, inference
+// from annotated lambda parameters and from methods, pointers to defined array
+// types, and fields through a defined pointer type.
+import "fmt"
+import "net/http"
+import "net/http/httptest"
+
+type Op (int, int) -> int
+
+func Op.Apply(a: int, b: int): int = self(a, b)
+
+var Health: http.HandlerFunc = { w, r -> w.WriteHeader(204) }
+
+interface Node {
+    Eval(): int
+}
+
+struct Lit : Node {
+    V: int
+}
+
+func Lit.Eval(): int = self.V
+
+struct Neg : Node {
+    X: Node
+}
+
+func Neg.Eval(): int = -self.X.Eval()
+
+func asLit(n: Node): Lit? {
+    if n is Lit {
+        return n
+    }
+    return null
+}
+
+func early(n: Node): Lit? {
+    if n !is Lit {
+        return null
+    }
+    return n
+}
+
+func each[A](f: (A) -> unit): int = 4
+
+func compose[A, B, C](f: (A) -> B, g: (B) -> C): (A) -> C = { x -> g(f(x)) }
+
+interface Getter[T] {
+    Get(): T
+}
+
+struct IntProp {
+    v: int
+}
+
+func *IntProp.Get(): int = self.v
+
+func describe[T](g: Getter[T]): string = fmt.Sprintf("%T=%v", g.Get(), g.Get())
+
+type Grid [2][2]int
+
+func *Grid.Set(i: int, j: int, v: int) {
+    self[i][j] = v
+}
+
+func *Grid.Rows(): int = len(self)
+
+struct User {
+    Name: string
+}
+
+type UserPtr *User
+
+func main() {
+    h: http.HandlerFunc = { w, r -> w.WriteHeader(202) }
+    mux := http.NewServeMux()
+    mux.Handle("/", h)
+    mux.Handle("/health", Health)
+    for path in ["/", "/health"] {
+        rec := httptest.NewRecorder()
+        mux.ServeHTTP(rec, httptest.NewRequest("GET", path, null))
+        println(path, rec.Code)
+    }
+    add: Op = { a, b -> a + b }
+    fmt.Printf("%T %d\n", add, add.Apply(1, 2))
+
+    println(asLit(Lit(3))?.V ?: -1, asLit(Neg(Lit(3)))?.V ?: -1, early(Lit(4))?.V ?: -1)
+    for n in []Node{Lit(1), Neg(Lit(2))} {
+        if n is Lit {
+            x: Lit? = n
+            lits: []Lit? = [n, null]
+            println(x.V, len(lits))
+        }
+    }
+
+    println(each({ s: string -> println(s) }))
+    double := compose({ s: string -> len(s) }, { n: int -> n * 2 })
+    println(double("abc"))
+    println(describe(&IntProp(v = 1)))
+
+    g: Grid
+    g.Set(0, 1, 5)
+    gp := &g
+    for row in gp {
+        print(len(row), " ")
+    }
+    println(g, g.Rows(), gp[0][1], len(gp[1:]))
+
+    up := UserPtr(&User("ann"))
+    println(up.Name)
+}
+
+// Output:
+// / 202
+// /health 204
+// main.Op 3
+// 3 -1 4
+// 1 2
+// 4
+// 6
+// int=1
+// 2 2 [[0 5] [0 0]] 2 5 1
+// ann

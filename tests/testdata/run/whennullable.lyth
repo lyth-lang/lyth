@@ -1,0 +1,42 @@
+// A when over a nullable enum or sealed interface that covers every entry or
+// member and null is exhaustive: it needs no else, also as a value.
+
+enum Color {
+    Red,
+    Green
+}
+
+sealed interface Shape {
+    Area(): float64
+}
+
+struct Sq : Shape {
+    S: float64
+}
+
+func Sq.Area(): float64 = self.S * self.S
+
+struct Circ : Shape {
+    R: float64
+}
+
+func Circ.Area(): float64 = 3 * self.R * self.R
+
+func name(c: Color?): string = when c {
+    Red -> "red"
+    Green -> "green"
+    null -> "none"
+}
+
+func kind(s: Shape?): string = when s {
+    is Sq -> "square"
+    is Circ -> "circle"
+    null -> "nothing"
+}
+
+func main() {
+    println(name(Color.Green), name(null), kind(Sq(1)), kind(null))
+}
+
+// Output:
+// green none square nothing

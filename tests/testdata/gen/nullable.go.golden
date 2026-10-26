@@ -12,15 +12,13 @@ type User struct {
 }
 
 func Contact(u User) string {
-	var email string
-//line nullable.lyth:8
 	v := u.Email
 	if v == nil {
 //line nullable.lyth:8
 		return "no email for " + u.Name
 	}
-	email = *v
-//line nullable.lyth:9
+//line nullable.lyth:8
+	email := *v
 	return u.Name + " <" + email + ">"
 }
 

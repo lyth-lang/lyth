@@ -128,6 +128,7 @@ type fileLowerer struct {
 	decls       []ast.Decl
 	runName     string
 	comments    []*ast.CommentGroup // comments kept inside function bodies (an example's output)
+	recvNames   map[*types.TypeDecl]string
 }
 
 func lowerFile(pkg *check.Package, f *syntax.File, pkgNames map[string]bool) *File {
@@ -281,6 +282,64 @@ func (l *fileLowerer) importFor(p *gotypes.Package) string {
 // typeExpr returns the Go type expression for a Lyth type.
 func (l *fileLowerer) typeExpr(t types.Type) ast.Expr {
 	return l.goTypeExpr(types.Lower(t))
+}
+
+// declTypeExpr lowers the declared type te, resolved as t, keeping the Lyth
+// type aliases it names (mws: []Middleware is []Middleware in Go too, not the
+// function type), which the resolved type no longer records.
+func (l *fileLowerer) declTypeExpr(te syntax.TypeExpr, t types.Type) ast.Expr {
+	if te == nil || !l.namesAlias(te) {
+		return l.typeExpr(t)
+	}
+	switch x := te.(type) {
+	case *syntax.NamedType:
+		ts, _ := l.info.Uses[x.Name].(*check.TypeSym)
+		if ts == nil || ts.Alias == nil || ts.Pkg == nil {
+			break
+		}
+		if ts.Pkg.Path == l.pkg.Path {
+			return ast.NewIdent(ts.GoName)
+		}
+		return sel(l.useImport(ts.Pkg.Path, ts.Pkg.Name), ts.GoName)
+	case *syntax.NullableType:
+		base := types.Base(t)
+		if types.IsNilable(base) {
+			return l.declTypeExpr(x.Elem, base)
+		}
+		return &ast.StarExpr{X: l.declTypeExpr(x.Elem, base)}
+	case *syntax.PointerType:
+		if p, ok := types.Base(t).(*types.Pointer); ok {
+			return &ast.StarExpr{X: l.declTypeExpr(x.Elem, p.Elem)}
+		}
+	case *syntax.SliceType:
+		if s, ok := types.Base(t).(*types.Slice); ok {
+			return &ast.ArrayType{Elt: l.declTypeExpr(x.Elem, s.Elem)}
+		}
+	case *syntax.MapType:
+		if m, ok := types.Base(t).(*types.Map); ok {
+			return &ast.MapType{Key: l.declTypeExpr(x.Key, m.Key), Value: l.declTypeExpr(x.Value, m.Elem)}
+		}
+	}
+	return l.typeExpr(t)
+}
+
+// namesAlias reports whether te names a Lyth type alias, outside function
+// types (whose parameters keep their resolved types).
+func (l *fileLowerer) namesAlias(te syntax.TypeExpr) bool {
+	switch x := te.(type) {
+	case *syntax.NamedType:
+		ts, _ := l.info.Uses[x.Name].(*check.TypeSym)
+		return ts != nil && ts.Alias != nil
+	case *syntax.NullableType:
+		return l.namesAlias(x.Elem)
+	case *syntax.PointerType:
+		return l.namesAlias(x.Elem)
+	case *syntax.SliceType:
+		return l.namesAlias(x.Elem)
+	case *syntax.MapType:
+		return l.namesAlias(x.Key) || l.namesAlias(x.Value)
+	}
+	return false
 }
 
 func (l *fileLowerer) goTypeExpr(t gotypes.Type) ast.Expr {
@@ -597,6 +656,9 @@ func (l *fileLowerer) structType(decl *types.TypeDecl, d *syntax.StructDecl) *as
 	st := &ast.StructType{Fields: &ast.FieldList{Opening: l.pos(d.S), Closing: l.endPos(d.S)}}
 	for i, f := range decl.Fields {
 		fld := &ast.Field{Names: []*ast.Ident{ast.NewIdent(f.GoName)}, Type: l.typeExpr(f.Type)}
+		if i < len(d.Fields) && !f.Embedded {
+			fld.Type = l.declTypeExpr(d.Fields[i].Type, f.Type)
+		}
 		if f.Tag != "" {
 			fld.Tag = tagLit(f.Tag)
 		}
@@ -719,6 +781,12 @@ func (l *fileLowerer) enumDecl(d *syntax.EnumDecl) {
 	consts := &ast.GenDecl{Tok: token.CONST, TokPos: l.pos(d.S), Lparen: l.pos(d.S), Rparen: l.endPos(d.S)}
 	for i, e := range decl.Entries {
 		vs := &ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(e.GoName)}}
+		if i < len(d.Docs) && i < len(d.Entries) && d.Docs[i] != "" {
+			// The doc and the name at their Lyth lines, so that go/printer
+			// puts the doc above the entry.
+			vs.Doc = l.memberDoc(d.Docs[i], d.Entries[i].S)
+			vs.Names[0].NamePos = l.pos(d.Entries[i].S)
+		}
 		switch {
 		case decl.Backing != nil:
 			vs.Type, vs.Values = ast.NewIdent(decl.GoName), []ast.Expr{strLit(e.Wire)}
@@ -883,6 +951,45 @@ func (fl *fnLower) freeRecvName(name string) string {
 	}
 }
 
+// recvNameFor returns the receiver name of the methods of decl: the first of
+// its initial, initial+"v", recv, ... that no method of the package uses for
+// something else, so that all of them name the receiver alike (staticcheck's
+// ST1016).
+func (l *fileLowerer) recvNameFor(decl *types.TypeDecl) string {
+	if n, ok := l.recvNames[decl]; ok {
+		return n
+	}
+	base := strings.ToLower(decl.Name[:1])
+	var methods []*fnLower
+	for d, fi := range l.info.Funcs {
+		if fi.Sym != nil && fi.Sym.Recv == decl && fi.Sym.ExtRecv == nil && fi.Sym.Sig != nil {
+			fl := newFnLower(l, fi.Sym.Sig, false)
+			fl.collectNames(d)
+			methods = append(methods, fl)
+		}
+	}
+	name := base
+	candidates := []string{base, base + "v", "recv", "self_"}
+	for i := 2; i < 10; i++ {
+		candidates = append(candidates, fmt.Sprintf("%s%d", base, i))
+	}
+	for _, c := range candidates {
+		free := !check.IsGoReserved(c)
+		for _, fl := range methods {
+			free = free && !fl.taken[c] && !fl.reserved[c]
+		}
+		if free {
+			name = c
+			break
+		}
+	}
+	if l.recvNames == nil {
+		l.recvNames = map[*types.TypeDecl]string{}
+	}
+	l.recvNames[decl] = name
+	return name
+}
+
 func recvParamName(t types.Type) string {
 	switch b := types.Base(t).(type) {
 	case *types.Pointer:
@@ -954,6 +1061,32 @@ func (l *fileLowerer) instantiate(x ast.Expr, targs []types.Type) ast.Expr {
 
 // funcType builds a Go function type from a Lyth signature with optional
 // parameter names.
+// declAliases gives the parameters and results of ft, lowered from sig, the
+// type aliases d's declaration names (h: Handler stays h Handler).
+func (l *fileLowerer) declAliases(ft *ast.FuncType, sig *types.Signature, d *syntax.FunDecl) {
+	if len(d.Params) == len(sig.Params) && len(ft.Params.List) == len(sig.Params) {
+		for i, p := range d.Params {
+			if p.Type == nil || !l.namesAlias(p.Type) {
+				continue
+			}
+			if sig.Variadic && i == len(sig.Params)-1 {
+				if s, ok := sig.Params[i].(*types.Slice); ok {
+					ft.Params.List[i].Type = &ast.Ellipsis{Elt: l.declTypeExpr(p.Type, s.Elem)}
+				}
+				continue
+			}
+			ft.Params.List[i].Type = l.declTypeExpr(p.Type, sig.Params[i])
+		}
+	}
+	if d.Result != nil && ft.Results != nil && len(d.Result.Types) == len(sig.Results) && len(ft.Results.List) >= len(sig.Results) {
+		for i, r := range d.Result.Types {
+			if l.namesAlias(r) {
+				ft.Results.List[i].Type = l.declTypeExpr(r, sig.Results[i])
+			}
+		}
+	}
+}
+
 func (l *fileLowerer) funcType(sig *types.Signature, names []string) *ast.FuncType {
 	ft := &ast.FuncType{Params: &ast.FieldList{}}
 	for i, p := range sig.Params {
@@ -1002,7 +1135,7 @@ func (l *fileLowerer) funDecl(d *syntax.FunDecl) {
 		fl.taken[rname] = true
 		extParam = &ast.Field{Names: []*ast.Ident{ast.NewIdent(rname)}, Type: l.typeExpr(sym.ExtRecv)}
 	} else if fi.Recv != nil {
-		rname := fl.freeRecvName(strings.ToLower(sym.Recv.Name[:1]))
+		rname := fl.freeRecvName(l.recvNameFor(sym.Recv))
 		fl.recvName, fl.recvVar = rname, fi.Recv
 		fl.locals[fi.Recv] = rname
 		fl.taken[rname] = true
@@ -1038,6 +1171,7 @@ func (l *fileLowerer) funDecl(d *syntax.FunDecl) {
 	}
 	ft := l.funcType(sym.Sig, names)
 	ft.Func = l.pos(d.S)
+	l.declAliases(ft, sym.Sig, d)
 	if fi.DeferErr && d.Body != nil && ft.Results != nil {
 		// Deferred code sets the error result, which Go lets only a named
 		// result do: func f() (_ T, err error).
@@ -1259,6 +1393,11 @@ func (l *fileLowerer) constDecl(d *syntax.ConstDecl) {
 // needsExplicitType reports whether `x := e` would give x a different Go
 // type than the declared Lyth type t.
 func needsExplicitType(info *check.Info, e syntax.Expr, t types.Type) bool {
+	if _, ok := syntax.Unparen(e).(*syntax.LambdaExpr); ok {
+		if _, named := types.Lower(t).(*gotypes.Named); named {
+			return true // a func literal has no name: h := func... is not an http.HandlerFunc
+		}
+	}
 	tv, ok := info.Types[e]
 	if !ok {
 		return true

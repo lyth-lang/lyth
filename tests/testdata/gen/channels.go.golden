@@ -16,13 +16,11 @@ func produce(out chan<- int, n int) {
 }
 
 func first(ch <-chan *string) string {
-	var s *string
-//line channels.lyth:11
 	v := <-ch
 	if v == nil {
 		return "closed"
 	}
-	s = v
+	s := v
 //line channels.lyth:12
 	return *s
 }
