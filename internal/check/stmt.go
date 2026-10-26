@@ -1063,6 +1063,12 @@ func (c *Checker) when(e *syntax.WhenExpr, want types.Type, needValue bool) (*op
 							bin := &syntax.BinaryExpr{Op: syntax.EQL, X: e.Subject, Y: cond.X, OpSpan: cond.S, S: cond.S}
 							s2 := &operand{mode: ModeValue, typ: subject.typ, expr: e.Subject}
 							c.equality(bin, s2, x)
+							if types.IsErrorType(subject.typ) && x.typ != types.Null && types.IsErrorType(x.typ) {
+								// when err { ErrNotFound -> }: Go's ==, as in a switch.
+								subj, val := e.Subject.Span().Short(), cond.X.Span().Short()
+								c.warnf(diag.WErrorTypeTest, cond.S, "a when over an error compares with ==, so a wrapped %s does not match", val).
+									WithHint("to match through wrapping, test errors.Is in a when without a subject: when { errors.Is(%s, %s) -> ... }", subj, val)
+							}
 						}
 					}
 				case syntax.WhenIs, syntax.WhenNotIs:

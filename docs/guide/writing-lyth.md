@@ -255,7 +255,7 @@ func main() throws {
   `struct tc { in: string; want: int }`, then `for c in [tc(in = "1", want = 1)] { ... }`.
 - `go vet` runs with the tests and requires a constant format string: write
   `t.Errorf("got %d, want %d", got, want)`, or `t.Error("got ${got}, want ${want}")` with a
-  template, never a template inside `t.Errorf`.
+  template, never a template inside `t.Errorf` (`lyth check` warns, W0010).
 
 ## Coming from Go
 

@@ -81,4 +81,5 @@ const (
 	WErrorTypeTest Code = "W0007"
 	WJSONKey       Code = "W0008"
 	WJSONKeyChange Code = "W0009"
+	WFormatString  Code = "W0010"
 )

@@ -1,0 +1,22 @@
+// Values put into a template used as a format string are read as format text.
+import "fmt"
+import "errors"
+import "io/fs"
+import "log"
+
+func main() {
+    v := 50
+    fmt.Printf("${v}% done\n") // WARN W0010 "a string template is used as a format string"
+    log.Printf("progress ${v}") // WARN W0010 "a string template is used as a format string"
+    fmt.Printf("%d%% done\n", v)
+    fmt.Print("${v}% done\n")
+    err := fmt.Errorf("open: %w", fs.ErrNotExist)
+    when err {
+        fs.ErrNotExist -> println("missing") // WARN W0007 "a when over an error compares with =="
+        else -> println("other")
+    }
+    when {
+        errors.Is(err, fs.ErrNotExist) -> println("missing")
+        else -> println("other")
+    }
+}

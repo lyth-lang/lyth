@@ -472,7 +472,30 @@ func (c *Checker) checkArgs(e *syntax.CallExpr, sig *types.Signature, args []*sy
 		}
 	}
 	c.preArgs = nil
+	c.templateFormat(sig, args)
 	return ok
+}
+
+// templateFormat warns about a string template passed as the format of a
+// printf-like function (format string, args ...any): the values put into
+// the template are read as format text, so a % in them breaks the output
+// (W0010).
+func (c *Checker) templateFormat(sig *types.Signature, args []*syntax.Arg) {
+	np := len(sig.Params)
+	if !sig.Variadic || np < 2 || len(sig.ParamNames) != np || sig.ParamNames[np-2] != "format" || len(args) < np-1 {
+		return
+	}
+	tmpl, ok := syntax.Unparen(args[np-2].Value).(*syntax.TemplateLit)
+	if !ok || args[np-2].Name != nil {
+		return
+	}
+	for _, part := range tmpl.Parts {
+		if part.X != nil {
+			c.warnf(diag.WFormatString, tmpl.S, "a string template is used as a format string: a %% in the values put into it is read as a formatting verb").
+				WithHint("pass the values as arguments (\"%%v\", x), or call the function without f (Print, Error) with the template")
+			return
+		}
+	}
 }
 
 func (c *Checker) checkArgsLoose(args []*syntax.Arg) {
