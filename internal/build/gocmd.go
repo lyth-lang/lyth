@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -352,6 +353,18 @@ func (s *Session) WriteInTree() ([]string, error) {
 				return written, err
 			}
 			written = append(written, path)
+		}
+		// Generated files whose source is gone (b.lyth renamed) would be
+		// compiled with the package: they are this command's to remove.
+		stale := map[string]string{}
+		hideStaleInTree(p.Dir.Dir, stale)
+		for path := range stale {
+			if slices.Contains(written, path) {
+				continue
+			}
+			if err := os.Remove(path); err != nil {
+				return written, err
+			}
 		}
 	}
 	return written, nil
