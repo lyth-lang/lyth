@@ -25,9 +25,6 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         go: [go.mod, stable]
     runs-on: ${{ matrix.os }}
-    # Windows support has not been verified on a Windows machine yet: its results are
-    # reported without failing the run.
-    continue-on-error: ${{ matrix.os == 'windows-latest' }}
     steps:
       - name: Keep line endings as committed
         run: git config --global core.autocrlf false
