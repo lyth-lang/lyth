@@ -1,0 +1,118 @@
+# Tests every push to main and every pull request: the compiler on Linux, macOS, and
+# Windows with the Go of go.mod and the latest Go, the race detector, a fuzzing smoke
+# run, the editor grammars and the VS Code extension, and the documentation site, which
+# fails on broken links.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, ${{ matrix.go }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        go: [go.mod, stable]
+    runs-on: ${{ matrix.os }}
+    # Windows support has not been verified on a Windows machine yet: its results are
+    # reported without failing the run.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    steps:
+      - name: Keep line endings as committed
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        if: matrix.go == 'go.mod'
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-go@v5
+        if: matrix.go == 'stable'
+        with:
+          go-version: stable
+
+      - name: gofmt
+        if: matrix.os == 'ubuntu-latest' && matrix.go == 'go.mod'
+        run: |
+          unformatted=$(gofmt -l $(git ls-files '*.go'))
+          if [ -n "$unformatted" ]; then
+            echo "::error::these files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test ./...
+
+      - name: go test -race
+        if: matrix.os == 'ubuntu-latest' && matrix.go == 'stable'
+        run: go test -race ./...
+
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Fuzz the parser
+        run: go test ./internal/syntax -run '^$' -fuzz FuzzParse -fuzztime 60s
+      - name: Fuzz the checker
+        run: go test ./internal/check -run '^$' -fuzz FuzzCheck -fuzztime 60s
+
+  editors:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: tree-sitter grammar
+        working-directory: editors/tree-sitter-lyth
+        run: |
+          npm ci
+          npm test
+      - name: VS Code extension
+        working-directory: editors/vscode-lyth
+        # the integration tests start VS Code, which needs a display
+        run: |
+          npm ci
+          npm run check
+          xvfb-run -a npm test
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the site names the newest release tag
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Build the site
+        working-directory: website
+        run: |
+          npm ci
+          npm run build
