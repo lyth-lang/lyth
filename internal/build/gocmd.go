@@ -215,10 +215,36 @@ func (s *Session) GoRun(pkg string, args []string, flags []string) (int, error) 
 	cmd := exec.Command(bin, args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, s.cfg.Stdout, s.cfg.Stderr
 	cmd.Dir = s.cfg.WorkDir
-	err = cmd.Run()
+	// While the program runs, Ctrl-C reaches it from the terminal, and lyth
+	// waits for it to finish (a server shutting down gracefully) instead of
+	// exiting first; a SIGTERM sent to lyth goes on to the program.
+	signal.Ignore(os.Interrupt)
+	defer signal.Reset(os.Interrupt)
+	term := make(chan os.Signal, 1)
+	signal.Notify(term, syscall.SIGTERM)
+	defer signal.Stop(term)
+	if err := cmd.Start(); err != nil {
+		return 1, err
+	}
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case sig := <-term:
+			_ = cmd.Process.Signal(sig)
+		case <-done:
+		}
+	}()
+	err = cmd.Wait()
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
-		return exitErr.ExitCode(), nil
+		if code := exitErr.ExitCode(); code >= 0 {
+			return code, nil
+		}
+		if code := signalExitCode(exitErr); code >= 0 {
+			return code, nil
+		}
+		return 1, nil
 	}
 	if err != nil {
 		return 1, err
