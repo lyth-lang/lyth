@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	gobuild "go/build"
+	"go/build/constraint"
 	"go/token"
 	gotypes "go/types"
 	"io"
@@ -366,6 +368,9 @@ func (s *Session) parse() {
 			}
 			f := source.NewFile(path, displayName(path, s.cfg.WorkDir), data)
 			sf := syntax.Parse(f, s.Sink)
+			if !s.buildsFile(path, sf) {
+				continue // another platform's file, or excluded by //go:build
+			}
 			if sf.Package != nil && strings.HasSuffix(sf.Package.Name, "_test") {
 				s.Sink.Errorf(diag.EUnsupported, sf.Package.S, "external test packages (package %s) are not supported yet", sf.Package.Name).
 					WithHint("write the test in the package itself (omit the package clause), or as a Go _test.go file")
@@ -415,6 +420,43 @@ func (s *Session) embedOutsideModule() {
 			}
 		}
 	}
+}
+
+// buildsFile reports whether the build includes a parsed file, as go build
+// decides for the Go file it becomes: its name's _GOOS and _GOARCH
+// suffixes, and its //go:build line, for the session's GOOS, GOARCH, and
+// tags. A malformed //go:build line is reported.
+func (s *Session) buildsFile(path string, sf *syntax.File) bool {
+	content := "package p\n"
+	if c := sf.BuildConstraint; c != "" {
+		if _, err := constraint.Parse(c); err != nil {
+			span := source.Span{File: sf.Src}
+			for _, cm := range sf.Comments {
+				if cm.Text == c {
+					span = cm.Span
+				}
+			}
+			s.Sink.Errorf(diag.EUnsupportedSyntax, span, "invalid //go:build line: %v", strings.TrimPrefix(err.Error(), "parsing //go:build line: ")).
+				WithHint("write a boolean expression of build tags: //go:build linux && !arm")
+			return true
+		}
+		content = c + "\n\npackage p\n"
+	}
+	ctx := gobuild.Default
+	if s.goEnv != nil {
+		if v := s.goEnv.Vars["GOOS"]; v != "" {
+			ctx.GOOS = v
+		}
+		if v := s.goEnv.Vars["GOARCH"]; v != "" {
+			ctx.GOARCH = v
+		}
+		ctx.CgoEnabled = s.goEnv.Vars["CGO_ENABLED"] == "1"
+	}
+	ctx.BuildTags = s.cfg.Tags
+	ctx.OpenFile = func(string) (io.ReadCloser, error) { return io.NopCloser(strings.NewReader(content)), nil }
+	name := strings.TrimSuffix(filepath.Base(path), ".lyth") + ".go"
+	ok, err := ctx.MatchFile(filepath.Dir(path), name)
+	return err != nil || ok
 }
 
 func baseNames(paths []string) []string {

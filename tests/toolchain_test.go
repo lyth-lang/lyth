@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -1592,5 +1593,45 @@ func TestGoDirectiveTooOld(t *testing.T) {
 	if len(ds) != 1 || ds[0].Code != diag.EToolchain || !strings.Contains(ds[0].Message, "go.mod declares go 1.21; Lyth needs go 1.26") ||
 		ds[0].Span.StartPos().Line != 3 {
 		t.Fatalf("diagnostics:\n%s", render(ds))
+	}
+}
+
+// TestBuildConstraints checks only the files the build includes: per-GOOS
+// files declaring the same function, and //go:build tag pairs, as go build
+// selects them; -tags switches the pair.
+func TestBuildConstraints(t *testing.T) {
+	files := map[string]string{
+		"main.lyth":         "func main() {\n    println(platform(), mode())\n}\n",
+		"plat_linux.lyth":   "func platform(): string = \"linux\"\n",
+		"plat_darwin.lyth":  "func platform(): string = \"darwin\"\n",
+		"plat_windows.lyth": "func platform(): string = \"windows\"\n",
+		"plat_other.lyth":   "//go:build !linux && !darwin && !windows\n\nfunc platform(): string = \"other\"\n",
+		"mode_dev.lyth":     "//go:build dev\n\nfunc mode(): string = \"dev\"\n",
+		"mode_prod.lyth":    "//go:build !dev\n\nfunc mode(): string = \"prod\"\n",
+		"ignored_tool.lyth": "//go:build ignore\n\nfunc main() {}\n",
+	}
+	root := writeModule(t, "plat", files)
+	for _, tags := range [][]string{nil, {"dev"}} {
+		cfg := &build.Config{WorkDir: root, Tags: tags, Stdout: os.Stdout, Stderr: os.Stderr}
+		s, err := build.Compile(cfg, build.Target{})
+		if err != nil || s.Sink.HasErrors() {
+			t.Fatalf("tags %v: %v\n%s", tags, err, render(s.Sink.All()))
+		}
+		bin := filepath.Join(root, "plat.bin")
+		if ok, err := s.GoBuild(bin, []string{"plat"}, nil); err != nil || !ok {
+			t.Fatalf("build: %v\n%s", err, render(s.Sink.All()))
+		}
+		out, _ := exec.Command(bin).Output()
+		mode := "prod"
+		if tags != nil {
+			mode = "dev"
+		}
+		want := runtime.GOOS
+		if want != "linux" && want != "darwin" && want != "windows" {
+			want = "other"
+		}
+		if got := strings.TrimSpace(string(out)); got != want+" "+mode {
+			t.Errorf("tags %v: output %q, want %q", tags, got, want+" "+mode)
+		}
 	}
 }
