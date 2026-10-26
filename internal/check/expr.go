@@ -452,7 +452,12 @@ func (c *Checker) unary(e *syntax.UnaryExpr, want types.Type) *operand {
 	case syntax.AND:
 		return c.addressOf(e)
 	case syntax.MUL:
-		x := c.value(e.X, nil)
+		x := c.expr(e.X, nil)
+		if x.mode == ModeType {
+			// (*T)(p): a conversion to the pointer type.
+			return &operand{mode: ModeType, typ: &types.Pointer{Elem: x.typ}}
+		}
+		x = c.singleValue(x)
 		if x.mode == ModeInvalid {
 			return invalid(e)
 		}
@@ -1474,6 +1479,8 @@ func (c *Checker) typedListLit(e *syntax.ListLit) *operand {
 		c.checkElems(e.Elems, b.Elem)
 		if int64(len(e.Elems)) > b.Len {
 			c.errorf(diag.ETypeMismatch, e.Elems[b.Len].Span(), "%s holds %d elements; this literal gives %d", t, b.Len, len(e.Elems))
+		} else if int64(len(e.Elems)) < b.Len && !types.Zeroable(b.Elem) {
+			c.errorf(diag.ENoZeroValue, e.S, "%s needs all %d elements: the rest would be zero, and %s", t, b.Len, types.NoZeroReason(b.Elem))
 		}
 	default:
 		c.checkElems(e.Elems, nil)

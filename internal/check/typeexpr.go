@@ -150,6 +150,11 @@ func (c *Checker) resolveType0(te syntax.TypeExpr) types.Type {
 				c.errorf(diag.ETypeArgs, keySpan, "%s cannot be a map key: it is not comparable", key)
 				return
 			}
+			if types.IsNullable(key) && !types.IsNilable(key) {
+				c.errorf(diag.ETypeArgs, keySpan, "%s cannot be a map key: Go would compare the optional values by address, not by value", key).
+					WithHint("key the map by %s, and keep the entry for null apart", types.Base(key))
+				return
+			}
 			if path, ft := optionalPart(key); path != "" {
 				c.errorf(diag.ETypeArgs, keySpan, "%s cannot be a map key: %s has type %s, which Go would compare by address", key, path, ft)
 			}
@@ -259,6 +264,13 @@ func (c *Checker) validInstance(inst *types.Named, span source.Span) bool {
 		c.errorf(diag.ETypeArgs, span, "invalid type arguments for %s", inst.Decl.Name).
 			WithNote("%s", c.lythNames(translateGoMessage(err.Error())))
 		return false
+	}
+	if len(inst.Decl.TypeParams) == len(inst.Args) {
+		bind := bindings{}
+		for i, tp := range inst.Decl.TypeParams {
+			bind[tp.Go] = inst.Args[i]
+		}
+		c.comparableArgs(span, inst.Decl.TypeParams, bind)
 	}
 	return true
 }

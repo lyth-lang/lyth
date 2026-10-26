@@ -1,6 +1,7 @@
 package check
 
 import (
+	"fmt"
 	"go/constant"
 	gotypes "go/types"
 	"math"
@@ -277,6 +278,11 @@ func (c *Checker) assignable(src, dst types.Type) (bool, ConversionKind, string)
 		return false, ConvNone, reason
 	}
 	if gotypes.AssignableTo(gs, gd) {
+		if types.IsInterface(dst) {
+			if reason := c.methodNullability(src, dst); reason != "" {
+				return false, ConvNone, reason
+			}
+		}
 		return true, ConvNone, ""
 	}
 	if types.IsInterface(dst) {
@@ -296,7 +302,8 @@ func embeddedSealed(src, dst types.Type) string {
 		return ""
 	}
 	n, ok := types.Base(src).(*types.Named)
-	if p, isPtr := types.Base(src).(*types.Pointer); isPtr {
+	p, isPtr := types.Base(src).(*types.Pointer)
+	if isPtr {
 		n, ok = types.Base(p.Elem).(*types.Named)
 	}
 	if !ok || n.Decl == nil || n.Decl.Kind != types.StructDecl || n.Decl.PkgPath != sd.PkgPath {
@@ -304,6 +311,11 @@ func embeddedSealed(src, dst types.Type) string {
 	}
 	for _, m := range sd.Members {
 		if mn, ok := types.Base(m).(*types.Named); ok && mn.Decl == n.Decl {
+			if isPtr {
+				// Go gives *T the methods of T, but a when over the
+				// interface tests for the member T itself.
+				return "*" + n.Decl.Name + " is not a member of sealed " + types.Base(dst).String() + "; " + n.Decl.Name + " is: use the value, not its address"
+			}
 			return ""
 		}
 		if mp, ok := types.Base(m).(*types.Pointer); ok {
@@ -712,4 +724,78 @@ func (c *Checker) methodName() string {
 		}
 	}
 	return "name"
+}
+
+// methodNullability explains why src, whose Go method set implements the
+// Lyth interface dst, still does not implement it in Lyth: a method returns
+// null where dst promises a value, or rejects null that dst lets callers
+// pass. It is "" when the methods fit or are not Lyth methods.
+func (c *Checker) methodNullability(src, dst types.Type) string {
+	dn, ok := types.Base(dst).(*types.Named)
+	if !ok || dn.Decl == nil || dn.Decl.Kind != types.InterfaceDecl {
+		return ""
+	}
+	key := [2]string{src.String(), dst.String()}
+	if c.implementing[key] {
+		return "" // already being compared further up
+	}
+	if c.implementing == nil {
+		c.implementing = map[[2]string]bool{}
+	}
+	c.implementing[key] = true
+	defer delete(c.implementing, key)
+	wantBind := declBindings(dn)
+	for _, im := range dn.Decl.Methods {
+		dm, bind := lythMethod(types.Base(src), im.GoName, map[*types.TypeDecl]bool{})
+		if dm == nil || dm.Sig == nil || im.Sig == nil {
+			continue
+		}
+		for i, wp := range im.Sig.Params {
+			if i >= len(dm.Sig.Params) {
+				break
+			}
+			w, g := subst(wp, wantBind), subst(dm.Sig.Params[i], bind)
+			if ok, conv, _ := c.assignable(w, g); !ok || conv != ConvNone {
+				return fmt.Sprintf("method %s takes %s where %s passes %s", im.Name, g, dst, w)
+			}
+		}
+		for i, wr := range im.Sig.Results {
+			if i >= len(dm.Sig.Results) {
+				break
+			}
+			w, g := subst(wr, wantBind), subst(dm.Sig.Results[i], bind)
+			if ok, conv, _ := c.assignable(g, w); !ok || conv != ConvNone {
+				return fmt.Sprintf("method %s returns %s where %s promises %s", im.Name, g, dst, w)
+			}
+		}
+	}
+	return ""
+}
+
+// lythMethod finds the Lyth method goName of t (a Lyth struct, a pointer to
+// one, or a Lyth interface), including methods promoted from embedded
+// fields, with the type arguments of its declaration; nil when the method
+// comes from Go or is missing.
+func lythMethod(t types.Type, goName string, seen map[*types.TypeDecl]bool) (*types.Method, bindings) {
+	if p, ok := t.(*types.Pointer); ok {
+		t = types.Base(p.Elem)
+	}
+	n, ok := t.(*types.Named)
+	if !ok || n.Decl == nil || seen[n.Decl] {
+		return nil, nil
+	}
+	seen[n.Decl] = true
+	for _, m := range n.Decl.Methods {
+		if m.GoName == goName {
+			return m, declBindings(n)
+		}
+	}
+	for _, f := range n.Decl.Fields {
+		if f.Embedded {
+			if m, bind := lythMethod(types.Base(subst(f.Type, declBindings(n))), goName, seen); m != nil {
+				return m, bind
+			}
+		}
+	}
+	return nil, nil
 }

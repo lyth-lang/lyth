@@ -241,6 +241,11 @@ This is the idiomatic Go representation for optional JSON fields (`*int` with
   rejects such a conversion (E0201).
 - `T?` where `T` is a type parameter is **[planned]**. It needs a uniform
   representation that does not depend on the instantiation.
+- Go code can write through a pointer Lyth hands it, and Lyth cannot see
+  that. `json.Unmarshal(data, &u)` decodes into the existing box of an
+  optional field of `u`, which a copy of `u` made before shares (`u := base`
+  copies the pointer). Decode into a fresh value, or one whose optional fields
+  are null, when another copy must keep its values.
 
 Performance note: optional values cost a pointer indirection and possibly an
 allocation, like `*T` in hand-written Go. Hot paths can use `(T, bool)` results
@@ -258,11 +263,23 @@ Rules that follow:
 
 - A local `x: T` without initializer requires zeroable `T` (E0405).
 - Struct construction may omit only zeroable fields.
-- `make([]T, n)` with `n != 0` requires zeroable `T`.
-- `m[k]` on `map[K]V` has type `V` if `V` is zeroable, else `V?`.
+- `make([]T, n)` with `n != 0` requires zeroable `T`, and so do `clear(xs)` on
+  a slice and an array literal that gives fewer elements than the length
+  (`[3]*User{u}`).
+- `m[k]` on `map[K]V` has type `V` if `V` is zeroable, else `V?`, null when
+  the key is missing; `v, ok := m[k]` gives `v` the same type. For a struct or
+  enum `V`, the read is boxed (`var v *Job; if x, ok := m[k]; ok { v = &x }`),
+  and `v, ok = m[k]` cannot assign an existing `v` (E0405): assign `v = m[k]`.
+  `ch.receive()` follows the same rule (language.md §5.9).
 - Destructuring a fallible call yields the non-error values with their zero
   value on error, so non-zeroable value types become nullable there
   ([errors.md §5](errors.md#5-raw-access-destructuring)).
+
+One gap remains: Go lets `s[lo:hi]` extend a slice up to its capacity, and the
+elements past its length are zero values. For a slice of non-zeroable
+elements (`make([]*User, 0, 8)[:2]`) those are nils that the type says cannot
+exist. Lyth does not check `hi` against `len(s)` at run time; grow such slices
+with `append`.
 
 ## 7. Mutability
 
@@ -347,9 +364,11 @@ Function types are assignable when their lowered Go signatures are identical and
 nullability is compatible position by position. A Lyth `(A) -> R throws` is
 assignable to and from a Go `func(A) (R, error)`.
 
-Explicit conversions `T(x)` follow Go's conversion rules on the lowered types.
-Lyth additionally rejects conversions that would discard a nullability guarantee
-without a check.
+Explicit conversions `T(x)` follow Go's conversion rules on the lowered types,
+including `(*T)(p)` for a pointer type. Lyth additionally rejects conversions
+that would discard a nullability guarantee without a check. `copy(dst, src)`
+needs element types that are assignable without a conversion: a `[]*User?`
+cannot be copied into a `[]*User`.
 
 **Comparison.** `==` and `!=` require operands of identical type (ignoring
 nullability), with one Go exception: a value may be compared with an interface
@@ -417,7 +436,11 @@ and its limits. See [ADR 0028](../adr/0028-generic-declarations.md).
   `[T: any]`), `comparable`, Go constraints such as `cmp.Ordered`, and Lyth or
   Go method interfaces (`T: fmt.Stringer`). `comparable` and type-set
   interfaces can only constrain (E0216). Satisfaction is Go's, checked by `go/types` at each
-  instantiation (E0213).
+  instantiation (E0213). Lyth adds two rules: a type argument that may be
+  null (`*Sq?`) cannot satisfy a constraint with methods, which the generic
+  code would call on null; and an optional value (`int?`), or a struct or
+  array holding one, cannot be a `comparable` type argument or a map key,
+  since Go would compare the boxes' addresses.
 - **Operations** on a value of type `T` are the ones its constraint allows:
   `==` with `comparable`, `<` and `+` when every type of the constraint's
   type set supports them (`cmp.Ordered`), and the constraint's methods.
@@ -444,7 +467,10 @@ and its limits. See [ADR 0028](../adr/0028-generic-declarations.md).
 Method sets follow Go: the method set of `T` contains value-receiver methods,
 and `*T` contains both. A Lyth type satisfies an interface when its lowered Go
 type does (decided by `go/types.Implements`) *and* the Lyth signatures agree on
-nullability and fallibility. A value used as an interface it does not satisfy
+nullability and fallibility: a method may return a non-null value where the
+interface allows null, and accept null where the interface passes a non-null
+value, but not the reverse (`Find(): *User?` does not implement
+`Find(): *User`). A value used as an interface it does not satisfy
 is a type mismatch (E0201) whose note names the missing method and the reason:
 missing, wrong signature, pointer receiver, or a name that differs only in case. A struct can declare
 the interfaces it implements (`struct Circle : Shape`,

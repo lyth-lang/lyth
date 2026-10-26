@@ -30,6 +30,9 @@ type Config struct {
 // Checker holds the state of checking one package.
 type Checker struct {
 	gens int // generations handed out, for smart casts of reassigned locals (flow.go)
+	// implementing holds the (type, interface) pairs whose methods
+	// methodNullability is comparing, so recursive types terminate.
+	implementing map[[2]string]bool
 	// lythDecls caches, by package path, the declarations of other Lyth
 	// packages by Go name (nil for Go packages), for lythDecl.
 	lythDecls map[string]map[string]*types.TypeDecl

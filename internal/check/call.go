@@ -926,8 +926,31 @@ func (c *Checker) builtinCall(e *syntax.CallExpr, k BuiltinKind, args []*syntax.
 		if !nargs(2, 2) {
 			return invalid(e)
 		}
-		c.value(args[0].Value, nil)
-		c.value(args[1].Value, nil)
+		dst := c.value(args[0].Value, nil)
+		src := c.value(args[1].Value, nil)
+		if dst.mode == ModeInvalid || src.mode == ModeInvalid {
+			return &operand{mode: ModeValue, typ: types.Int}
+		}
+		ds, ok := collectionOf(dst.typ).(*types.Slice)
+		if !ok {
+			c.errorf(diag.EInvalidOp, args[0].Value.Span(), "copy needs a slice to copy into, not %s", dst.typ)
+			return &operand{mode: ModeValue, typ: types.Int}
+		}
+		if types.IsString(src.typ) && types.Identical(types.Base(ds.Elem), types.Byte) {
+			c.convertUntyped(src, types.String, nil)
+			return &operand{mode: ModeValue, typ: types.Int}
+		}
+		ss, ok := collectionOf(src.typ).(*types.Slice)
+		if !ok {
+			c.errorf(diag.EInvalidOp, args[1].Value.Span(), "copy needs a slice to copy from, not %s", src.typ)
+			return &operand{mode: ModeValue, typ: types.Int}
+		}
+		if okA, conv, _ := c.assignable(ss.Elem, ds.Elem); !okA || conv != ConvNone {
+			d := c.errorf(diag.ETypeMismatch, args[1].Value.Span(), "cannot copy %s into %s: the elements must have the same type", src.typ, dst.typ)
+			if types.MayBeNull(ss.Elem) && !types.MayBeNull(ds.Elem) && types.Identical(types.Base(ss.Elem), types.Base(ds.Elem)) {
+				d.WithNote("an element of %s may be null, and %s cannot hold null", src.typ, dst.typ)
+			}
+		}
 		return &operand{mode: ModeValue, typ: types.Int}
 	case BuiltinDelete:
 		if !nargs(2, 2) {
@@ -1040,7 +1063,11 @@ func (c *Checker) builtinCall(e *syntax.CallExpr, k BuiltinKind, args []*syntax.
 		if !nargs(1, 1) {
 			return invalid(e)
 		}
-		c.value(args[0].Value, nil)
+		x := c.value(args[0].Value, nil)
+		if s, ok := collectionOf(x.typ).(*types.Slice); ok && !types.Zeroable(s.Elem) {
+			c.errorf(diag.ENoZeroValue, args[0].Value.Span(), "clear would set every element of %s to its zero value, and %s", x.typ, types.NoZeroReason(s.Elem)).
+				WithHint("shorten the slice instead: %s = %s[:0]", args[0].Value.Span().Short(), args[0].Value.Span().Short())
+		}
 		return &operand{mode: ModeNoValue, typ: types.Unit}
 	case BuiltinClose:
 		if !nargs(1, 1) {

@@ -78,9 +78,16 @@ func (c *Checker) lambda(e *syntax.LambdaExpr, want types.Type) *operand {
 				t := exp.Params[i]
 				if p.Type != nil {
 					at := c.resolveType(p.Type)
-					if !types.IdenticalIgnoringNull(at, t) {
+					ok, conv, _ := c.assignable(t, at)
+					switch {
+					case !types.IdenticalIgnoringNull(at, t):
 						c.errorf(diag.ETypeMismatch, p.Type.Span(), "parameter %s has type %s, but %s is expected here", p.Name.Name, at, t)
-					} else {
+					case !ok || conv != ConvNone:
+						// The caller passes a t, which may be null.
+						c.errorf(diag.ETypeMismatch, p.Type.Span(), "parameter %s cannot have type %s: the lambda is called with %s values, which may be null", p.Name.Name, at, t).
+							WithEdit(p.Type.Span(), t.String(), "declare it %s, or leave the type out", t)
+						t = at // one error, not another at each use
+					default:
 						t = at
 					}
 				}

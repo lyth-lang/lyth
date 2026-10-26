@@ -776,6 +776,7 @@ func (c *Checker) instantiateFunc(e *syntax.InstantiateExpr) *operand {
 			WithNote("%s", c.lythNames(translateGoMessage(err.Error())))
 		return invalid(e)
 	}
+	c.comparableArgs(e.S, sig.TypeParams, bind)
 	res := substSig(sig, bind)
 	res.GoSig = inst.(*gotypes.Signature)
 	c.info.FuncInsts[e] = targs

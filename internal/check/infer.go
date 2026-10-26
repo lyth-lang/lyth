@@ -704,17 +704,33 @@ func (c *Checker) instantiateFuncValue(x *operand, want types.Type, explicit boo
 	return true
 }
 
+// nullableTypeArg reports a type argument that may be null for a type
+// parameter whose constraint has methods: the generic code calls them on its
+// values, which would be null.
+func (c *Checker) nullableTypeArg(span source.Span, tp *types.TypeParam, iface *gotypes.Interface, arg types.Type) {
+	if arg == nil || iface.NumMethods() == 0 || !types.MayBeNull(arg) || types.IsPlatform(arg) {
+		return
+	}
+	c.errorf(diag.ETypeArgs, span, "%s cannot be the type %s: it may be null, and %s's constraint has methods that are called on its values", arg, tp.Name, tp.Name).
+		WithHint("use %s, and leave the nulls out first", types.Base(arg))
+}
+
 // comparableArgs reports a type argument holding an optional value (a
 // struct with an int? field) for a comparable type parameter: Go would
 // compare it by the boxes' addresses (slices.Contains, map keys).
 func (c *Checker) comparableArgs(span source.Span, tps []*types.TypeParam, bind bindings) {
 	for _, tp := range tps {
 		iface, ok := tp.Go.Constraint().Underlying().(*gotypes.Interface)
+		if ok {
+			c.nullableTypeArg(span, tp, iface, bind[tp.Go])
+		}
 		if !ok || !iface.IsComparable() {
 			continue
 		}
-		if path, ft := optionalPart(bind[tp.Go]); path != "" {
-			c.errorf(diag.ETypeArgs, span, "%s cannot be the comparable type %s: %s has type %s, which Go would compare by address", bind[tp.Go], tp.Name, path, ft)
+		if t := bind[tp.Go]; t != nil && types.IsNullable(t) && !types.IsNilable(t) {
+			c.errorf(diag.ETypeArgs, span, "%s cannot be the comparable type %s: Go would compare the optional values by address, not by value", t, tp.Name)
+		} else if path, ft := optionalPart(t); path != "" {
+			c.errorf(diag.ETypeArgs, span, "%s cannot be the comparable type %s: %s has type %s, which Go would compare by address", t, tp.Name, path, ft)
 		}
 	}
 }
