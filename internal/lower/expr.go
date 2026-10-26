@@ -580,6 +580,10 @@ func (fl *fnLower) basicLit(e *syntax.BasicLit) ast.Expr {
 		return &ast.BasicLit{Kind: token.FLOAT, Value: e.Raw}
 	case syntax.RUNE:
 		r, _ := utf8.DecodeRuneInString(e.Value)
+		// Keep the source spelling ('\xff', '\v') when Go reads it as the same rune.
+		if v, _, tail, err := strconv.UnquoteChar(strings.TrimSuffix(strings.TrimPrefix(e.Raw, "'"), "'"), '\''); err == nil && tail == "" && v == r {
+			return &ast.BasicLit{Kind: token.CHAR, Value: e.Raw}
+		}
 		return &ast.BasicLit{Kind: token.CHAR, Value: strconv.QuoteRune(r)}
 	}
 	if e.Kind == syntax.RAWSTRING {

@@ -300,6 +300,14 @@ func (l *lexer) scanEscape(quote byte) (string, bool) {
 		return "\r", true
 	case 't':
 		return "\t", true
+	case 'a':
+		return "\a", true
+	case 'b':
+		return "\b", true
+	case 'f':
+		return "\f", true
+	case 'v':
+		return "\v", true
 	case '\\':
 		return "\\", true
 	case '"':
@@ -337,6 +345,9 @@ func (l *lexer) scanEscape(quote byte) (string, bool) {
 		}
 		l.off += n
 		if c == 'x' {
+			if quote == '\'' {
+				return string(v), true // in a rune literal, \xHH is the code point HH, as in Go
+			}
 			return string([]byte{byte(v)}), true
 		}
 		if !utf8.ValidRune(v) {
@@ -346,7 +357,7 @@ func (l *lexer) scanEscape(quote byte) (string, bool) {
 		return string(v), true
 	default:
 		l.errorf(diag.EInvalidEscape, start, l.off, "unknown escape sequence \\%c", c).
-			WithNote("valid escapes are \\n \\r \\t \\\\ \\\" \\' \\$ \\0 \\xHH \\uXXXX \\UXXXXXXXX")
+			WithNote("valid escapes are \\n \\r \\t \\a \\b \\f \\v \\\\ \\\" \\' \\$ \\0 \\xHH \\uXXXX \\UXXXXXXXX")
 		return "", false
 	}
 }
@@ -474,9 +485,11 @@ func (l *lexer) scanRune() {
 	l.off++
 	var val string
 	n := 0
+	bad := false
 	for l.off < len(l.src) && l.src[l.off] != '\'' && l.src[l.off] != '\n' {
 		if l.src[l.off] == '\\' {
-			s, _ := l.scanEscape('\'')
+			s, ok := l.scanEscape('\'')
+			bad = bad || !ok
 			val += s
 		} else {
 			_, size := utf8.DecodeRune(l.src[l.off:])
@@ -491,6 +504,10 @@ func (l *lexer) scanRune() {
 		return
 	}
 	l.off++
+	if bad {
+		l.emit(ILLEGAL, start, l.off, val)
+		return
+	}
 	if utf8.RuneCountInString(val) != 1 {
 		l.errorf(diag.EInvalidChar, start, l.off, "rune literal must contain exactly one character").
 			WithHint("use double quotes for strings: \"%s\"", val)
