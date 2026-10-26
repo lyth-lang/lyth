@@ -56,17 +56,30 @@ func (c *Checker) inferCall(e *syntax.CallExpr, sig *types.Signature, args []*sy
 		}
 		unify(pt, x.typ, bind)
 	}
-	// Untyped constants bind their default type to bare type parameters.
+	// Untyped constants bind their default type to bare type parameters,
+	// the largest kind among them as in Go: pair(1, 2.5) is pair[float64].
+	untyped := map[*gotypes.TypeParam]types.Type{}
+	var order []*gotypes.TypeParam
 	for i, a := range args {
 		x := ops[i]
 		if x == nil || x.mode == ModeInvalid || !types.IsUntyped(x.typ) {
 			continue
 		}
 		if tp, ok := paramFor(i, a).(*types.TypeParam); ok {
-			if _, bound := bind[tp.Go]; !bound {
-				bind[tp.Go] = types.DefaultType(x.typ)
+			if _, bound := bind[tp.Go]; bound {
+				continue
+			}
+			cur, seen := untyped[tp.Go]
+			if !seen {
+				order = append(order, tp.Go)
+			}
+			if !seen || constRank(x.typ) > constRank(cur) {
+				untyped[tp.Go] = x.typ
 			}
 		}
+	}
+	for _, tp := range order {
+		bind[tp] = types.DefaultType(untyped[tp])
 	}
 	c.inferCore(sig, bind)
 	if want != nil && len(sig.Results) == 1 && !types.IsInterface(want) {
@@ -733,4 +746,20 @@ func (c *Checker) comparableArgs(span source.Span, tps []*types.TypeParam, bind 
 			c.errorf(diag.ETypeArgs, span, "%s cannot be the comparable type %s: %s has type %s, which Go would compare by address", t, tp.Name, path, ft)
 		}
 	}
+}
+
+// constRank orders the numeric kinds of untyped constants as Go does when
+// several bind one type parameter: int, then rune, then float.
+func constRank(t types.Type) int {
+	if b := types.BasicOf(t); b != nil {
+		switch b.Kind {
+		case types.UntypedIntKind:
+			return 1
+		case types.UntypedRuneKind:
+			return 2
+		case types.UntypedFloatKind:
+			return 3
+		}
+	}
+	return 0
 }

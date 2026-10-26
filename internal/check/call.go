@@ -3,6 +3,7 @@ package check
 import (
 	"fmt"
 	"go/constant"
+	"go/token"
 	gotypes "go/types"
 	"slices"
 	"strings"
@@ -408,6 +409,11 @@ func (c *Checker) callResult(sig *types.Signature, info *CallInfo, span source.S
 			t = types.MakeNullable(t)
 		}
 		return &operand{mode: ModeValue, typ: t}
+	}
+	if info.Safe {
+		c.errorf(diag.EUnsupported, span, "a safe call cannot return several values").
+			WithHint("check the receiver first: if x != null { a, b := x.M() }")
+		return &operand{mode: ModeInvalid, typ: types.Invalid}
 	}
 	return &operand{mode: ModeValue, typ: &types.Tuple{Elems: sig.Results}}
 }
@@ -990,6 +996,12 @@ func (c *Checker) builtinCall(e *syntax.CallExpr, k BuiltinKind, args []*syntax.
 					WithHint("use make([]%s, 0, n) and append, or a nullable element type", tt.Elem)
 			}
 			c.intArgs(args[1:])
+			if len(args) == 3 {
+				l, k := c.info.Types[args[1].Value].Value, c.info.Types[args[2].Value].Value
+				if l != nil && k != nil && constant.Compare(l, token.GTR, k) {
+					c.errorf(diag.EInvalidOp, args[1].Value.Span(), "the length %s is larger than the capacity %s", l, k)
+				}
+			}
 		case *types.Map, *types.Chan:
 			if len(args) > 2 {
 				c.errorf(diag.EArgCount, e.S, "make(%s) takes at most one size argument", tt)
@@ -1086,6 +1098,10 @@ func (c *Checker) intArgs(args []*syntax.Arg) {
 	for _, a := range args {
 		x := c.value(a.Value, types.Int)
 		if x.mode == ModeInvalid {
+			continue
+		}
+		if x.val != nil && constSign(x.val) < 0 {
+			c.errorf(diag.EInvalidOp, a.Value.Span(), "size must not be negative")
 			continue
 		}
 		if types.IsUntyped(x.typ) {

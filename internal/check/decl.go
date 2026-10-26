@@ -2101,3 +2101,129 @@ func (c *Checker) checkEmbedCycles() {
 		}
 	}
 }
+
+// checkInitCycles reports a package-level variable whose initializer depends
+// on the variable itself through the functions and methods it refers to,
+// which Go rejects as an initialization cycle (var a = f(); func f(): int =
+// a + 1). Cycles of variables alone are reported by globalType.
+func (c *Checker) checkInitCycles(files []*syntax.File) {
+	own := map[*syntax.FunDecl]bool{}
+	for _, f := range files {
+		for _, d := range f.Decls {
+			if fd, ok := d.(*syntax.FunDecl); ok {
+				own[fd] = true
+			}
+		}
+	}
+	var vars []*VarSym
+	for _, g := range c.pkg.Globals {
+		if v, ok := g.(*VarSym); ok && v.Decl != nil && v.Decl.Value != nil {
+			vars = append(vars, v)
+		}
+	}
+	refs := map[Symbol][]Symbol{}
+	refsOf := func(s Symbol) []Symbol {
+		if r, ok := refs[s]; ok {
+			return r
+		}
+		var root syntax.Node
+		switch s := s.(type) {
+		case *VarSym:
+			root = s.Decl.Value
+		case *FuncSym:
+			root = s.Decl
+		}
+		var out []Symbol
+		seen := map[Symbol]bool{}
+		add := func(t Symbol) {
+			if !seen[t] {
+				seen[t] = true
+				out = append(out, t)
+			}
+		}
+		addFunc := func(f *FuncSym) {
+			if f != nil && f.Decl != nil && own[f.Decl] {
+				add(f)
+			}
+		}
+		syntax.Walk(root, func(n syntax.Node) {
+			switch n := n.(type) {
+			case *syntax.Ident:
+				switch t := c.info.Uses[n].(type) {
+				case *VarSym:
+					if t.Kind == GlobalVar && t.Decl != nil && t.Decl.Value != nil {
+						add(t)
+					}
+				case *FuncSym:
+					addFunc(t)
+				}
+			case *syntax.SelectorExpr:
+				if sel := c.info.Selections[n]; sel != nil {
+					if m, ok := sel.Obj.(*types.Method); ok {
+						f, _ := m.Sym.(*FuncSym)
+						addFunc(f)
+					}
+				}
+			case *syntax.CallExpr:
+				if ci := c.info.Calls[n]; ci != nil && ci.Ext != nil {
+					addFunc(ci.Ext.Func)
+				}
+			}
+		})
+		refs[s] = out
+		return out
+	}
+	reported := map[*VarSym]bool{}
+	for _, root := range vars {
+		if reported[root] {
+			continue
+		}
+		var path []Symbol
+		visited := map[Symbol]bool{}
+		var find func(s Symbol) bool
+		find = func(s Symbol) bool {
+			for _, t := range refsOf(s) {
+				if t == Symbol(root) {
+					path = append(path, s)
+					return true
+				}
+				if visited[t] {
+					continue
+				}
+				visited[t] = true
+				if find(t) {
+					path = append(path, s)
+					return true
+				}
+			}
+			return false
+		}
+		if !find(root) {
+			continue
+		}
+		// path holds the cycle backwards, from the last step to root.
+		names := []string{root.name}
+		viaFunc := false
+		for i := len(path) - 2; i >= 0; i-- {
+			switch s := path[i].(type) {
+			case *VarSym:
+				names = append(names, s.name)
+				reported[s] = true
+			case *FuncSym:
+				names = append(names, s.name)
+				viaFunc = true
+			}
+		}
+		names = append(names, root.name)
+		if !viaFunc {
+			continue // globalType reported it
+		}
+		reported[root] = true
+		var steps []string
+		for i := 0; i+1 < len(names); i++ {
+			steps = append(steps, names[i]+" refers to "+names[i+1])
+		}
+		c.errorf(diag.EInvalidUse, root.Span, "initialization cycle: %s", strings.Join(steps, ", ")).
+			WithHint("initialize %s in func init(), or pass the value the functions need as a parameter", root.name)
+	}
+}

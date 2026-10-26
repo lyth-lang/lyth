@@ -373,7 +373,9 @@ func (fl *fnLower) funcBody(d *syntax.FunDecl, fi *check.FuncInfo) *ast.BlockStm
 			}
 		})
 	} else if d.ExprBody != nil {
-		if len(fi.Sym.Sig.Results) == 0 && !fl.info.PassThrough[d.ExprBody] {
+		// A body that never yields a value (throw err, panic(...)) is a
+		// statement: it returns or panics itself.
+		if len(fi.Sym.Sig.Results) == 0 && !fl.info.PassThrough[d.ExprBody] || fl.info.TypeOf(d.ExprBody) == types.Nothing {
 			fl.exprStmt(d.ExprBody)
 		} else {
 			fl.returnStmt([]syntax.Expr{d.ExprBody}, d.ExprBody.Span())

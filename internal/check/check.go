@@ -157,6 +157,7 @@ func Check(conf *Config, pkgPath string, files []*syntax.File) *Package {
 	c.checkConformance()
 	c.resolveGlobals()
 	c.checkBodies()
+	c.checkInitCycles(files)
 	c.reportUnusedImports()
 	return c.pkg
 }
@@ -252,12 +253,30 @@ func (c *Checker) packageName(files []*syntax.File) string {
 		return "main"
 	}
 	dir = strings.ReplaceAll(dir, "-", "_")
-	if !isIdent(dir) || syntax.IsKeywordName(dir) {
+	if !isIdent(dir) || syntax.IsKeywordName(dir) || goKeywords[dir] {
 		if len(files) > 0 {
 			c.errorf(diag.EUnexpectedToken, source.Span{File: files[0].Src, Start: 0, End: 0},
 				"cannot derive a package name from directory %q; add a package clause", c.conf.DirName)
 		}
-		return "main"
+		// A name importers can still use, so that the error above is the
+		// only one: "my lib" is my_lib, "type" is type_.
+		var b strings.Builder
+		for i, r := range dir {
+			switch {
+			case r == '_' || unicode.IsLetter(r) || i > 0 && unicode.IsDigit(r):
+				b.WriteRune(r)
+			case unicode.IsDigit(r):
+				b.WriteString("_")
+				b.WriteRune(r)
+			default:
+				b.WriteByte('_')
+			}
+		}
+		name := b.String()
+		if name == "" || syntax.IsKeywordName(name) || goKeywords[name] {
+			name += "_"
+		}
+		return name
 	}
 	return dir
 }
@@ -450,6 +469,16 @@ func (c *Checker) resolveImports(f *syntax.File) {
 	fs := c.fileScope[f]
 	for _, imp := range f.Imports {
 		if imp.Path == "" {
+			continue
+		}
+		if r, bad := invalidImportRune(imp.Path); bad {
+			c.errorf(diag.EImport, imp.PathSpan, "invalid import path %q: Go import paths cannot contain %q", imp.Path, r).
+				WithHint("rename the directory")
+			name := path.Base(imp.Path)
+			if imp.Alias != nil {
+				name = imp.Alias.Name
+			}
+			fs.Insert(&PkgSym{name: name, Import: imp, Used: true})
 			continue
 		}
 		pkg, errMsg := c.conf.Import(imp.Path)
@@ -740,4 +769,17 @@ func goTestName(name string) bool {
 		}
 	}
 	return false
+}
+
+// invalidImportRune returns the first character of path that go/types does
+// not accept in an import path: a space, a control character, or one of
+// !"#$%&'()*,:;<=>?[\]^{|}`.
+func invalidImportRune(path string) (rune, bool) {
+	const illegal = "!\"#$%&'()*,:;<=>?[\\]^{|}`\uFFFD"
+	for _, r := range path {
+		if !unicode.IsGraphic(r) || unicode.IsSpace(r) || strings.ContainsRune(illegal, r) {
+			return r, true
+		}
+	}
+	return 0, false
 }

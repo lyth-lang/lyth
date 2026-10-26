@@ -619,9 +619,13 @@ func (l *fileLowerer) structType(decl *types.TypeDecl, d *syntax.StructDecl) *as
 // var _ I = T{}, or var _ I = (*T)(nil) when only *T implements I.
 func (l *fileLowerer) conformance(d *syntax.StructDecl, ts *check.TypeSym) {
 	confs := l.info.Conforms[d]
-	if len(confs) == 0 || len(ts.Decl.TypeParams) > 0 {
+	if len(confs) == 0 {
+		return
+	}
+	if len(ts.Decl.TypeParams) > 0 {
 		// A generic struct has no Go assertion without type arguments; the
 		// checker has verified the declaration.
+		l.sealedMarkers(d, ts, confs)
 		return
 	}
 	gd := &ast.GenDecl{Tok: token.VAR, TokPos: l.endPos(d.S)}
@@ -636,7 +640,24 @@ func (l *fileLowerer) conformance(d *syntax.StructDecl, ts *check.TypeSym) {
 	}
 	l.mark(gd, confs[0].Span)
 	l.decls = append(l.decls, gd)
-	// Members of sealed interfaces get the interface's marker method.
+	l.sealedMarkers(d, ts, confs)
+}
+
+// sealedMarkers gives a member of sealed interfaces their marker methods:
+// func (Leaf[T]) isNode() {}.
+func (l *fileLowerer) sealedMarkers(d *syntax.StructDecl, ts *check.TypeSym, confs []check.Conformance) {
+	var recv ast.Expr = ast.NewIdent(ts.Decl.GoName)
+	if tps := ts.Decl.TypeParams; len(tps) > 0 {
+		var names []ast.Expr
+		for _, tp := range tps {
+			names = append(names, ast.NewIdent(tp.Name))
+		}
+		if len(names) == 1 {
+			recv = &ast.IndexExpr{X: recv, Index: names[0]}
+		} else {
+			recv = &ast.IndexListExpr{X: recv, Indices: names}
+		}
+	}
 	for _, cf := range confs {
 		sd := types.SealedOf(cf.Iface)
 		if sd == nil {
@@ -644,7 +665,7 @@ func (l *fileLowerer) conformance(d *syntax.StructDecl, ts *check.TypeSym) {
 		}
 		pos := l.endPos(d.S)
 		fd := &ast.FuncDecl{
-			Recv: &ast.FieldList{List: []*ast.Field{{Type: ast.NewIdent(ts.Decl.GoName)}}},
+			Recv: &ast.FieldList{List: []*ast.Field{{Type: recv}}},
 			Name: ast.NewIdent(sd.Marker),
 			Type: &ast.FuncType{Func: pos, Params: &ast.FieldList{}},
 			Body: &ast.BlockStmt{Lbrace: pos, Rbrace: pos}, // {} on one line

@@ -1,0 +1,36 @@
+// Code that Go rejects, reported by Lyth.
+import "example.com/my lib" // ERROR E0103 "Go import paths cannot contain"
+struct U {
+    A: int
+}
+
+func U.Pair(): (int, string) {
+    return self.A, "x"
+}
+
+func maybe(): U? = null
+
+var a = f() // ERROR E0216 "initialization cycle: a refers to f, f refers to a"
+
+func f(): int = a + 1
+
+func drain(ch: chan<- int) {
+    for v in ch { // ERROR E0209 "cannot receive from chan<- int: it is send-only"
+        println(v)
+    }
+}
+
+func main() {
+    _ := 5 // ERROR E0005 "_ := declares no variable"
+    x: *int? = null!! // ERROR E0216 "null!! always fails"
+    u := maybe()
+    p, q := u?.Pair() // ERROR E0601 "a safe call cannot return several values"
+    arr := [3]int{1, 2, 3}
+    println(arr[4]) // ERROR E0209 "index 4 is out of range: the length is 3"
+    println(arr[1:7]) // ERROR E0209 "slice bound 7 is out of range: the length is 3"
+    println(arr[2:1]) // ERROR E0209 "invalid slice bounds: 2 is greater than 1"
+    println("abc"[3]) // ERROR E0209 "index 3 is out of range: the length is 3"
+    println(make([]int, -1)) // ERROR E0209 "size must not be negative"
+    println(make([]int, 5, 2)) // ERROR E0209 "the length 5 is larger than the capacity 2"
+    println(arr[2], arr[1:3], "abc"[2], x, p, q)
+}

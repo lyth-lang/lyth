@@ -885,8 +885,12 @@ func (fl *fnLower) elvisInto(e *syntax.ElvisExpr, target ast.Expr, targetType ty
 	if xt != nil && !types.MayBeNull(xt) && !types.IsNilable(xt) && !isCollection(xt) {
 		// The checker warned that the left side is never null (a string,
 		// a struct): Go cannot compare it with nil, and the right side
-		// never runs.
-		fl.emitSynth(&ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: token.ASSIGN, Rhs: []ast.Expr{fl.expr(e.X)}}, e.S)
+		// never runs. An optional target holds it boxed.
+		x := fl.expr(e.X)
+		if targetType != nil && types.IsNullable(targetType) && !types.IsNilable(types.Base(targetType)) {
+			x = fl.box(e.X, x)
+		}
+		fl.emitSynth(&ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: token.ASSIGN, Rhs: []ast.Expr{x}}, e.S)
 		return
 	}
 	x := fl.stash(e.X, fl.expr(e.X))

@@ -1,6 +1,7 @@
 package check
 
 import (
+	"bytes"
 	"go/constant"
 	"go/token"
 	gotypes "go/types"
@@ -187,6 +188,15 @@ func (c *Checker) localDecl(s *syntax.LocalDecl) bool {
 		want = c.resolveType(s.Type)
 	}
 	redeclared := false
+	if s.Define && name.Name == "_" && s.Type == nil && s.Value != nil {
+		// Go's _ := e is "no new variables on left side of :=".
+		d := c.errorf(diag.EColonEquals, name.S, "_ := declares no variable")
+		f := name.S.File
+		if i := bytes.Index(f.Content[name.S.End:s.Value.Span().Start], []byte(":=")); i >= 0 {
+			op := source.Span{File: f, Start: name.S.End + i, End: name.S.End + i + 2}
+			d.WithFix(op, "=", "discard the value with _ = %s", s.Value.Span().Short())
+		}
+	}
 	var param *VarSym // the parameter this declaration may replace (ADR 0039)
 	if s.Define && name.Name != "_" {
 		param = c.paramNamed(name.Name)
@@ -1036,7 +1046,7 @@ func (c *Checker) when(e *syntax.WhenExpr, want types.Type, needValue bool) (*op
 						dup("is "+t.String(), "is "+t.String(), cond.S)
 					}
 					if cond.Kind == syntax.WhenIs && sealed != nil {
-						covered[t.String()] = true
+						covered[memberKey(t)] = true
 					}
 					if cond.Kind == syntax.WhenIs && len(br.Conds) == 1 {
 						if v := whenSubjectVar(c, e); v != nil {
@@ -1086,8 +1096,8 @@ func (c *Checker) when(e *syntax.WhenExpr, want types.Type, needValue bool) (*op
 			}
 		} else {
 			for _, m := range sealed.Members {
-				if !covered[m.String()] {
-					missing = append(missing, m.String())
+				if !covered[memberKey(m)] {
+					missing = append(missing, memberName(m, subject.typ))
 				}
 			}
 		}
@@ -1174,6 +1184,9 @@ func (c *Checker) forStmt(s *syntax.ForStmt) {
 			case *types.Chan:
 				info.Kind, valT = ForChan, t.Elem
 				twoAllowed = false
+				if t.Dir == types.SendOnly {
+					c.errorf(diag.EInvalidOp, s.Iter.Span(), "cannot receive from %s: it is send-only", x.typ)
+				}
 			default:
 				if types.IsString(t) {
 					info.Kind, keyT, valT = ForString, types.Int, types.Rune
@@ -1526,4 +1539,32 @@ func iteratorYield(t types.Type) *types.Signature {
 		return nil
 	}
 	return yield
+}
+
+// memberKey identifies a member of a sealed interface by its declaration,
+// so that is Leaf[int] covers the generic member Leaf.
+func memberKey(t types.Type) string {
+	b, ptr := types.Base(t), ""
+	if p, ok := b.(*types.Pointer); ok {
+		b, ptr = types.Base(p.Elem), "*"
+	}
+	if n, ok := b.(*types.Named); ok && n.Decl != nil {
+		return ptr + n.Decl.PkgPath + "." + n.Decl.Name
+	}
+	return t.String()
+}
+
+// memberName spells a sealed member for a when over subject: a generic
+// member takes the subject's type arguments (Leaf[int] for a Node[int]).
+func memberName(m, subject types.Type) string {
+	b, ptr := types.Base(m), ""
+	if p, ok := b.(*types.Pointer); ok {
+		b, ptr = types.Base(p.Elem), "*"
+	}
+	n, ok := b.(*types.Named)
+	sn, sok := types.Base(subject).(*types.Named)
+	if !ok || n.Decl == nil || len(n.Args) > 0 || len(n.Decl.TypeParams) == 0 || !sok || len(sn.Args) != len(n.Decl.TypeParams) {
+		return m.String()
+	}
+	return ptr + (&types.Named{Decl: n.Decl, Args: sn.Args}).String()
 }

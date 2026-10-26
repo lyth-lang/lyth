@@ -195,11 +195,17 @@ func (c *Checker) expr0(e syntax.Expr, want types.Type) *operand {
 			return invalid(e)
 		}
 		if !types.MayBeNull(x.typ) {
-			c.warnf(diag.WUnnecessary, e.OpSpan, "unnecessary !! on a value of non-nullable type %s", x.typ)
+			if v := c.smartCast(syntax.Unparen(e.X)); v != nil {
+				c.warnf(diag.WUnnecessary, e.OpSpan, "unnecessary !!: %s is not null here", v.name)
+			} else {
+				c.warnf(diag.WUnnecessary, e.OpSpan, "unnecessary !! on a value of non-nullable type %s", x.typ)
+			}
 			return &operand{mode: ModeValue, typ: x.typ}
 		}
 		if x.typ == types.Null {
-			return &operand{mode: ModeValue, typ: types.Nothing}
+			c.errorf(diag.EInvalidUse, e.S, "null!! always fails").
+				WithHint("to stop the program, call panic(\"...\")")
+			return invalid(e)
 		}
 		return &operand{mode: ModeValue, typ: types.Base(x.typ)}
 	case *syntax.IfExpr:
@@ -1715,11 +1721,11 @@ func (c *Checker) index(e *syntax.IndexExpr) *operand {
 		c.indexValue(e.Index)
 		return &operand{mode: ModeValue, typ: t.Elem}
 	case *types.Array:
-		c.indexValue(e.Index)
+		c.constBound(e.Index, c.indexValue(e.Index), t.Len, false)
 		return &operand{mode: ModeValue, typ: t.Elem}
 	case *types.Pointer:
 		if a, ok := types.Base(t.Elem).(*types.Array); ok {
-			c.indexValue(e.Index)
+			c.constBound(e.Index, c.indexValue(e.Index), a.Len, false)
 			return &operand{mode: ModeValue, typ: a.Elem}
 		}
 	case *types.Map:
@@ -1732,41 +1738,77 @@ func (c *Checker) index(e *syntax.IndexExpr) *operand {
 		return &operand{mode: ModeValue, typ: vt}
 	}
 	if types.IsString(collectionOf(x.typ)) {
-		c.indexValue(e.Index)
+		v := c.indexValue(e.Index)
+		if x.val != nil && x.val.Kind() == constant.String {
+			c.constBound(e.Index, v, int64(len(constant.StringVal(x.val))), false)
+		}
 		return &operand{mode: ModeValue, typ: types.Byte}
 	}
 	c.errorf(diag.EInvalidOp, e.S, "cannot index a value of type %s", x.typ)
 	return invalid(e)
 }
 
-func (c *Checker) indexValue(e syntax.Expr) {
+// indexValue checks an index or slice bound and returns its value when it
+// is a constant.
+func (c *Checker) indexValue(e syntax.Expr) constant.Value {
 	x := c.value(e, types.Int)
 	if x.mode == ModeInvalid {
-		return
+		return nil
+	}
+	if x.val != nil && constSign(x.val) < 0 {
+		c.errorf(diag.EInvalidOp, e.Span(), "index must not be negative")
+		return nil
 	}
 	if types.IsUntyped(x.typ) {
-		if x.val != nil && constSign(x.val) < 0 {
-			c.errorf(diag.EInvalidOp, e.Span(), "index must not be negative")
-			return
-		}
 		c.assign(x, types.Int, "index")
-		return
+		return x.val
 	}
 	if !types.IsInteger(types.Base(x.typ)) {
 		c.errorf(diag.ETypeMismatch, e.Span(), "index must be an integer, not %s", x.typ)
+		return nil
+	}
+	return x.val
+}
+
+// constBound reports a constant index or slice bound v past n, the length
+// of an array or constant string: Go rejects it at compile time. A slice
+// bound may equal n.
+func (c *Checker) constBound(e syntax.Expr, v constant.Value, n int64, slice bool) {
+	if v == nil {
+		return
+	}
+	i, exact := constant.Int64Val(constant.ToInt(v))
+	if !exact || i > n || !slice && i == n {
+		what := "index"
+		if slice {
+			what = "slice bound"
+		}
+		c.errorf(diag.EInvalidOp, e.Span(), "%s %s is out of range: the length is %d", what, v, n)
 	}
 }
 
 func (c *Checker) sliceExpr(e *syntax.SliceExpr) *operand {
 	x := c.value(e.X, nil)
+	var lo, hi constant.Value
 	if e.Lo != nil {
-		c.indexValue(e.Lo)
+		lo = c.indexValue(e.Lo)
 	}
 	if e.Hi != nil {
-		c.indexValue(e.Hi)
+		hi = c.indexValue(e.Hi)
 	}
 	if x.mode == ModeInvalid {
 		return invalid(e)
+	}
+	if lo != nil && hi != nil && constant.Compare(lo, token.GTR, hi) {
+		c.errorf(diag.EInvalidOp, e.S, "invalid slice bounds: %s is greater than %s", lo, hi)
+	}
+	bounds := func(n int64) {
+		if e.Lo != nil {
+			c.constBound(e.Lo, lo, n, true)
+		}
+		if e.Hi != nil {
+			c.constBound(e.Hi, hi, n, true)
+		}
 	}
 	switch t := collectionOf(x.typ).(type) {
 	case *types.Slice:
@@ -1775,9 +1817,13 @@ func (c *Checker) sliceExpr(e *syntax.SliceExpr) *operand {
 		if !c.mutablePath(e.X, "slice", diag.EAddressOfVal) {
 			return invalid(e)
 		}
+		bounds(t.Len)
 		return &operand{mode: ModeValue, typ: &types.Slice{Elem: t.Elem}}
 	}
 	if types.IsString(types.Base(x.typ)) {
+		if x.val != nil && x.val.Kind() == constant.String {
+			bounds(int64(len(constant.StringVal(x.val))))
+		}
 		return &operand{mode: ModeValue, typ: types.Base(x.typ)}
 	}
 	c.errorf(diag.EInvalidOp, e.S, "cannot slice a value of type %s", x.typ)

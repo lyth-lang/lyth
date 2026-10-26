@@ -1,0 +1,56 @@
+// Programs whose generated Go once failed to compile.
+import "errors"
+
+// An expression body that throws or panics is a statement.
+func fail(): int throws = throw errors.New("no")
+func never(): string = panic("never")
+
+// A non-null value on the left of ?: fills an optional target boxed.
+func pick(s: string, t: string?): string? {
+    a: string? = s ?: null
+    return a ?: t
+}
+
+// Members of a generic sealed interface.
+sealed interface Node[T] {
+    Val(): T
+}
+
+struct Leaf[T] : Node[T] {
+    V: T
+}
+
+func Leaf[T].Val(): T = self.V
+
+struct Pair[T] : Node[T] {
+    A: T
+    B: T
+}
+
+func Pair[T].Val(): T = self.A
+
+func show(n: Node[int]): string = when n {
+    is Leaf[int] -> "leaf ${n.Val()}"
+    is Pair[int] -> "pair ${n.Val()}"
+}
+
+// Untyped constants of several kinds bind the largest one, as in Go.
+func two[T](a: T, b: T): []T = [a, b]
+
+func main() {
+    println(fail() catch { -1 })
+    println(pick("x", null) ?: "none")
+    println(show(Leaf[int](V = 3)), show(Pair[int](A = 1, B = 2)))
+    println(two(1, 2.5), two('a', 1))
+    defer {
+        println("recovered", recover())
+    }
+    println(never())
+}
+
+// Output:
+// -1
+// x
+// leaf 3 pair 1
+// [1 2.5] [97 1]
+// recovered never
