@@ -50,13 +50,10 @@ func Either(a *int, b *int) *int {
 
 //line optional_reuse.lyth:31
 func Pick(a *string, b *string) *string {
-	var v *string
 	if a != nil {
-		v = a
-	} else {
-		v = b
+		return a
 	}
-	return v
+	return b
 }
 
 //line optional_reuse.lyth:33

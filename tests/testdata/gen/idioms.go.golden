@@ -16,7 +16,7 @@ type NotFound struct {
 func (n *NotFound) Error() string { return "user " + strconv.Itoa(n.ID) + " not found" }
 
 type Store interface {
-	Name(int) (string, error)
+	Name(id int) (string, error)
 }
 
 // A declared conformance is a compile-time assertion.

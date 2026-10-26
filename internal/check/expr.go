@@ -575,18 +575,36 @@ func sizeOfBasic(b *types.Basic) int {
 	return 8
 }
 
+// convertsLiteral reports whether call converts a list or map literal to a
+// named type (IntHeap([2, 1])), which Go writes as the composite literal
+// IntHeap{2, 1}, whose address can be taken.
+func convertsLiteral(call *syntax.CallExpr) bool {
+	if len(call.Args) != 1 {
+		return false
+	}
+	switch syntax.Unparen(call.Args[0].Value).(type) {
+	case *syntax.ListLit, *syntax.MapLit:
+		return true
+	}
+	return false
+}
+
 func (c *Checker) addressOf(e *syntax.UnaryExpr) *operand {
 	inner := syntax.Unparen(e.X)
 	if call, ok := inner.(*syntax.CallExpr); ok {
 		x := c.expr(e.X, nil)
-		if ci := c.info.Calls[call]; ci != nil && ci.Kind == CallConstruct {
+		if ci := c.info.Calls[call]; ci != nil && (ci.Kind == CallConstruct || ci.Kind == CallConvert && convertsLiteral(call)) {
 			if x.mode == ModeInvalid {
 				return invalid(e) // reported; a *invalid type would cascade
 			}
 			return &operand{mode: ModeValue, typ: &types.Pointer{Elem: x.typ}}
 		}
 		if x.mode != ModeInvalid {
-			c.errorf(diag.EInvalidOp, e.S, "cannot take the address of a call result").
+			what := "a call result"
+			if ci := c.info.Calls[call]; ci != nil && ci.Kind == CallConvert {
+				what = "a conversion"
+			}
+			c.errorf(diag.EInvalidOp, e.S, "cannot take the address of %s", what).
 				WithHint("store the value in a variable first")
 		}
 		return invalid(e)

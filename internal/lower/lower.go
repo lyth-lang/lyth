@@ -932,18 +932,41 @@ func (l *fileLowerer) interfaceDecl(d *syntax.InterfaceDecl) {
 		return
 	}
 	it := &ast.InterfaceType{Methods: &ast.FieldList{Opening: l.pos(d.S), Closing: l.endPos(d.S)}}
+	// Methods and embedded interfaces keep their Lyth order.
+	type member struct {
+		at  int
+		fld *ast.Field
+	}
+	var members []member
 	for i, m := range ts.Decl.Methods {
-		fld := &ast.Field{Names: []*ast.Ident{ast.NewIdent(m.GoName)}, Type: l.funcType(m.Sig, nil)}
+		var names []string
+		if i < len(d.Methods) && len(d.Methods[i].Params) == len(m.Sig.Params) {
+			for _, p := range d.Methods[i].Params {
+				names = append(names, check.MemberGoName(p.Name.Name))
+			}
+		}
+		fld := &ast.Field{Names: []*ast.Ident{ast.NewIdent(m.GoName)}, Type: l.funcType(m.Sig, names)}
+		at := len(members)
 		if i < len(d.Methods) {
 			fld.Doc = l.memberDoc(d.Methods[i].Doc, d.Methods[i].S)
 			fld.Comment = l.lineComment(d.Methods[i].S)
 			fld.Names[0].NamePos = l.pos(d.Methods[i].S)
 			l.mark(fld, d.Methods[i].S)
+			at = d.Methods[i].S.Start
 		}
-		it.Methods.List = append(it.Methods.List, fld)
+		members = append(members, member{at, fld})
 	}
-	for _, e := range ts.Decl.Embeds {
-		it.Methods.List = append(it.Methods.List, &ast.Field{Type: l.typeExpr(e)})
+	for i, e := range ts.Decl.Embeds {
+		at, te := len(members), l.typeExpr(e)
+		if i < len(d.Embeds) {
+			at = d.Embeds[i].Span().Start
+			startAt(te, l.pos(d.Embeds[i].Span()))
+		}
+		members = append(members, member{at, &ast.Field{Type: te}})
+	}
+	slices.SortStableFunc(members, func(a, b member) int { return a.at - b.at })
+	for _, m := range members {
+		it.Methods.List = append(it.Methods.List, m.fld)
 	}
 	if ts.Decl.Sealed {
 		// The unexported marker method keeps other types, and other
@@ -1341,6 +1364,21 @@ func (l *fileLowerer) ownLine(s source.Span) bool {
 		start--
 	}
 	return strings.TrimSpace(string(content[start:s.Start])) == ""
+}
+
+// startAt places the leftmost name of the type expression e at pos, so
+// go/printer lays it out on its Lyth line.
+func startAt(e ast.Expr, pos token.Pos) {
+	switch e := e.(type) {
+	case *ast.Ident:
+		e.NamePos = pos
+	case *ast.SelectorExpr:
+		startAt(e.X, pos)
+	case *ast.IndexExpr:
+		startAt(e.X, pos)
+	case *ast.IndexListExpr:
+		startAt(e.X, pos)
+	}
 }
 
 // keepLineComment records for emit the comment that follows the code of a

@@ -198,6 +198,62 @@ func (fl *fnLower) ifTypeTest(e *syntax.IfExpr, is *syntax.IsExpr, target ast.Ex
 	fl.emitIf(stmt, after, e.S)
 }
 
+// leadingIs returns the type test x is T that starts a chain of &&
+// (x is T && x.Ready()), or nil.
+func leadingIs(cond syntax.Expr) *syntax.IsExpr {
+	b, ok := syntax.Unparen(cond).(*syntax.BinaryExpr)
+	if !ok || b.Op != syntax.LAND {
+		return nil
+	}
+	if is, ok := syntax.Unparen(b.X).(*syntax.IsExpr); ok && !is.Not {
+		return is
+	}
+	return leadingIs(b.X)
+}
+
+// ifTypeTestAnd lowers `if x is T && rest` to
+// `if t, ok := x.(T); ok && rest`, binding the asserted value once for rest
+// and the then branch. When rest needs statements of its own, the
+// assertion goes before them instead of into the if's init.
+func (fl *fnLower) ifTypeTestAnd(e *syntax.IfExpr, is *syntax.IsExpr, target ast.Expr, targetType types.Type) {
+	t := fl.info.TypeTests[is]
+	x := fl.expr(is.X)
+	v := fl.castVar(is.X)
+	bind := &castBinding{typ: t, ident: ast.NewIdent("_")}
+	if v != nil {
+		bind.ident.Name = fl.bindingName(t)
+	}
+	ok := fl.temp("ok")
+	assign := fl.typeAssign(bind.ident, ok, x, t)
+	if fl.isOK == nil {
+		fl.isOK = map[*syntax.IsExpr]string{}
+	}
+	fl.isOK[is] = ok
+	stmt := &ast.IfStmt{If: fl.l.pos(e.S)}
+	region := func(f func()) {
+		if v != nil {
+			fl.withCast(v, bind, f)
+		} else {
+			f()
+		}
+	}
+	sub, pre := fl.sub()
+	region(func() {
+		stmt.Cond = sub.expr(e.Cond)
+		stmt.Body = fl.branch(e.Then, target, targetType)
+	})
+	bind.finish()
+	if len(*pre) == 0 {
+		stmt.Init = assign
+		fl.release(bind.ident.Name, ok)
+	} else {
+		fl.emitSynth(assign, is.S)
+		*fl.stmts = append(*fl.stmts, *pre...)
+	}
+	after := fl.elseOf(stmt, e, target, targetType)
+	fl.emitIf(stmt, after, e.S)
+}
+
 // elseOf lowers the else branch of e into stmt, chaining `else if`. When
 // the if's value is returned and the then branch returns, the else branch
 // follows the if instead, in Go's early-return style; the caller emits the
@@ -249,6 +305,9 @@ func (fl *fnLower) emitIf(stmt *ast.IfStmt, after []ast.Stmt, span source.Span) 
 // isExpr lowers `x is T` in other positions to the ok result of a comma-ok
 // assertion.
 func (fl *fnLower) isExpr(e *syntax.IsExpr) ast.Expr {
+	if ok, done := fl.isOK[e]; done {
+		return ast.NewIdent(ok)
+	}
 	x := fl.expr(e.X)
 	ok := fl.temp("is" + upperFirst(typeBase(fl.info.TypeTests[e])))
 	fl.emitSynth(fl.typeAssign(ast.NewIdent("_"), ok, x, fl.info.TypeTests[e]), e.S)

@@ -1,0 +1,126 @@
+// What porting Go packages (text/tabwriter, container/*, encoding/csv, flag)
+// turned up: each case matches the Go program it came from.
+import "fmt"
+
+const Escape = '\xff' // a rune: U+00FF, not the byte 0xff
+
+struct Node {
+    next: *Node?
+    v: int
+}
+
+// A field named len and a method named init keep their Go names.
+struct Counter {
+    len: int
+    data: []int
+}
+
+func *Counter.init(): *Counter {
+    self.len = 1
+    return self
+}
+
+// A method named like a builtin leaves the builtin callable.
+func *Counter.append(x: int) {
+    self.data = append(self.data, x) // the builtin (W0011)
+    self.len = len(self.data)
+}
+
+// Go calls pointer methods on nil receivers.
+func *Counter.Size(): int {
+    if self == null {
+        return 0
+    }
+    return self.len
+}
+
+// A parameter made assignable for the rest of the body.
+func up(j: int): int {
+    j := j
+    while j > 0 {
+        j = (j - 1) / 2
+    }
+    return j
+}
+
+func count(n: int): int {
+    this := 0
+    while this < n {
+        this++
+    }
+    return this
+}
+
+interface Named {
+    Name(): string
+}
+
+interface Flagged {
+    Named
+    IsFlag(): bool
+}
+
+struct Flag {
+    name: string
+    on: bool
+}
+
+func Flag.Name(): string = self.name
+
+func Flag.IsFlag(): bool = self.on
+
+func describe(v: Named): string {
+    if v is Flagged && v.IsFlag() {
+        return "flag " + v.Name()
+    }
+    return "plain " + v.Name()
+}
+
+func orZero(p: int?): int = p ?: 0
+
+func *Node.Next(): *Node = self.next ?: self
+
+type IntHeap []int
+
+func main() {
+    println(int(Escape), int('\x80'), int('\v'), int('\f'), int('\a'), int('\b'), len("\a\b\f\v"))
+
+    x, y := &Node(), &Node()
+    a := &Node(next = x)
+    retarget := { ->
+        a.next = y
+        1
+    }
+    a.next!!.v = retarget() // Go reads a.next after the call
+    println(x.v, y.v)
+
+    c := &Counter()
+    println(c.init().len)
+    c.append(7)
+    println(c.len, c.data)
+    none: *Counter? = null
+    println(none?.Size() ?: -1, c.Size())
+
+    println(up(9), count(3))
+    println(describe(Flag(name = "v", on = true)), describe(Flag(name = "q")))
+    four := 4
+    println(orZero(null), orZero(&four))
+    n := &Node()
+    println(n.Next() == n)
+
+    h := &IntHeap([2, 1, 5])
+    *h = append(*h, 3)
+    fmt.Println(*h)
+}
+
+// Output:
+// 255 128 11 12 7 8 4
+// 0 1
+// 1
+// 1 [7]
+// -1 1
+// 0 3
+// flag v plain q
+// 0 4
+// true
+// [2 1 5 3]

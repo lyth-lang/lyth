@@ -1,0 +1,47 @@
+// Generated Go for what porting Go packages turned up.
+import "sort"
+
+// Interface keeps its members in the Lyth order, with parameter names.
+interface Interface {
+    sort.Interface
+    Push(x: any?)
+    Pop(): any?
+}
+
+struct Ring {
+    next: *Ring?
+    len: int
+}
+
+func *Ring.init(): *Ring {
+    self.next = self
+    return self
+}
+
+// Next returns the next ring element.
+func *Ring.Next(): *Ring = self.next ?: self.init()
+
+interface Flagged {
+    IsFlag(): bool
+}
+
+func describe(v: any): string {
+    if v is Flagged && v.IsFlag() {
+        return "flag"
+    }
+    return "plain"
+}
+
+func up(j: int): int {
+    j := j
+    while j > 0 {
+        j = (j - 1) / 2
+    }
+    return j
+}
+
+func retarget(n: *Ring, f: () -> int) {
+    n.next!!.len = f()
+}
+
+const Escape = '\xff'

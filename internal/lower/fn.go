@@ -46,6 +46,7 @@ type fnLower struct {
 	zeros     map[string]string
 	zeroDecls *[]ast.Stmt                    // shared with sub-lowerers of nested blocks
 	casts     map[*check.VarSym]*castBinding // smart casts served by a binding, see typetest.go
+	isOK      map[*syntax.IsExpr]string      // type tests already asserted: their ok variable
 	breaks    *[]*breakCtx                   // enclosing loops and switches, innermost last
 	labels    map[string]bool                // Go labels used in this function
 	pre       map[syntax.Expr]ast.Expr       // operands already evaluated into temporaries (deferred calls)
@@ -1195,6 +1196,9 @@ func (fl *fnLower) returnStmt(values []syntax.Expr, span source.Span) {
 		fl.emit(&ast.ReturnStmt{Return: fl.l.pos(span), Results: fl.successResults(val)}, span)
 		return
 	}
+	if len(values) == 1 && len(fl.shape.results) == 1 && fl.elvisReturn(values[0], span) {
+		return
+	}
 	if len(values) == 1 && len(fl.shape.results) == 1 {
 		// return if/when: each branch returns its value.
 		switch x := syntax.Unparen(values[0]).(type) {
@@ -1222,6 +1226,67 @@ func (fl *fnLower) returnStmt(values []syntax.Expr, span source.Span) {
 	fl.emit(&ast.ReturnStmt{Return: fl.l.pos(span), Results: results}, span)
 }
 
+// elvisReturn lowers return a ?: b, where a is a plain read or call, to an
+// early return:
+//
+//	if next := r.next; next != nil {
+//		return next
+//	}
+//	return b
+func (fl *fnLower) elvisReturn(v syntax.Expr, span source.Span) bool {
+	e, ok := syntax.Unparen(v).(*syntax.ElvisExpr)
+	if !ok || fl.info.Implicit[v] != check.ConvNone || fl.info.TypeOf(e.Y) == types.Nothing {
+		return false
+	}
+	switch x := syntax.Unparen(e.X).(type) {
+	case *syntax.Ident:
+	case *syntax.SelectorExpr:
+		if x.Safe {
+			return false
+		}
+	case *syntax.CallExpr:
+		if c, _, _ := fl.safeCallOf(x); c != nil {
+			return false
+		}
+	default:
+		return false
+	}
+	xt, et := fl.info.TypeOf(e.X), fl.info.TypeOf(e)
+	if xt == nil || et == nil || !types.MayBeNull(xt) || !types.Identical(et, fl.shape.results[0]) || !types.Identical(fl.info.TypeOf(e.Y), et) {
+		return false
+	}
+	stmt := &ast.IfStmt{If: fl.l.pos(e.S)}
+	var x ast.Expr = fl.expr(e.X)
+	if id, ok := x.(*ast.Ident); !ok || !isLocalIdent(fl, e.X) {
+		name := fl.temp(tempBase(e.X))
+		stmt.Init = &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(name)}, Tok: token.DEFINE, Rhs: []ast.Expr{x}}
+		x = ast.NewIdent(name)
+		defer fl.release(name)
+	} else {
+		x = id
+	}
+	stmt.Cond = nilCmp(cloneIdentExpr(x), token.NEQ)
+	val := ast.Expr(cloneIdentExpr(x))
+	if optionalValue(xt) && !optionalValue(et) {
+		val = &ast.StarExpr{X: val}
+	}
+	stmt.Body = &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: fl.successResults(val)}}}
+	markTree(fl.l, stmt.Body, e.S)
+	fl.emit(stmt, e.S)
+	fl.returnStmt([]syntax.Expr{e.Y}, span)
+	return true
+}
+
+// isLocalIdent reports whether e names a local variable or parameter.
+func isLocalIdent(fl *fnLower, e syntax.Expr) bool {
+	id, ok := syntax.Unparen(e).(*syntax.Ident)
+	if !ok {
+		return false
+	}
+	v, ok := fl.info.Uses[id].(*check.VarSym)
+	return ok && v.Kind != check.GlobalVar
+}
+
 // successResults returns the results of a successful return of v, with the
 // nil error of a throws function.
 func (fl *fnLower) successResults(v ast.Expr) []ast.Expr {
@@ -1239,6 +1304,10 @@ func (fl *fnLower) successResults(v ast.Expr) []ast.Expr {
 func (fl *fnLower) ifStmt(e *syntax.IfExpr, target ast.Expr, targetType types.Type) {
 	if is, ok := syntax.Unparen(e.Cond).(*syntax.IsExpr); ok && fl.info.TypeTests[is] != nil {
 		fl.ifTypeTest(e, is, target, targetType)
+		return
+	}
+	if is := leadingIs(e.Cond); is != nil && fl.info.TypeTests[is] != nil {
+		fl.ifTypeTestAnd(e, is, target, targetType)
 		return
 	}
 	stmt := &ast.IfStmt{If: fl.l.pos(e.S)}
