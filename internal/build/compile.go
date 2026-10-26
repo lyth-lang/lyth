@@ -88,7 +88,11 @@ type Session struct {
 	// program imports the standard library; StdRoot is the library's
 	// directory in the user cache.
 	ModFile string
-	StdRoot string
+	// WorkFile is the go.work that go commands use (GOWORK) when the module
+	// is in a workspace, which rejects -modfile: the workspace's modules and
+	// replacements with the standard library added.
+	WorkFile string
+	StdRoot  string
 	// Maps from generated file (virtual path in the package directory, or
 	// physical path in single-file mode) to its source map.
 	Maps map[string]*emit.SourceMap

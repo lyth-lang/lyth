@@ -32,6 +32,9 @@ func (s *Session) goCmd(args ...string) *exec.Cmd {
 	cmd := exec.Command("go", args...)
 	cmd.Dir = s.Mod.Root
 	cmd.Env = append(append(os.Environ(), "PWD="+s.Mod.Root), s.cfg.Env...)
+	if s.WorkFile != "" {
+		cmd.Env = append(cmd.Env, "GOWORK="+s.WorkFile)
+	}
 	return cmd
 }
 
@@ -323,7 +326,7 @@ func (s *Session) goTest(patterns, flags []string) (int, error) {
 	args = append(args, flags...)
 	cmd := s.goCmd(args...)
 	cmd.Dir = s.cfg.WorkDir
-	cmd.Env = append(append(os.Environ(), "PWD="+s.cfg.WorkDir), s.cfg.Env...)
+	cmd.Env = append(cmd.Env, "PWD="+s.cfg.WorkDir) // the last PWD wins
 	cmd.Stdout, cmd.Stderr = s.cfg.Stdout, s.cfg.Stderr
 	err := cmd.Run()
 	var exitErr *exec.ExitError

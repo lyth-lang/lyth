@@ -315,6 +315,12 @@ Use `lyth mod tidy` instead of `go mod tidy`: the `go` command cannot see
 imports inside `.lyth` files and would remove modules only Lyth code uses. The
 [REST API example](../../examples/todoapi/README.md) uses `pgx` this way.
 
+A module in a `go.work` workspace builds against the workspace's other
+modules, as Go code does. Lyth compiles the Lyth packages of the module it
+runs in: a Lyth package of another module in the workspace is seen through
+its generated Go, so run `lyth gen -in-tree` there, or keep the Lyth packages
+that import each other in one module.
+
 ## Limits and differences
 
 - A package cannot mix Lyth and Go source files yet, apart from `_test.go`

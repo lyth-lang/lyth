@@ -1663,3 +1663,48 @@ func TestAcross(t: *testing.T) {
 		}
 	}
 }
+
+// TestWorkspaceModule checks a module in a go.work workspace: the go command
+// rejects -modfile there, so the standard library (lyth/coll) comes in
+// through a generated go.work that also uses the workspace's modules.
+func TestWorkspaceModule(t *testing.T) {
+	ws := t.TempDir()
+	if real, err := filepath.EvalSymlinks(ws); err == nil {
+		ws = real
+	}
+	files := map[string]string{
+		"go.work":      "go 1.26\n\nuse (\n\t./app\n\t./util\n)\n",
+		"app/go.mod":   "module example.com/app\n\ngo 1.26\n\nrequire example.com/util v0.0.0\n",
+		"util/go.mod":  "module example.com/util\n\ngo 1.26\n",
+		"util/util.go": "package util\n\nfunc Double(n int) int { return n * 2 }\n",
+		"app/main.lyth": `import "lyth/coll"
+import "example.com/util"
+
+func main() {
+    println([1, 2, 3].Map { util.Double(it) }.Filter { it > 2 })
+}
+`,
+	}
+	for name, content := range files {
+		p := filepath.Join(ws, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root := filepath.Join(ws, "app")
+	s := compileModule(t, root, false)
+	if s.WorkFile == "" {
+		t.Fatal("the session did not use a workspace file")
+	}
+	bin := filepath.Join(t.TempDir(), "app")
+	if ok, err := s.GoBuild(bin, []string{"example.com/app"}, nil); err != nil || !ok {
+		t.Fatalf("build failed: %v\n%s", err, render(s.Sink.All()))
+	}
+	out, err := exec.Command(bin).CombinedOutput()
+	if err != nil || strings.TrimSpace(string(out)) != "[4 6]" {
+		t.Fatalf("got %q, %v", out, err)
+	}
+}
