@@ -1,0 +1,28 @@
+// The unsafe package's functions, and conversions to pointer types.
+import "unsafe"
+
+struct Pair {
+    A: int8
+    B: int64
+}
+
+func main() {
+    p := Pair(A = 1, B = 2)
+    println(unsafe.Sizeof(p), unsafe.Alignof(p.B), unsafe.Offsetof(p.B))
+    b := []byte("hello")
+    s := unsafe.String(unsafe.SliceData(b), len(b))
+    println(s)
+    println(string(unsafe.Slice(unsafe.StringData(s), 3)))
+    ptr := unsafe.Pointer(&p)
+    q := (*Pair)(ptr)
+    q.B = 5
+    println(p.B)
+    println(*(*int64)(unsafe.Add(ptr, unsafe.Offsetof(p.B))))
+}
+
+// Output:
+// 16 8 8
+// hello
+// hel
+// 5
+// 5

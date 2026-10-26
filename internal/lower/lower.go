@@ -286,6 +286,9 @@ func (l *fileLowerer) typeExpr(t types.Type) ast.Expr {
 func (l *fileLowerer) goTypeExpr(t gotypes.Type) ast.Expr {
 	switch t := t.(type) {
 	case *gotypes.Basic:
+		if t.Kind() == gotypes.UnsafePointer {
+			return sel(l.useImport("unsafe", "unsafe"), "Pointer")
+		}
 		return ast.NewIdent(t.Name())
 	case *gotypes.Alias:
 		obj := t.Obj()

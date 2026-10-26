@@ -161,7 +161,7 @@ A Lyth package compiles to a normal Go package:
 |---|---|---|
 | Go and Lyth files in the same package | E0601 "package mixes Go and Lyth files" (hand-written `_test.go` files are allowed: only go test compiles them) | Two-phase check: emit Go stubs for Lyth declarations, type-check Go files plus stubs with `go/types`, then check Lyth bodies (like Kotlin/Java joint compilation stubs). |
 | Go APIs whose last result is a concrete error type | treated as an ordinary value | Opt-in `?` with nil check before interface conversion. |
-| Calling methods through `unsafe` or with `//go:linkname` | unsupported | not planned |
+| `//go:linkname` (`unsafe` itself works: `run/unsafeptr`) | E0601 "//go:linkname is not supported in Lyth" | not planned |
 | Go generic methods (Go does not have them) | n/a | n/a |
 | Lyth-name ↔ Go-name collisions in a package | E0102 | — |
 

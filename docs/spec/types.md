@@ -365,10 +365,10 @@ nullability is compatible position by position. A Lyth `(A) -> R throws` is
 assignable to and from a Go `func(A) (R, error)`.
 
 Explicit conversions `T(x)` follow Go's conversion rules on the lowered types,
-including `(*T)(p)` for a pointer type. Lyth additionally rejects conversions
-that would discard a nullability guarantee without a check. `copy(dst, src)`
-needs element types that are assignable without a conversion: a `[]*User?`
-cannot be copied into a `[]*User`.
+including `(*T)(p)` for a pointer type and `unsafe.Pointer(&x)`. Lyth
+additionally rejects conversions that would discard a nullability guarantee
+without a check. `copy(dst, src)` needs element types that are assignable
+without a conversion: a `[]*User?` cannot be copied into a `[]*User`.
 
 **Comparison.** `==` and `!=` require operands of identical type (ignoring
 nullability), with one Go exception: a value may be compared with an interface

@@ -325,3 +325,7 @@ imports inside `.lyth` files and would remove modules only Lyth code uses. The
 - Go's channel operator is spelled with methods: `ch <- v` is `ch.send(v)` and
   `<-ch` is `ch.receive()` (`<-ctx.Done()` is `ctx.Done().receive()`), and
   `select` has `when`-style branches.
+- `unsafe` works as in Go: `unsafe.Sizeof`, `Alignof`, `Offsetof`, `Add`,
+  `Slice`, `SliceData`, `String`, `StringData`, and `unsafe.Pointer`
+  conversions, with Go's `(*T)(p)` for a pointer type. Nothing about it is
+  checked beyond Go's own rules.

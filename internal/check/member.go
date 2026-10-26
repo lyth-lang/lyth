@@ -1,6 +1,7 @@
 package check
 
 import (
+	"go/token"
 	gotypes "go/types"
 	"slices"
 	"strings"
@@ -683,8 +684,64 @@ func (c *Checker) pkgMember(e *syntax.SelectorExpr, pkg *Package) *operand {
 		t := c.qualifiedType(pkg, nt)
 		sel.Type = t
 		return &operand{mode: ModeType, typ: t, sym: g}
+	case *gotypes.Builtin:
+		if gs := unsafeSignature(o); gs != nil {
+			sig := c.liftSig(gs)
+			sel.Type = sig
+			return &operand{mode: ModeValue, typ: sig, sym: g}
+		}
 	}
+	c.errorf(diag.EUnknownPkgName, e.Sel.S, "%s.%s is not supported", pkg.Name, name)
 	return invalid(e)
+}
+
+// unsafeSignature returns a Go signature that calls of the unsafe package's
+// builtin o check against, or nil.
+func unsafeSignature(o *gotypes.Builtin) *gotypes.Signature {
+	pkg := o.Pkg()
+	if pkg == nil || pkg.Path() != "unsafe" {
+		return nil
+	}
+	param := func(name string, t gotypes.Type) *gotypes.Var { return gotypes.NewParam(token.NoPos, pkg, name, t) }
+	sig := func(tps []*gotypes.TypeParam, result gotypes.Type, params ...*gotypes.Var) *gotypes.Signature {
+		return gotypes.NewSignatureType(nil, nil, tps, gotypes.NewTuple(params...), gotypes.NewTuple(param("", result)), false)
+	}
+	any := gotypes.Universe.Lookup("any").Type()
+	uintptr := gotypes.Typ[gotypes.Uintptr]
+	pointer := gotypes.Typ[gotypes.UnsafePointer]
+	elem := func() *gotypes.TypeParam {
+		return gotypes.NewTypeParam(gotypes.NewTypeName(token.NoPos, pkg, "T", nil), any)
+	}
+	// len is of any integer type.
+	length := func() *gotypes.TypeParam {
+		var terms []*gotypes.Term
+		for _, k := range []gotypes.BasicKind{gotypes.Int, gotypes.Int8, gotypes.Int16, gotypes.Int32, gotypes.Int64,
+			gotypes.Uint, gotypes.Uint8, gotypes.Uint16, gotypes.Uint32, gotypes.Uint64, gotypes.Uintptr} {
+			terms = append(terms, gotypes.NewTerm(true, gotypes.Typ[k]))
+		}
+		integer := gotypes.NewInterfaceType(nil, []gotypes.Type{gotypes.NewUnion(terms)})
+		integer.Complete()
+		return gotypes.NewTypeParam(gotypes.NewTypeName(token.NoPos, pkg, "L", nil), integer)
+	}
+	switch o.Name() {
+	case "Sizeof", "Alignof", "Offsetof":
+		return sig(nil, uintptr, param("x", any))
+	case "Add":
+		l := length()
+		return sig([]*gotypes.TypeParam{l}, pointer, param("ptr", pointer), param("len", l))
+	case "Slice":
+		t, l := elem(), length()
+		return sig([]*gotypes.TypeParam{t, l}, gotypes.NewSlice(t), param("ptr", gotypes.NewPointer(t)), param("len", l))
+	case "SliceData":
+		t := elem()
+		return sig([]*gotypes.TypeParam{t}, gotypes.NewPointer(t), param("slice", gotypes.NewSlice(t)))
+	case "String":
+		l := length()
+		return sig([]*gotypes.TypeParam{l}, gotypes.Typ[gotypes.String], param("ptr", gotypes.NewPointer(gotypes.Typ[gotypes.Byte])), param("len", l))
+	case "StringData":
+		return sig(nil, gotypes.NewPointer(gotypes.Typ[gotypes.Byte]), param("str", gotypes.Typ[gotypes.String]))
+	}
+	return nil
 }
 
 // instantiateExpr resolves Name[Args] used in expression position: a generic
