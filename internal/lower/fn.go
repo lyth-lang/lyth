@@ -607,7 +607,9 @@ func (fl *fnLower) localDecl(s *syntax.LocalDecl) {
 		// name := f(name) in the function's outermost block: Go has no new
 		// variable to declare there, so the parameter is assigned.
 		name := fl.declareLocal(v)
-		fl.exprInto(s.Value, ast.NewIdent(name), v.Type)
+		if id, ok := value.(*syntax.Ident); !ok || fl.info.Uses[id] != v.Rebinds {
+			fl.exprInto(s.Value, ast.NewIdent(name), v.Type) // j := j only makes j assignable
+		}
 		fl.useIfUnused(v, name, s.S)
 		return
 	}
@@ -824,6 +826,21 @@ func (fl *fnLower) assignStmt(s *syntax.AssignStmt) {
 		fl.emit(&ast.AssignStmt{Lhs: lhs, Tok: token.ASSIGN, TokPos: fl.l.pos(s.S), Rhs: []ast.Expr{x}}, s.S)
 		return
 	}
+	if fl.callFree(s.Lhs) && hasNotNull(s.Lhs) && !fl.callFree(s.Rhs) {
+		// p.next!!.v = f(): Go reads p.next after calling f, so the right
+		// side runs before the target's null check.
+		rhs := fl.expr(s.Rhs)
+		if s.Op == syntax.ASSIGN {
+			rhs = fl.convertTo(s.Rhs, rhs)
+		}
+		tmp := fl.temp("v")
+		spill := &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(tmp)}, Tok: token.DEFINE, Rhs: []ast.Expr{rhs}}
+		fl.l.mark(spill, s.Rhs.Span())
+		*fl.stmts = append(*fl.stmts, spill)
+		lhs := fl.lvalue(s.Lhs)
+		fl.emit(&ast.AssignStmt{Lhs: []ast.Expr{lhs}, Tok: assignToken(s.Op), TokPos: fl.l.pos(s.S), Rhs: []ast.Expr{ast.NewIdent(tmp)}}, s.S)
+		return
+	}
 	exprs := fl.exprList([]syntax.Expr{s.Lhs, s.Rhs}, []bool{true, false})
 	tok := assignToken(s.Op)
 	rhs := exprs[1]
@@ -887,6 +904,17 @@ func (fl *fnLower) tupleAssign(s *syntax.AssignStmt, lhs *syntax.TupleExpr) {
 		}
 	}
 	fl.emit(&ast.AssignStmt{Lhs: xs[:n], Tok: token.ASSIGN, TokPos: fl.l.pos(s.S), Rhs: right}, s.S)
+}
+
+// hasNotNull reports whether e contains a !! assertion.
+func hasNotNull(e syntax.Expr) bool {
+	found := false
+	syntax.Walk(e, func(n syntax.Node) {
+		if _, ok := n.(*syntax.NotNullExpr); ok {
+			found = true
+		}
+	})
+	return found
 }
 
 func assignToken(k syntax.Kind) token.Token {
