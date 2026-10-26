@@ -2,6 +2,9 @@
 
 package optional_reuse
 
+// A smart-cast optional stored as an optional again is the same pointer, not
+// new(...); `a ?: b` over two optionals keeps the box it picks.
+
 //line optional_reuse.lyth:4
 type Patch struct {
 	DiscountPct *int    `json:"discountPct,omitzero"`

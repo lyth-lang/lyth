@@ -8,6 +8,8 @@ import (
 	"strconv"
 )
 
+// The Go spellings of ADR 0031, and what they lower to.
+
 //line syntax.lyth:6
 type Account struct {
 	ID      int64 `json:"id"`

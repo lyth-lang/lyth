@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"go/ast"
+	"go/format"
 	"go/parser"
 	"go/printer"
 	"go/token"
@@ -109,6 +110,18 @@ func Emit(f *lower.File, opts Options) (*Result, error) {
 			return nil, fmt.Errorf("internal error: generated tree for %s changed shape when printed at node %d (%v vs %v)%s", f.Src.Name, i, bt, rt, ctx)
 		}
 	}
+	if len(f.Comments) > 0 {
+		// Comments inside function bodies go next to the code of their
+		// Lyth lines; the tree keeps its shape, so only the text changes.
+		if commented, ok := placeComments(printed, f, built, reparsed, tf); ok {
+			fset3 := token.NewFileSet()
+			if f3, err := parser.ParseFile(fset3, f.GoName, commented, parser.ParseComments|parser.SkipObjectResolution); err == nil {
+				if r3 := preorder(f3); len(r3) == len(reparsed) {
+					printed, f2, tf, reparsed = commented, f3, fset3.File(f3.Pos()), r3
+				}
+			}
+		}
+	}
 	var segs []Segment
 	segNode := map[int]ast.Node{} // reparsed node of each segment, by GenStart
 	for i, n := range built {
@@ -145,32 +158,52 @@ func Emit(f *lower.File, opts Options) (*Result, error) {
 	// import block, around compiler-synthesized declarations, and where the
 	// Lyth source has a gap.
 	blankBefore := map[int]bool{}
+	// docOf returns the first line of declaration i's doc comment. The
+	// lowered tree knows the doc even where Go's parser takes it for the
+	// line comment of the declaration above (const x = 1 // note).
+	docOf := func(i int) (start int, ok bool) {
+		var doc, built *ast.CommentGroup
+		switch d := f2.Decls[i].(type) {
+		case *ast.FuncDecl:
+			doc = d.Doc
+		case *ast.GenDecl:
+			doc = d.Doc
+		}
+		if doc != nil {
+			return tf.Line(doc.Pos()), true
+		}
+		switch d := f.AST.Decls[i].(type) {
+		case *ast.FuncDecl:
+			built = d.Doc
+		case *ast.GenDecl:
+			built = d.Doc
+		}
+		if built == nil || len(built.List) == 0 {
+			return tf.Line(f2.Decls[i].Pos()), false
+		}
+		return tf.Line(f2.Decls[i].Pos()) - len(built.List), true
+	}
 	// A declaration that gofmt sees with a doc comment needs a blank line
 	// before it; a //line directive inserted right above a declaration is
 	// such a comment too, so those lines are remembered here.
 	undocumented := map[int]bool{}
+	if len(f2.Decls) > 0 {
+		// gofmt separates the package clause from the first declaration.
+		if start, _ := docOf(0); start == tf.Line(f2.Name.End())+1 {
+			blankBefore[start] = true
+		}
+	}
 	for i := 1; i < len(f2.Decls); i++ {
 		prevEnd := tf.Line(f2.Decls[i-1].End())
-		start := f2.Decls[i].Pos()
-		hasDoc := false
-		switch d := f2.Decls[i].(type) {
-		case *ast.FuncDecl:
-			if d.Doc != nil {
-				start, hasDoc = d.Doc.Pos(), true
-			}
-		case *ast.GenDecl:
-			if d.Doc != nil {
-				start, hasDoc = d.Doc.Pos(), true
-			}
-		}
-		if tf.Line(start) != prevEnd+1 {
+		start, hasDoc := docOf(i)
+		if start != prevEnd+1 {
 			continue
 		}
 		if hasDoc {
-			blankBefore[tf.Line(start)] = true
+			blankBefore[start] = true
 			continue
 		}
-		undocumented[tf.Line(start)] = true
+		undocumented[start] = true
 		prevSpan, prevOK := f.Spans[f.AST.Decls[i-1]]
 		curSpan, curOK := f.Spans[f.AST.Decls[i]]
 		isImport := false
@@ -179,7 +212,7 @@ func Emit(f *lower.File, opts Options) (*Result, error) {
 		}
 		gap := prevOK && curOK && curSpan.StartPos().Line > prevSpan.EndPos().Line+1
 		if isImport || !prevOK || !curOK || f.Synthetic[f.AST.Decls[i]] || f.Synthetic[f.AST.Decls[i-1]] || gap {
-			blankBefore[tf.Line(start)] = true
+			blankBefore[start] = true
 		}
 	}
 
@@ -237,13 +270,25 @@ func Emit(f *lower.File, opts Options) (*Result, error) {
 	// comment and the declaration, after an empty "//" line: the canonical
 	// form gofmt gives directives in doc comments.
 	docBefore := map[int]bool{}
-	for _, d := range f2.Decls {
+	for i, d := range f2.Decls {
 		var doc *ast.CommentGroup
 		switch d := d.(type) {
 		case *ast.FuncDecl:
 			doc = d.Doc
 		case *ast.GenDecl:
 			doc = d.Doc
+		}
+		if doc == nil {
+			switch b := f.AST.Decls[i].(type) {
+			case *ast.FuncDecl:
+				doc = b.Doc
+			case *ast.GenDecl:
+				doc = b.Doc
+			}
+			if doc != nil && len(doc.List) > 0 && !isDirective(doc.List[len(doc.List)-1].Text) {
+				docBefore[tf.Line(d.Pos())] = true
+			}
+			continue
 		}
 		// A doc comment that ends in directives (//go:embed) has its "//"
 		// line already, or needs none when it holds only directives.
@@ -383,6 +428,142 @@ func Emit(f *lower.File, opts Options) (*Result, error) {
 		return segs[i].GenEnd > segs[j].GenEnd
 	})
 	return &Result{Name: f.GoName, Code: out.Bytes(), Map: &SourceMap{GenName: f.GoName, Src: f.Src, Segments: segs, LineToSrc: finalLineSrc}}, nil
+}
+
+// placeComments inserts the comments of function bodies into the printed
+// file: a comment after code goes at the end of the first generated line of
+// its Lyth line, and one on its own line before the generated code of the
+// next Lyth line of its block (or after the statement it follows, at the
+// end of a block). The result is formatted as gofmt does.
+func placeComments(printed []byte, f *lower.File, built, reparsed []ast.Node, tf *token.File) ([]byte, bool) {
+	firstGen := map[int]int{} // Lyth line -> first generated line of code starting on it
+	startGen := map[source.Span]int{}
+	endGen := map[source.Span]int{}
+	for i, n := range built {
+		span, ok := f.Spans[n]
+		if !ok || span.File != f.Src {
+			continue
+		}
+		r := reparsed[i]
+		if !r.Pos().IsValid() || !r.End().IsValid() {
+			continue
+		}
+		a, b := tf.Line(r.Pos()), tf.Line(r.End())
+		if g, ok := firstGen[span.StartPos().Line]; !ok || a < g {
+			firstGen[span.StartPos().Line] = a
+		}
+		if g, ok := startGen[span]; !ok || a < g {
+			startGen[span] = a
+		}
+		endGen[span] = max(endGen[span], b)
+	}
+	inString := map[int]bool{} // lines continuing a multi-line string literal
+	ast.Inspect(reparsed[0], func(n ast.Node) bool {
+		if lit, ok := n.(*ast.BasicLit); ok && lit.Kind == token.STRING {
+			for l := tf.Line(lit.Pos()) + 1; l <= tf.Line(lit.End()); l++ {
+				inString[l] = true
+			}
+		}
+		return true
+	})
+	lines := strings.SplitAfter(string(printed), "\n")
+	indent := func(g int) string {
+		ln := lines[g-1]
+		return ln[:len(ln)-len(strings.TrimLeft(ln, " \t"))]
+	}
+	// A declaration's or field's doc comment starts above its first line.
+	docStart := map[int]int{}
+	ast.Inspect(reparsed[0], func(n ast.Node) bool {
+		var doc *ast.CommentGroup
+		switch n := n.(type) {
+		case *ast.FuncDecl:
+			doc = n.Doc
+		case *ast.GenDecl:
+			doc = n.Doc
+		case *ast.Field:
+			doc = n.Doc
+		case *ast.ValueSpec:
+			doc = n.Doc
+		case *ast.TypeSpec:
+			doc = n.Doc
+		}
+		if doc != nil {
+			docStart[tf.Line(doc.End())+1] = tf.Line(doc.Pos())
+		}
+		return true
+	})
+	before, after, trail := map[int][]string{}, map[int][]string{}, map[int][]string{}
+	var head, tail []string // detached comments above the package clause, after the last declaration
+	for _, c := range f.Comments {
+		if c.Head {
+			head = append(head, c.Text+"\n")
+			continue
+		}
+		if c.Detached {
+			g := 0
+			for l := c.Line + strings.Count(c.Text, "\n") + 1; l <= f.Src.LineCount() && g == 0; l++ {
+				g = firstGen[l]
+			}
+			if g == 0 {
+				tail = append(tail, "\n"+c.Text)
+				continue
+			}
+			if d, ok := docStart[g]; ok {
+				g = d
+			}
+			in := indent(g)
+			before[g] = append(before[g], "\n"+in+strings.ReplaceAll(c.Text, "\n", "\n"+in)+"\n")
+			continue
+		}
+		if g, ok := firstGen[c.Line]; ok && c.Trailing && !inString[g+1] {
+			trail[g] = append(trail[g], c.Text)
+			continue
+		}
+		end := c.Line + strings.Count(c.Text, "\n")
+		placed := false
+		for l := end + 1; l < c.BlockEnd && !placed; l++ {
+			if g, ok := firstGen[l]; ok {
+				before[g] = append(before[g], indent(g)+c.Text)
+				placed = true
+			}
+		}
+		switch {
+		case placed:
+		case c.After.IsValid() && endGen[c.After] > 0:
+			g := endGen[c.After]
+			after[g] = append(after[g], indent(startGen[c.After])+c.Text)
+		default:
+			if g, ok := firstGen[c.BlockStart]; ok {
+				after[g] = append(after[g], indent(g)+"\t"+c.Text) // an otherwise empty block
+			}
+		}
+	}
+	var out bytes.Buffer
+	for _, c := range head {
+		out.WriteString(c + "\n")
+	}
+	for i, ln := range lines {
+		g := i + 1
+		for _, c := range before[g] {
+			out.WriteString(c + "\n")
+		}
+		if t := trail[g]; len(t) > 0 {
+			out.WriteString(strings.TrimSuffix(ln, "\n") + " " + strings.Join(t, " ") + "\n")
+		} else {
+			out.WriteString(ln)
+		}
+		for _, c := range after[g] {
+			out.WriteString(c + "\n")
+		}
+	}
+	for _, c := range tail {
+		out.WriteString(c + "\n")
+	}
+	formatted, err := format.Source(out.Bytes())
+	if err != nil {
+		return nil, false
+	}
+	return formatted, true
 }
 
 // stmtMayFail reports whether a statement's own expressions (not nested

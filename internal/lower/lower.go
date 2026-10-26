@@ -34,6 +34,26 @@ type File struct {
 	Spans     map[ast.Node]source.Span
 	Synthetic map[ast.Node]bool
 	Build     string // //go:build line, if any
+	// Comments are the comments inside function bodies, which emit places
+	// next to the generated code of the Lyth lines around them.
+	Comments []BodyComment
+}
+
+// BodyComment is a comment inside a function body.
+type BodyComment struct {
+	Text     string
+	Line     int  // the comment's Lyth line
+	Trailing bool // it follows code on its line
+	// The innermost block holding the comment: its first and last lines,
+	// and the statement before the comment (to follow when no code
+	// follows the comment in the block).
+	BlockStart, BlockEnd int
+	After                source.Span
+	// Detached marks a block of comments outside function bodies that is
+	// no declaration's doc (a copyright header, a section heading): it is
+	// kept apart by blank lines, above the next declaration or field.
+	Detached bool
+	Head     bool // detached and above the package clause
 }
 
 // Package lowers all files of a checked package.
@@ -121,14 +141,14 @@ type fileLowerer struct {
 	synthetic map[ast.Node]bool
 	pkgNames  map[string]bool
 	// imports: path -> local name, and local name -> path.
-	imports     map[string]string
-	importNames map[string]string
-	usedImports map[string]bool
-	blank       []string
-	decls       []ast.Decl
-	runName     string
-	comments    []*ast.CommentGroup // comments kept inside function bodies (an example's output)
-	recvNames   map[*types.TypeDecl]string
+	imports      map[string]string
+	importNames  map[string]string
+	usedImports  map[string]bool
+	blank        []string
+	decls        []ast.Decl
+	runName      string
+	bodyComments []BodyComment
+	recvNames    map[*types.TypeDecl]string
 }
 
 func lowerFile(pkg *check.Package, f *syntax.File, pkgNames map[string]bool) *File {
@@ -160,11 +180,16 @@ func lowerFile(pkg *check.Package, f *syntax.File, pkgNames map[string]bool) *Fi
 	for _, d := range f.Decls {
 		l.decl(d)
 	}
-	file := &ast.File{Name: ast.NewIdent(pkg.Name), Decls: l.importDecls(), Comments: l.comments}
+	file := &ast.File{Name: ast.NewIdent(pkg.Name), Decls: l.importDecls()}
+	if f.Package != nil {
+		file.Doc = l.memberDoc(packageDoc(f), f.Package.S)
+		file.Package = l.pos(f.Package.S)
+	}
 	file.Decls = append(file.Decls, l.decls...)
 	parenHeaderLiterals(file)
 	flattenElseIf(file)
-	return &File{Src: f.Src, GoName: GoFileName(f.Src.Base()), AST: file, Fset: fset, Spans: l.spans, Synthetic: l.synthetic, Build: f.BuildConstraint}
+	l.keepDetachedComments(f)
+	return &File{Src: f.Src, GoName: GoFileName(f.Src.Base()), AST: file, Fset: fset, Spans: l.spans, Synthetic: l.synthetic, Build: f.BuildConstraint, Comments: l.bodyComments}
 }
 
 // pos returns a layout position mirroring a Lyth span start.
@@ -664,6 +689,7 @@ func (l *fileLowerer) structType(decl *types.TypeDecl, d *syntax.StructDecl) *as
 		}
 		if i < len(d.Fields) {
 			fld.Doc = l.memberDoc(d.Fields[i].Doc, d.Fields[i].S)
+			fld.Comment = l.lineComment(d.Fields[i].S)
 			fld.Names[0].NamePos = l.pos(d.Fields[i].S)
 			l.mark(fld, d.Fields[i].S)
 			l.mark(fld.Names[0], f.Span)
@@ -787,6 +813,10 @@ func (l *fileLowerer) enumDecl(d *syntax.EnumDecl) {
 			vs.Doc = l.memberDoc(d.Docs[i], d.Entries[i].S)
 			vs.Names[0].NamePos = l.pos(d.Entries[i].S)
 		}
+		if i < len(d.Entries) {
+			vs.Names[0].NamePos = l.pos(d.Entries[i].S)
+			vs.Comment = l.lineComment(d.Entries[i].S)
+		}
 		switch {
 		case decl.Backing != nil:
 			vs.Type, vs.Values = ast.NewIdent(decl.GoName), []ast.Expr{strLit(e.Wire)}
@@ -906,6 +936,7 @@ func (l *fileLowerer) interfaceDecl(d *syntax.InterfaceDecl) {
 		fld := &ast.Field{Names: []*ast.Ident{ast.NewIdent(m.GoName)}, Type: l.funcType(m.Sig, nil)}
 		if i < len(d.Methods) {
 			fld.Doc = l.memberDoc(d.Methods[i].Doc, d.Methods[i].S)
+			fld.Comment = l.lineComment(d.Methods[i].S)
 			fld.Names[0].NamePos = l.pos(d.Methods[i].S)
 			l.mark(fld, d.Methods[i].S)
 		}
@@ -1194,8 +1225,8 @@ func (l *fileLowerer) funDecl(d *syntax.FunDecl) {
 	l.mark(fd, d.S)
 	body := fl.funcBody(d, fi)
 	fd.Body = body
-	if strings.HasPrefix(sym.GoName, "Example") && strings.HasSuffix(l.src.Src.Base(), "_test.lyth") && d.Body != nil {
-		l.exampleOutput(d.Body.S)
+	if d.Body != nil {
+		l.keepBodyComments(d.Body)
 	}
 	l.decls = append(l.decls, fd)
 	if sym.IsMain && sym.Sig.Throws {
@@ -1206,32 +1237,136 @@ func (l *fileLowerer) funDecl(d *syntax.FunDecl) {
 	}
 }
 
-// exampleOutput keeps the "// Output:" comment of an example test, which go
-// test compares with what the example prints, at its place in the body.
-func (l *fileLowerer) exampleOutput(body source.Span) {
-	var g *ast.CommentGroup
-	next := 0 // the line the next comment of the block must start on
+// keepBodyComments records the comments inside a function body (an
+// example's "// Output:" among them) for emit. Comments inside a local
+// struct are left out: its fields carry their own docs.
+func (l *fileLowerer) keepBodyComments(b *syntax.Block) {
+	var skip []source.Span
+	var blocks []*syntax.Block
+	syntax.Walk(b, func(n syntax.Node) {
+		switch n := n.(type) {
+		case *syntax.StructDecl:
+			skip = append(skip, n.S)
+		case *syntax.Block:
+			blocks = append(blocks, n)
+		}
+	})
 	for _, c := range l.src.Comments {
-		if c.Span.Start < body.Start || c.Span.End > body.End || !strings.HasPrefix(c.Text, "//") {
+		if c.Span.Start <= b.S.Start || c.Span.End >= b.S.End || slices.ContainsFunc(skip, func(s source.Span) bool { return s.Contains(c.Span) }) {
 			continue
 		}
-		line := c.Span.StartPos().Line
-		if g == nil {
-			text := strings.TrimSpace(strings.TrimPrefix(c.Text, "//"))
-			lower := strings.ToLower(text)
-			if !strings.HasPrefix(lower, "output:") && !strings.HasPrefix(lower, "unordered output:") {
-				continue
+		in := b
+		for _, bl := range blocks {
+			if bl.S.Contains(c.Span) && in.S.Contains(bl.S) {
+				in = bl
 			}
-			g = &ast.CommentGroup{}
-		} else if line != next {
+		}
+		bc := BodyComment{Text: c.Text, Line: c.Span.StartPos().Line, Trailing: !l.ownLine(c.Span),
+			BlockStart: in.S.StartPos().Line, BlockEnd: in.S.EndPos().Line}
+		for _, st := range in.Stmts {
+			if st.Span().End <= c.Span.Start {
+				bc.After = st.Span()
+			}
+		}
+		l.bodyComments = append(l.bodyComments, bc)
+	}
+}
+
+// keepDetachedComments records the blocks of // comments outside function
+// bodies that a blank line separates from the code below them.
+func (l *fileLowerer) keepDetachedComments(f *syntax.File) {
+	var funcs []source.Span
+	for _, d := range f.Decls {
+		if fd, ok := d.(*syntax.FunDecl); ok {
+			funcs = append(funcs, fd.S)
+		}
+	}
+	src := f.Src
+	var block []syntax.Comment
+	flush := func() {
+		if len(block) == 0 {
+			return
+		}
+		first, last := block[0].Span.StartPos().Line, block[len(block)-1].Span.EndPos().Line
+		if last >= src.LineCount() || src.LineBlank(last+1) {
+			var text []string
+			for _, c := range block {
+				text = append(text, c.Text)
+			}
+			head := f.Package != nil && block[0].Span.Start < f.Package.S.Start
+			l.bodyComments = append(l.bodyComments, BodyComment{Text: strings.Join(text, "\n"), Line: first, Detached: true, Head: head})
+		}
+		block = nil
+	}
+	for _, c := range f.Comments {
+		if !strings.HasPrefix(c.Text, "//") || strings.HasPrefix(c.Text, "//go:") || strings.HasPrefix(c.Text, "//line ") ||
+			!l.ownLine(c.Span) || slices.ContainsFunc(funcs, func(s source.Span) bool { return s.Contains(c.Span) }) {
+			flush()
+			continue
+		}
+		if len(block) > 0 && c.Span.StartPos().Line != block[len(block)-1].Span.EndPos().Line+1 {
+			flush()
+		}
+		block = append(block, c)
+	}
+	flush()
+}
+
+// packageDoc returns the comment directly above the package clause.
+func packageDoc(f *syntax.File) string {
+	if f.Package == nil {
+		return ""
+	}
+	var lines []string
+	expect := f.Package.S.StartPos().Line - 1
+	for i := len(f.Comments) - 1; i >= 0; i-- {
+		c := f.Comments[i]
+		if c.Span.Start >= f.Package.S.Start {
+			continue
+		}
+		if c.Span.EndPos().Line != expect || !strings.HasPrefix(c.Text, "//") || strings.HasPrefix(c.Text, "//go:") {
 			break
 		}
-		g.List = append(g.List, &ast.Comment{Slash: l.pos(c.Span), Text: c.Text})
-		next = line + 1
+		lines = append([]string{c.Text}, lines...)
+		expect--
 	}
-	if g != nil {
-		l.comments = append(l.comments, g)
+	return strings.Join(lines, "\n")
+}
+
+// ownLine reports whether nothing but space precedes span s on its line.
+func (l *fileLowerer) ownLine(s source.Span) bool {
+	content := l.src.Src.Content
+	start := s.Start
+	for start > 0 && content[start-1] != '\n' {
+		start--
 	}
+	return strings.TrimSpace(string(content[start:s.Start])) == ""
+}
+
+// keepLineComment records for emit the comment that follows the code of a
+// package-level declaration on its last line (const max = 10 // per page).
+func (l *fileLowerer) keepLineComment(s source.Span) {
+	if g := l.lineComment(s); g != nil {
+		l.bodyComments = append(l.bodyComments, BodyComment{Text: g.List[0].Text, Line: s.EndPos().Line, Trailing: true})
+	}
+}
+
+// lineComment returns the comment that follows the code of span s on its
+// last line (X: int // pixels), for go/printer's line comment slot.
+func (l *fileLowerer) lineComment(s source.Span) *ast.CommentGroup {
+	if !s.IsValid() || s.File != l.src.Src {
+		return nil
+	}
+	line := s.EndPos().Line
+	for _, c := range l.src.Comments {
+		if c.Span.Start >= s.End && c.Span.StartPos().Line == line && strings.HasPrefix(c.Text, "//") {
+			return &ast.CommentGroup{List: []*ast.Comment{{Slash: l.pos(c.Span), Text: c.Text}}}
+		}
+		if c.Span.Start > s.End && c.Span.StartPos().Line > line {
+			break
+		}
+	}
+	return nil
 }
 
 // freshPkgName returns a package-level name based on base that no
@@ -1366,6 +1501,7 @@ func (l *fileLowerer) propDecl(d *syntax.PropDecl) {
 			l.useEmbed()
 		}
 	}
+	l.keepLineComment(d.S)
 	gd := &ast.GenDecl{Doc: docWithDirectives(d.Doc, d.Directives), Tok: token.VAR, TokPos: l.pos(d.S), Specs: []ast.Spec{spec}}
 	l.mark(gd, d.S)
 	l.decls = append(l.decls, gd)
@@ -1385,6 +1521,7 @@ func (l *fileLowerer) constDecl(d *syntax.ConstDecl) {
 	if d.Type != nil {
 		spec.Type = l.typeExpr(k.Type)
 	}
+	l.keepLineComment(d.S)
 	gd := &ast.GenDecl{Doc: docGroup(d.Doc), Tok: token.CONST, TokPos: l.pos(d.S), Specs: []ast.Spec{spec}}
 	l.mark(gd, d.S)
 	l.decls = append(l.decls, gd)

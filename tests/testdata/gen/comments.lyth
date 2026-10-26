@@ -1,0 +1,50 @@
+// Copyright notice, kept above the package doc.
+
+// Package comments shows where Lyth comments land in the generated Go.
+package comments
+
+import "strings"
+
+// ---- Section heading: not the doc of what follows ----
+
+// Point is a point.
+struct Point {
+    X: int // pixels from the left
+    // Y is the doc of Y.
+    Y: int // pixels from the top
+}
+
+// Mode picks a format.
+enum Mode {
+    Short, // one line
+    Long
+}
+
+const limit = 10 // the most points shown
+
+// Describe renders p.
+func Describe(p: Point, m: Mode): string {
+    // a comment on its own line
+    parts := []string{} // a trailing comment
+    when m {
+        // before the first branch
+        Short -> parts = append(parts, "short")
+        Long -> {
+            parts = append(parts, "long")
+            // at the end of a block
+        }
+    }
+    if p.X > limit {
+        // the only thing in this block
+    }
+    names := [
+        "x", // the first
+        "y",
+    ]
+    struct pair {
+        a: int // not a body comment: the field keeps it
+    }
+    _ = pair(a = len(names))
+    return strings.Join(parts, ",")
+    // after the last statement
+}

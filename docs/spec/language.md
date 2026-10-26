@@ -24,9 +24,13 @@ See [compiler.md §6.2](../design/compiler.md#62-generated-file-names).
 
 `// line comment` and `/* block comment */` (not nested). A run of line comments,
 each on a line of its own, immediately preceding a declaration, struct field, or
-interface method is its doc comment and is copied to the generated Go declaration
-so `go doc` works on Lyth packages. A comment after code on the same line is not a
-doc comment.
+interface method, enum entry, or the package clause is its doc comment and is copied
+to the generated Go declaration so `go doc` works on Lyth packages. A comment after
+code on the same line is not a doc comment. The other comments are copied too: a
+comment after code goes after the Go code of that line, a comment on its own line
+inside a function goes before the Go code of the next line, and a block of comments
+that a blank line separates from what follows (a copyright header, a section heading)
+stays separate. Comments inside an expression may move to the end of their line.
 
 **Directives.** A line comment `//go:name args` at the start of a line is a Go
 directive. `//go:build` lines before the package clause and imports are build
