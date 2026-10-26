@@ -332,6 +332,16 @@ func GoName(lythName string) string {
 	return lythName
 }
 
+// MemberGoName computes the Go name of a field or method. Members live in
+// their type's namespace, so only Go keywords need the trailing `_`: a
+// field len or a method init keeps its name, as in Go's container/ring.
+func MemberGoName(lythName string) string {
+	if !Exported(lythName) && goKeywords[lythName] {
+		return lythName + "_"
+	}
+	return lythName
+}
+
 // Exported reports whether a Lyth name is exported (starts with an uppercase
 // letter), Go's rule.
 func Exported(name string) bool {

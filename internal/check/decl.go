@@ -418,7 +418,7 @@ func (c *Checker) resolveStruct(decl *types.TypeDecl, d *syntax.StructDecl) {
 			t = types.Invalid
 		}
 		f := &types.Field{Name: name, Type: t, Private: !Exported(name), Span: sf.Name.S, Embedded: sf.Embedded}
-		f.GoName = GoName(name)
+		f.GoName = MemberGoName(name)
 		if sf.Embedded && !c.embeddable(t, sf.Type.Span()) {
 			t, f.Type = types.Invalid, types.Invalid
 		}
@@ -842,7 +842,7 @@ func (c *Checker) resolveInterface(decl *types.TypeDecl, d *syntax.InterfaceDecl
 			}
 		}
 		sig := c.signature(m.Params, m.Result, m.Throws, nil)
-		decl.Methods = append(decl.Methods, &types.Method{Name: m.Name.Name, GoName: GoName(m.Name.Name), Sig: sig, Pub: Exported(m.Name.Name), Span: m.Name.S})
+		decl.Methods = append(decl.Methods, &types.Method{Name: m.Name.Name, GoName: MemberGoName(m.Name.Name), Sig: sig, Pub: Exported(m.Name.Name), Span: m.Name.S})
 	}
 	for _, e := range d.Embeds {
 		t := c.resolveType(e)
@@ -1290,7 +1290,7 @@ func (c *Checker) resolveMethod(d *syntax.FunDecl) {
 	name := d.Name.Name
 	pub := Exported(name)
 	fs := &FuncSym{name: name, Pub: pub, Pkg: c.pkg, Decl: d, Recv: decl, RecvArgs: recvArgs, PtrRecv: d.Recv.Pointer, Span: d.Name.S, tscope: tscope}
-	fs.GoName = GoName(name)
+	fs.GoName = MemberGoName(name)
 	if tscope != nil {
 		c.withScope(tscope, func() { fs.Sig = c.signature(d.Params, d.Result, d.Throws, nil) })
 	} else {

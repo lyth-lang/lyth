@@ -263,7 +263,8 @@ FuncBody    = Block | "=" Expression .
   declare several. `init` takes no parameters, returns no results, has no type
   parameters, and cannot throw (E0216); nothing can call or refer to it
   (E0101). Another package-level declaration named `init` gets the Go name
-  `init_`.
+  `init_`; a field or method named `init` (or `len`, `copy`, ...) keeps its
+  name, since Go members do not clash with package-level names.
 - A parameter may have a **default value**:
   `func connect(host: string, port: int = 5432, timeout: time.Duration = 30 * time.Second)`.
   A call that leaves the parameter out gets the default expression at the call
