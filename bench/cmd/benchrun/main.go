@@ -51,10 +51,15 @@ func main() {
 
 	step("compiling Lyth packages")
 	run(root, nil, lyth, "check")
-	overlay := "-overlay=" + filepath.Join(root, ".lyth", "overlay.json")
+	// The go flags lyth uses: the generated files, and the go.mod that adds
+	// Lyth's standard library (lyth/coll, which collections imports).
+	goFlags := []string{"-overlay=" + filepath.Join(root, ".lyth", "overlay.json")}
+	if _, err := os.Stat(filepath.Join(root, ".lyth", "go.mod")); err == nil {
+		goFlags = append(goFlags, "-modfile="+filepath.Join(root, ".lyth", "go.mod"))
+	}
 
 	step("checking that both implementations agree")
-	run(root, nil, "go", "test", overlay, "-count=1", "-run", "TestEquivalence", "./...")
+	run(root, nil, "go", append(append([]string{"test"}, goFlags...), "-count=1", "-run", "TestEquivalence", "./...")...)
 
 	pkgs := benchPackages(root)
 	impls := []string{"go", "lyth"}
@@ -62,7 +67,7 @@ func main() {
 	for _, p := range pkgs {
 		for _, impl := range impls {
 			bin := filepath.Join(root, *outDir, "bin", strings.ReplaceAll(p, "/", "_")+"."+impl+".test")
-			args := []string{"test", "-c", overlay, "-o", bin}
+			args := append(append([]string{"test", "-c"}, goFlags...), "-o", bin)
 			if impl == "lyth" {
 				args = append(args, "-tags", "impl_lyth")
 			}
@@ -151,7 +156,7 @@ func buildMetrics(root, lyth string) string {
 	warm := map[string][]time.Duration{}
 	// The warm edit adds a function, so the generated Go changes too (Lyth
 	// drops comments, so a comment-only edit would leave nothing to rebuild).
-	edits := map[string]string{"go": "\nfunc rebuild%d() int { return %d }\n", "lyth": "\nfun rebuild%d(): Int = %d\n"}
+	edits := map[string]string{"go": "\nfunc rebuild%d() int { return %d }\n", "lyth": "\nfunc rebuild%d(): int = %d\n"}
 	// Series alternate within each run so that drifting machine state
 	// (thermal throttling, background load) affects all of them alike.
 	// "lyth-nocache" disables Lyth's persistent Go type cache, so every build

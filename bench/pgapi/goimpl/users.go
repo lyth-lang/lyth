@@ -18,7 +18,7 @@ var ErrNotFound = errors.New("user not found")
 type User struct {
 	ID    int64   `json:"id"`
 	Name  string  `json:"name"`
-	Email *string `json:"email"`
+	Email *string `json:"email,omitempty"`
 }
 
 // FetchJSON loads a user and encodes it as JSON.

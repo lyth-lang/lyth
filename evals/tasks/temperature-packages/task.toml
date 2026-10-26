@@ -1,3 +1,3 @@
 features = ["packages", "exported names", "imports"]
-requires = ['import\s+"app/units"', 'import\s+"app/stats"']
+requires = ['"app/units"', '"app/stats"']  # import "app/units", or within import ( ... )
 files = ["units/", "stats/"]
