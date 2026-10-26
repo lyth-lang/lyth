@@ -144,13 +144,19 @@ from their `check.Package`.
    parallelizable later).
 5. Flow analyses per body: definite return, smart-cast narrowing, mutability,
    unhandled errors, unused locals, shadowing (W0006). Smart casts need a value
-   that cannot change between the check and the use: parameters, `self`, and
-   locals the function never reassigns. Before a body is checked, a syntactic
-   pass collects every name that is the target of `=`, a compound assignment,
-   `++`/`--`, or `&`, or that a later `:=` list redeclares, anywhere in the
-   body including its lambdas (`stable.go`). It goes by name, so it is
-   conservative: reassigning one `x` unsettles every `x` in that function.
-   Package-level variables never smart-cast.
+   that cannot change between the check and the use. Before a body is
+   checked, a syntactic pass collects every name that is the target of `=`, a
+   compound assignment, `++`/`--`, or `&`, or that a later `:=` list
+   redeclares, anywhere in the body including its lambdas (`stable.go`); the
+   other locals, parameters, and `self` are settled and smart-cast wherever a
+   check holds. A reassigned local smart-casts between assignments
+   (`flow.go`, ADR 0046): each assignment gives the variable a new
+   generation, a smart cast records the generation it holds for, loops start
+   a new generation for the variables their body assigns, and the branches of
+   an `if` or `when` each start from the generations before the first and
+   merge what every continuing branch leaves non-null. A second syntactic
+   pass turns this off for names whose address is taken or that a closure or
+   a block used as a value assigns. Package-level variables never smart-cast.
 
 ### 4.3 Recorded information (`check.Info`)
 

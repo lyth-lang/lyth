@@ -213,8 +213,12 @@ func main() throws {
 - A `T?` needs a check before member access: `if u != null { u.Name }` (a smart cast), or
   `u?.Name`, `u?.Name ?: "anon"`, `u!!` (panics on null).
 - `x := f() ?: return` exits early on null.
-- Smart casts apply to parameters, `self`, and locals the function never reassigns. For a field
-  or a package-level variable, copy it into a local first.
+- Smart casts apply to parameters, `self`, and locals. A reassigned local stays smart-cast until
+  its next assignment (`node = node.Next` inside `while node != null` works, and so does
+  `if u == null { u = guest }` before `u.Name`), unless a lambda assigns it or `&u` is taken.
+  For a field or a package-level variable, copy it into a local first.
+- `v, err := f()` gives `err` the type `error?`: check it before `throw err`. A success value
+  without a zero value is `T?` there (null when `f` fails); prefer `v := f()?`.
 - Values from Go packages are usable as non-null.
 
 ## Control flow
@@ -340,6 +344,7 @@ The table lists older Lyth forms and the Go and Kotlin habits the compiler recog
 | a null `T?` field encoded as `null` | it is left out (`omitzero`); tag `json:"name"` keeps `null` | no: a wire change |
 | a `T?` passed to a Go `any` parameter arrived as a pointer (`*string`) | it arrives as its value, or a nil interface when null; pass `&x` where Go writes through a pointer | no: a run-time change |
 | an enum encoded as its number in JSON | its name (`"pendingReview"`); declare `MarshalJSON` and `UnmarshalJSON` to keep numbers | no: a wire change |
+| `n, err := strconv.Atoi(s)` then `throw err` or passing `err` as `error` without a check | `if err != null { throw err }`: the destructured error is `error?` (E0305, E0401 otherwise) | no: a check to add |
 
 ## Topics
 

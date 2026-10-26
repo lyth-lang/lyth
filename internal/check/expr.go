@@ -313,7 +313,7 @@ func (c *Checker) ident(e *syntax.Ident) *operand {
 			c.errorf(diag.EInvalidUse, e.S, "%s is used before its type is known", e.Name)
 			return invalid(e)
 		}
-		if nt, ok := c.scope.narrowed(s); ok {
+		if nt, ok := c.scope.narrowed(s, c.fn); ok {
 			switch {
 			case types.IdenticalIgnoringNull(nt, t):
 				if !types.IsNilable(types.Base(t)) && types.IsNullable(t) {
@@ -897,6 +897,15 @@ func (c *Checker) equality(e *syntax.BinaryExpr, x, y *operand) *operand {
 		_, isSlice := b.(*types.Slice)
 		_, isMap := b.(*types.Map)
 		if !types.MayBeNull(other.typ) && !isSlice && !isMap {
+			if v := c.smartCast(other.expr); v != nil {
+				// A check or an assignment smart-cast the variable: compare
+				// the variable itself, which may be null in Go's eyes.
+				c.info.Types[other.expr] = TypeAndValue{Mode: ModeValue, Type: v.Type}
+				delete(c.info.Implicit, other.expr)
+				delete(c.info.Asserts, other.expr)
+				c.warnf(diag.WUnnecessary, e.S, "%s is not null here, so this comparison is always %v", v.name, e.Op == syntax.NEQ)
+				return &operand{mode: ModeValue, typ: types.Bool}
+			}
 			if !types.IsNilable(other.typ) {
 				// Go cannot compare a string or a struct with nil.
 				c.errorf(diag.ETypeMismatch, e.S, "%s has non-nullable type %s, so it is never null",
@@ -1118,7 +1127,7 @@ func (c *Checker) nullCheck(x *syntax.BinaryExpr) (*VarSym, bool) {
 		return nil, true
 	}
 	v, ok := c.info.Uses[id].(*VarSym)
-	if !ok || !v.Settled() || v.Type == nil || !types.MayBeNull(v.Type) {
+	if !ok || !c.castable(v) || v.Type == nil || !types.MayBeNull(v.Type) {
 		return nil, true
 	}
 	return v, true
@@ -1215,20 +1224,41 @@ func (c *Checker) warnErrorTypeTest(x *operand, t types.Type, span source.Span) 
 		WithHint("to test the dynamic type on purpose, bind the error as any first: v: any = %s", value)
 }
 
+// smartCast returns the variable e names when a smart cast made it
+// non-null although its type is nullable.
+func (c *Checker) smartCast(e syntax.Expr) *VarSym {
+	id, ok := e.(*syntax.Ident)
+	if !ok {
+		return nil
+	}
+	v, ok := c.info.Uses[id].(*VarSym)
+	if !ok || v.Type == nil || !types.MayBeNull(v.Type) || types.IsPlatform(v.Type) {
+		return nil
+	}
+	return v
+}
+
 // nullableUse reports E0401 for using a nullable value as non-null.
 func (c *Checker) nullableUse(x *operand, what string) {
 	text := x.expr.Span().Short()
 	d := c.errorf(diag.ENullable, x.expr.Span(), "cannot %s %s: it may be null (type %s)", what, text, x.typ)
 	switch e := syntax.Unparen(x.expr).(type) {
 	case *syntax.Ident:
-		if v, ok := c.info.Uses[e].(*VarSym); ok && !v.Settled() {
-			if v.Kind == GlobalVar {
-				d.WithNote("smart casts do not apply to package-level variables; %s may change between the check and this use", v.name)
-			} else {
-				d.WithNote("smart casts apply only to variables that are never reassigned; %s is assigned in this function", v.name)
+		v, ok := c.info.Uses[e].(*VarSym)
+		if !ok {
+			break
+		}
+		if note, copyHelps := c.noCastNote(v); note != "" {
+			d.WithNote("%s", note)
+			if copyHelps {
+				name := v.name + "Now"
+				d.WithHint("copy it into a new variable and check that: %s := %s; if %s != null { ... }", name, text, name)
 			}
-			name := v.name + "Now"
-			d.WithHint("copy it into a new variable and check that: %s := %s; if %s != null { ... }", name, text, name)
+			return
+		}
+		if v.rawCall != "" {
+			d.WithNote("%s is null when %s fails", v.name, v.rawCall).
+				WithHint("handle the error with ? or catch instead of destructuring (%s := %s?), or check %s itself", v.name, v.rawCall, v.name)
 			return
 		}
 	case *syntax.SelectorExpr:
@@ -1285,7 +1315,11 @@ func (c *Checker) elvis(e *syntax.ElvisExpr, want types.Type) *operand {
 		isColl = true // xs ?: default: a nil slice is the absent value
 	}
 	if !types.MayBeNull(x.typ) && !isColl {
-		d := c.warnf(diag.WUnnecessary, e.OpSpan, "left side of ?: has non-nullable type %s, so the right side is never used", x.typ)
+		msg := "left side of ?: has non-nullable type " + x.typ.String()
+		if v := c.smartCast(syntax.Unparen(e.X)); v != nil {
+			msg = v.name + " is not null here"
+		}
+		d := c.warnf(diag.WUnnecessary, e.OpSpan, "%s, so the right side of ?: is never used", msg)
 		if ci := c.info.Calls[callOf(e.X)]; ci != nil && ci.Kind == CallPrelude && ci.Prelude == PreludeReceive {
 			d.WithNote("receiving from a closed channel of %s yields its zero value, not null", x.typ).
 				WithHint("tell a closed channel apart with v, ok := ch.receive()")

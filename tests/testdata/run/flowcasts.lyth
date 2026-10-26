@@ -1,0 +1,130 @@
+// Smart casts of reassigned locals hold until the next assignment.
+import "strconv"
+
+struct Node {
+    Value: int
+    Next: *Node?
+}
+
+struct User {
+    Name: string
+}
+
+// Go's idiom: := reuses err, and each check smart-casts the new error.
+func parsePair(a: string, b: string): (int, int) throws {
+    x, err := strconv.Atoi(a)
+    if err != null {
+        throw err
+    }
+    y, err := strconv.Atoi(b)
+    if err != null {
+        throw err.wrap("second")
+    }
+    return x, y
+}
+
+// The condition checks node again after each assignment in the body.
+func sum(head: *Node?): int {
+    total := 0
+    node := head
+    while node != null {
+        total += node.Value
+        node = node.Next
+    }
+    return total
+}
+
+func longest(words: []string): string? {
+    best: string? = null
+    for w in words {
+        if best == null || len(w) > len(best) {
+            best = w
+        }
+    }
+    return best
+}
+
+func lookup(id: int): *User? {
+    if id == 1 {
+        return &User(Name = "Ada")
+    }
+    return null
+}
+
+func greet(id: int): string {
+    u := lookup(id)
+    if u == null {
+        u = &User(Name = "guest")
+    }
+    return "hello ${u.Name}"
+}
+
+func counter(): int {
+    n: int? = null
+    for i in 0..<3 {
+        if n == null {
+            n = 0
+        }
+        n = n + i
+    }
+    return n ?: -1
+}
+
+// Every branch that continues leaves u non-null.
+func pick(c: bool): string {
+    u: *User? = null
+    if c {
+        u = &User(Name = "left")
+    } else {
+        u = &User(Name = "right")
+    }
+    return u.Name
+}
+
+func label(n: int): string {
+    s: string? = null
+    when {
+        n < 0 -> s = "negative"
+        n == 0 -> return "zero"
+        else -> s = "positive"
+    }
+    return s
+}
+
+func report(a: string, b: string) {
+    _, _ = parsePair(a, b) catch (e) {
+        println(e)
+        return
+    }
+    println("ok")
+}
+
+func main() {
+    a, b := parsePair("1", "2") catch { return }
+    println(a + b)
+    report("1", "x")
+    println(sum(&Node(Value = 1, Next = &Node(Value = 2, Next = null))))
+    println(longest(["a", "abc", "ab"]) ?: "none")
+    println(greet(1), greet(2))
+    println(counter())
+    println(pick(true), pick(false))
+    println(label(-1), label(0), label(5))
+    u: *User? = null
+    u = &User(Name = "Lin")
+    println(u.Name)
+    k: int? = null
+    k = 41
+    println(k + 1)
+}
+
+// Output:
+// 3
+// second: strconv.Atoi: parsing "x": invalid syntax
+// 3
+// abc
+// hello Ada hello guest
+// 3
+// left right
+// negative zero positive
+// Lin
+// 42

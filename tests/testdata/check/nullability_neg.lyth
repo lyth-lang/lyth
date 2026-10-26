@@ -7,14 +7,14 @@ func get(n: *Node?): int {
     return n.value // ERROR E0401 "it may be null"
 }
 
-func assign() {
+func assign(s: string?) {
     p: *Node = null // ERROR E0201 "not nullable"
     q: *Node // ERROR E0405 "has no zero value"
-    s: string? = "x"
     t: string = s // ERROR E0201 "expected string, found string?"
     v: string? = "a"
     if v != null {
-        println(len(v)) // ERROR E0401 "smart casts apply only to variables that are never reassigned"
+        v = s
+        println(len(v)) // ERROR E0401 "v is assigned after the check, which ends the smart cast"
     }
     v = null
     bad := Node(Value = 1) // ERROR E0211 "missing field Next"

@@ -53,6 +53,7 @@ type blockResult struct {
 	op         *operand
 	valueExpr  syntax.Expr
 	terminates bool
+	flow       map[*VarSym]types.Type // the smart casts at its end, if it does not terminate
 }
 
 // blockValue checks a block whose last expression statement provides a value
@@ -60,6 +61,11 @@ type blockResult struct {
 func (c *Checker) blockValue(b *syntax.Block, want types.Type, needValue bool) blockResult {
 	var res blockResult
 	c.withScope(newScope(c.scope, BlockScope), func() {
+		defer func() {
+			if !res.terminates {
+				res.flow = c.flowState()
+			}
+		}()
 		n := len(b.Stmts)
 		last, isExpr := syntax.Stmt(nil), false
 		if n > 0 {
@@ -192,7 +198,7 @@ func (c *Checker) localDecl(s *syntax.LocalDecl) bool {
 			redeclared = true
 		}
 	}
-	var t types.Type
+	var t, init types.Type
 	terminates := false
 	switch {
 	case s.Value == nil:
@@ -212,6 +218,9 @@ func (c *Checker) localDecl(s *syntax.LocalDecl) bool {
 		if want != nil {
 			c.assign(x, want, "initializer of "+name.Name)
 			t = want
+			if x.mode != ModeInvalid {
+				init = x.typ
+			}
 		} else {
 			t = c.defaultValueType(x, "initializer of "+name.Name)
 		}
@@ -245,6 +254,7 @@ func (c *Checker) localDecl(s *syntax.LocalDecl) bool {
 	v := c.newLocal(name, t)
 	if !redeclared {
 		c.declareLocal(v, name)
+		c.castByValue(v, init) // x: T? = nonNull
 	}
 	c.info.Locals[s] = []*VarSym{v}
 	return terminates
@@ -361,6 +371,7 @@ func (c *Checker) declareLocal(v *VarSym, id *syntax.Ident) {
 
 func (c *Checker) destructure(s *syntax.LocalDecl) bool {
 	vars := make([]*VarSym, len(s.Names))
+	var rawNull []bool // the values null when the destructured call fails
 	// As in Go, a, b := e declares the names not yet declared in this scope
 	// and assigns the others; at least one must be new.
 	declareAll := func(ts []types.Type) {
@@ -393,11 +404,15 @@ func (c *Checker) destructure(s *syntax.LocalDecl) bool {
 				if ok {
 					c.info.Uses[id] = ov
 					vars[i] = ov
+					c.assigned(id, t)
 				}
 				continue
 			}
 			fresh = true
 			v := c.newLocal(id, t)
+			if i < len(rawNull) && rawNull[i] {
+				v.rawCall = s.Value.Span().Short()
+			}
 			c.declareLocal(v, id)
 			vars[i] = v
 		}
@@ -455,7 +470,11 @@ func (c *Checker) destructure(s *syntax.LocalDecl) bool {
 		}
 		switch t := x.typ.(type) {
 		case *types.Result:
-			elems = t.Raw
+			elems = rawComponents(t)
+			rawNull = make([]bool, len(elems))
+			for i, st := range t.Success {
+				rawNull[i] = !types.MayBeNull(st) && types.MayBeNull(elems[i])
+			}
 		case *types.Tuple:
 			elems = t.Elems
 		default:
@@ -473,6 +492,24 @@ func (c *Checker) destructure(s *syntax.LocalDecl) bool {
 	}
 	declareAll(elems)
 	return false
+}
+
+// rawComponents returns the types v, err := f() binds (errors.md §5): the
+// error is error?, null on success, and a success value is null on failure
+// unless its type has a zero value (Z(T), types.md §6).
+func rawComponents(r *types.Result) []types.Type {
+	out := make([]types.Type, len(r.Raw))
+	for i, t := range r.Raw {
+		switch {
+		case i == len(r.Raw)-1 && types.IsErrorType(t):
+			out[i] = types.MakeNullable(types.Error)
+		case !types.Zeroable(t) && !types.MayBeNull(t):
+			out[i] = types.MakeNullable(t)
+		default:
+			out[i] = t
+		}
+	}
+	return out
 }
 
 func (c *Checker) assignStmt(s *syntax.AssignStmt) {
@@ -507,8 +544,10 @@ func (c *Checker) assignStmt(s *syntax.AssignStmt) {
 	if s.Op == syntax.ASSIGN {
 		r := c.value(s.Rhs, target)
 		c.assign(r, target, "assignment to "+s.Lhs.Span().Short())
+		c.assigned(s.Lhs, r.typ)
 		return
 	}
+	defer c.assigned(s.Lhs, nil)
 	// Compound assignment: lhs op= rhs.
 	op := compoundOp(s.Op)
 	bin := &syntax.BinaryExpr{Op: op, X: s.Lhs, Y: s.Rhs, OpSpan: s.OpSpan, S: s.S}
@@ -574,6 +613,7 @@ func (c *Checker) tupleAssign(s *syntax.AssignStmt, lhs *syntax.TupleExpr) {
 		targets[i] = l.typ
 	}
 	if rhs, isTuple := syntax.Unparen(s.Rhs).(*syntax.TupleExpr); isTuple {
+		vals := make([]types.Type, len(lhs.Elems))
 		if len(rhs.Elems) != len(lhs.Elems) {
 			c.errorf(diag.EMultiValue, s.Rhs.Span(), "%s assigned to %s", plural(len(rhs.Elems), "value"), plural(len(lhs.Elems), "target"))
 			for _, el := range rhs.Elems {
@@ -591,9 +631,18 @@ func (c *Checker) tupleAssign(s *syntax.AssignStmt, lhs *syntax.TupleExpr) {
 			}
 			x := c.value(el, targets[i])
 			c.assign(x, targets[i], "assignment to "+lhs.Elems[i].Span().Short())
+			vals[i] = x.typ
+		}
+		for i, el := range lhs.Elems {
+			c.assigned(el, vals[i])
 		}
 		return
 	}
+	defer func() {
+		for _, el := range lhs.Elems {
+			c.assigned(el, nil)
+		}
+	}()
 	x := c.expr(s.Rhs, nil)
 	if x.mode == ModeInvalid {
 		return
@@ -608,7 +657,7 @@ func (c *Checker) tupleAssign(s *syntax.AssignStmt, lhs *syntax.TupleExpr) {
 	var elems []types.Type
 	switch t := x.typ.(type) {
 	case *types.Result:
-		elems = t.Raw
+		elems = rawComponents(t)
 	case *types.Tuple:
 		elems = t.Elems
 	default:
@@ -766,10 +815,18 @@ type ifResult struct {
 func (c *Checker) ifExpr(e *syntax.IfExpr, want types.Type, needValue bool) ifResult {
 	_, nt, nf := c.cond(e.Cond)
 	var tr, er blockResult
+	bf := c.startBranches()
+	bf.next()
 	c.withScope(c.narrowedScope(nt), func() { tr = c.blockValue(e.Then, want, needValue) })
+	bf.end(tr.terminates, tr.flow)
+	bf.next()
 	if e.Else != nil {
 		c.withScope(c.narrowedScope(nf), func() { er = c.blockValue(e.Else, want, needValue) })
+		bf.end(er.terminates, er.flow)
+	} else {
+		c.withScope(c.narrowedScope(nf), func() { bf.end(false, c.flowState()) })
 	}
+	bf.finish()
 	res := ifResult{
 		terminates:     e.Else != nil && tr.terminates && er.terminates,
 		thenTerminates: tr.terminates,
@@ -896,10 +953,12 @@ func (c *Checker) when(e *syntax.WhenExpr, want types.Type, needValue bool) (*op
 		seen[key] = span
 	}
 	allTerminate := true
+	bf := c.startBranches()
 	for i, br := range e.Branches {
 		if hasElse {
 			c.warnf(diag.WUnreachable, br.S, "branch after else is unreachable")
 		}
+		bf.next()
 		before := prevFalse
 		var nt, nf narrowing
 		c.withScope(scope, func() {
@@ -1005,6 +1064,7 @@ func (c *Checker) when(e *syntax.WhenExpr, want types.Type, needValue bool) (*op
 			bodyScope.setNarrow(v, t)
 		}
 		c.withScope(bodyScope, func() { r = c.blockValue(br.Body, want, needValue) })
+		bf.end(r.terminates, r.flow)
 		if !r.terminates {
 			allTerminate = false
 		}
@@ -1039,6 +1099,12 @@ func (c *Checker) when(e *syntax.WhenExpr, want types.Type, needValue bool) (*op
 			hasElse = true // reported; avoid a second error for a value use
 		}
 	}
+	if !hasElse {
+		// No branch may run.
+		bf.next()
+		c.withScope(c.narrowedScope(prevFalse), func() { bf.end(false, c.flowState()) })
+	}
+	bf.finish()
 	terminates := hasElse && allTerminate && len(e.Branches) > 0
 	if !needValue {
 		return &operand{mode: ModeNoValue, typ: types.Unit}, terminates
@@ -1170,6 +1236,7 @@ func (c *Checker) forStmt(s *syntax.ForStmt) {
 				info.Vars = append(info.Vars, v)
 			}
 		}
+		c.forgetLoopAssigned(s.Body)
 		c.loop(s.Label, func() { c.block(s.Body) })
 	})
 	c.info.Fors[s] = info
@@ -1228,6 +1295,7 @@ func (c *Checker) loop(label *syntax.Ident, body func()) {
 }
 
 func (c *Checker) whileStmt(s *syntax.WhileStmt) bool {
+	c.forgetLoopAssigned(s.Body) // the condition runs again after the body
 	cond, nt, _ := c.cond(s.Cond)
 	breaks := c.countBreaks(s.Body, s.Label)
 	c.withScope(c.narrowedScope(nt), func() { c.loop(s.Label, func() { c.block(s.Body) }) })
@@ -1347,7 +1415,7 @@ func (c *Checker) deferGo(call syntax.Expr, body *syntax.Block, ds *syntax.Defer
 		fn := &funcCtx{isLambda: true, sig: &types.Signature{}, name: kw + " block"}
 		if saveFn != nil {
 			fn.recv, fn.recvDecl = saveFn.recv, saveFn.recvDecl
-			fn.reassigned = saveFn.reassigned
+			fn.reassigned, fn.flowOff = saveFn.reassigned, saveFn.flowOff
 			if !isGo && saveFn.fallible && !saveFn.isLambda {
 				// ? and throw in a deferred block of a function that can
 				// fail set the function's error, unless it has one already.

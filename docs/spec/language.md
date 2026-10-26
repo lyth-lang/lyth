@@ -1070,9 +1070,9 @@ operand never matches.
 | `x as T` | `x` as a `T`; panics if it is not one | `x.(T)` |
 | `x as? T` | `x` as a `T`, or null | `t, _ := x.(T)` (boxed for value types) |
 
-A successful `is` test **smart-casts** a variable to `T` exactly like a null
-check, under the same conditions (a parameter, `self`, or a local the function
-never reassigns, types.md §5.3): in the guarded branch, in the clauses of a
+A successful `is` test **smart-casts** a variable to `T` like a null check,
+for a parameter, `self`, or a local the function never reassigns
+(types.md §5.3): in the guarded branch, in the clauses of a
 `when x { is T -> ... }`, and after `if x !is T { return }`. The lowering binds
 the cast value once, as idiomatic Go does:
 

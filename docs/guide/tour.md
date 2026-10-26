@@ -289,9 +289,9 @@ func main() {
 
 A type with `?` can be null; others cannot, so `user.Name` on a `User?` is a
 compile error until a check proves `user` is not null (a *smart cast*). Smart
-casts apply to parameters and to local variables the function never
-reassigns; for a field or a reassigned variable, copy the value into a new
-local first. `?.` reads through a possible null, `?:` supplies a default or
+casts apply to parameters and local variables; a check of a variable holds
+until the variable is assigned again, and assigning a non-null value is a
+check too. For a field, copy the value into a local first. `?.` reads through a possible null, `?:` supplies a default or
 exits early (`?: return`), and `!!` asserts. In Go, `User?` is `*User` and
 `string?` is `*string`, and the automatic `json` tag of an optional field
 adds `omitzero`, so a null value is left out of the JSON. Passed to a Go `any`

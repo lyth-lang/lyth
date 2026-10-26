@@ -1722,8 +1722,10 @@ func (c *Checker) funcBody(sym *FuncSym) {
 	}
 	if d.Body != nil {
 		fn.reassigned = reassignedNames(params, d.Body)
+		fn.flowOff = flowOff(d.Body)
 	} else if d.ExprBody != nil {
 		fn.reassigned = reassignedNames(params, d.ExprBody)
+		fn.flowOff = flowOff(d.ExprBody)
 	}
 	saveScope, saveFn := c.scope, c.fn
 	c.scope, c.fn = scope, fn

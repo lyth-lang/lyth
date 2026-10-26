@@ -138,18 +138,46 @@ inside the region the condition dominates. The same holds after an early exit
 on `x == null` for the rest of the block. Conditions combine through `&&`, `||`,
 and `!`.
 
-A smart cast needs a value that cannot change between the check and the use.
-It applies to parameters, `self`, and locals the function never reassigns: a
-local whose name is never the target of `=`, a compound assignment, `++`/`--`,
-or `&`, and is never reused by a later `:=` list (language.md §4.2), anywhere
-in the function body, including its lambdas. The analysis is syntactic and by
-name, so it is conservative: reassigning one `x` unsettles every `x` in that
-function. Smart casts do not apply to a reassigned local, to package-level
-variables (any code in the package may assign them), to fields, or to calls.
-E0401 then says why and suggests a copy that can be checked
-(`curNow := cur; if curNow != null { ... }`); for a field, copy it into a local
-first. Type tests (`x is T`, language.md §5.10) smart-cast the same
-way, from an interface type to `T`.
+A smart cast needs a value that cannot change between the check and the use
+([ADR 0046](../adr/0046-smart-casts-between-assignments.md)):
+
+- Parameters, `self`, and locals the function never reassigns smart-cast
+  wherever the check holds, also inside lambdas. A local is never reassigned
+  when its name is never the target of `=`, a compound assignment, `++`/`--`,
+  or `&`, and is never reused by a later `:=` list (language.md §4.2), anywhere
+  in the function body, including its lambdas. The analysis is syntactic and
+  by name, so it is conservative.
+- A reassigned local smart-casts from the check until its next assignment.
+  An assignment of a value that is never null smart-casts it to non-null, as
+  does a declaration `x: T? = e` with a non-null `e`. A loop ends, at its
+  start, the smart casts of the variables its body assigns. After an
+  `if`/`else` or a `when`, a variable stays smart-cast when every branch that
+  continues leaves it non-null (an `if` without `else`, and a `when` without
+  one, include the path that runs no branch):
+
+  ```kotlin
+  u := lookup(id)
+  if u == null {
+      u = guest
+  }
+  println(u.Name) // u is not null on either path
+  ```
+
+  This needs every assignment in view, so it does not apply to a local whose
+  address is taken (`&x`), that a lambda, `go` block, or `defer` block
+  assigns, or that an `if`, `when`, or `catch` used as a value assigns (such a
+  block runs before the plain reads of the expression around it,
+  language.md §6); and a smart cast of a reassigned local made outside a
+  lambda does not hold inside it.
+- Package-level variables (any code in the package may assign them), fields,
+  and calls never smart-cast.
+
+E0401 says why a check did not hold and, where it helps, suggests a copy
+that can be checked (`curNow := cur; if curNow != null { ... }`); for a field,
+copy it into a local first. Comparing a smart-cast variable with `null` warns
+(W0004) and compares the variable itself. Type tests (`x is T`, language.md
+§5.10) smart-cast parameters, `self`, and locals the function never
+reassigns, from an interface type to `T`.
 
 ### 5.4 Platform types
 

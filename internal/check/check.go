@@ -29,6 +29,7 @@ type Config struct {
 
 // Checker holds the state of checking one package.
 type Checker struct {
+	gens int // generations handed out, for smart casts of reassigned locals (flow.go)
 	// lythDecls caches, by package path, the declarations of other Lyth
 	// packages by Go name (nil for Go packages), for lythDecl.
 	lythDecls map[string]map[string]*types.TypeDecl
@@ -100,6 +101,10 @@ type funcCtx struct {
 	// reassigned holds the names the enclosing function body may assign
 	// after declaring them; nil when unknown (nothing is settled then).
 	reassigned map[string]bool
+	// flowOff holds the names whose locals are never smart-cast between
+	// assignments (flow.go), and why: their address is taken or a closure
+	// assigns them.
+	flowOff map[string]flowReason
 }
 
 // Check type-checks the files of one Lyth package.

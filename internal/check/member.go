@@ -107,7 +107,11 @@ func (c *Checker) selector(e *syntax.SelectorExpr, want types.Type) *operand {
 			if types.MayBeNull(t) {
 				sel.Safe = true
 			} else {
-				c.warnf(diag.WUnnecessary, e.OpSpan, "unnecessary safe call: %s has non-nullable type %s", e.X.Span().Short(), t).
+				why := e.X.Span().Short() + " has non-nullable type " + t.String()
+				if v := c.smartCast(syntax.Unparen(e.X)); v != nil {
+					why = v.name + " is not null here"
+				}
+				c.warnf(diag.WUnnecessary, e.OpSpan, "unnecessary safe call: %s", why).
 					WithEdit(e.OpSpan, ".", "use . instead of ?.")
 			}
 		} else if types.IsNullable(t) || t == types.Null {

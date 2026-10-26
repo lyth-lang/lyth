@@ -1,0 +1,111 @@
+// Smart casts of reassigned locals end where the variable may change.
+import "strconv"
+
+struct User {
+    Name: string
+}
+
+func maybe(): *User? = null
+
+func find(id: int): *User throws {
+    if id == 0 {
+        throw strconv.ErrRange
+    }
+    return &User(Name = "a")
+}
+
+func reassigned() {
+    u: *User? = &User(Name = "a")
+    println(u.Name)
+    u = maybe()
+    println(u.Name) // ERROR E0401 "u is assigned after the check, which ends the smart cast"
+}
+
+func closureAssigns() {
+    u: *User? = maybe()
+    reset := { u = null }
+    if u != null {
+        reset()
+        println(u.Name) // ERROR E0401 "a lambda, go block, or defer block assigns it"
+    }
+}
+
+func addressTaken() {
+    u: *User? = maybe()
+    p := &u
+    if u != null {
+        *p = null
+        println(u.Name) // ERROR E0401 "its address is taken"
+    }
+}
+
+func loopAssigns() {
+    u: *User? = &User(Name = "a")
+    for _ in 0..<2 {
+        println(u.Name) // ERROR E0401 "this loop assigns u, so a check before the loop does not hold inside it"
+        u = maybe()
+    }
+}
+
+func inLambda() {
+    u: *User? = maybe()
+    if u != null {
+        f := { println(u.Name) } // ERROR E0401 "checks do not smart-cast u inside a lambda"
+        f()
+    }
+    u = null
+}
+
+func show(a: string, b: int) {
+    println(a, b)
+}
+
+func valueBlockAssigns(c: bool) {
+    u: *User? = maybe()
+    if u != null {
+        // The if runs before u.Name is read (ADR 0045).
+        show(u.Name, if c { u = null; 1 } else { 2 }) // ERROR E0401 "an if, when, or catch used as a value assigns it"
+    }
+}
+
+func oneBranch(c: bool) {
+    u: *User? = maybe()
+    if c {
+        u = &User(Name = "b")
+    }
+    println(u.Name) // ERROR E0401 "it may be null"
+}
+
+func branchNulls(c: bool) {
+    u: *User? = &User(Name = "a")
+    if c {
+        u = &User(Name = "b")
+    } else {
+        u = maybe()
+    }
+    println(u.Name) // ERROR E0401 "it may be null"
+}
+
+func whenWithoutElse(n: int) {
+    s: string? = null
+    when {
+        n < 0 -> s = "negative"
+        n > 0 -> s = "positive"
+    }
+    println(len(s)) // ERROR E0401 "it may be null"
+}
+
+func throwUnchecked(s: string): int throws {
+    _, err := strconv.Atoi(s)
+    throw err // ERROR E0305 "cannot throw err: it may be null (type error?)"
+}
+
+func destructured() {
+    u, err := find(1)
+    if err != null {
+        return
+    }
+    println(u.Name) // ERROR E0401 "u is null when find(1) fails"
+}
+
+func main() {}

@@ -41,7 +41,8 @@ func smart(id: int): int {
         found = Box(Size = id)
     }
     if found != null {
-        return found.Size // ERROR E0401 "smart casts apply only to variables that are never reassigned"
+        found = if id > 9 { null } else { Box(Size = 1) }
+        return found.Size // ERROR E0401 "found is assigned after the check, which ends the smart cast"
     }
     return 0
 }

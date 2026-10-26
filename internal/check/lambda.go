@@ -134,7 +134,10 @@ func (c *Checker) lambda(e *syntax.LambdaExpr, want types.Type) *operand {
 	fn.sig = sig
 	info.Fallible = fn.fallible
 	if c.fn != nil {
-		fn.reassigned = c.fn.reassigned // the enclosing body's analysis covers the lambda
+		// The enclosing body's analysis covers the lambda.
+		fn.reassigned, fn.flowOff = c.fn.reassigned, c.fn.flowOff
+	} else {
+		fn.flowOff = flowOff(e.Body)
 	}
 
 	saveScope, saveFn := c.scope, c.fn

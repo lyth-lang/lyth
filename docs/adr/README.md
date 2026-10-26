@@ -35,7 +35,7 @@ Accepted ADRs are immutable; a superseding ADR links back.
 | [0028](0028-generic-declarations.md) | Generic declarations are Go generics | Accepted (spelling amended by 0031) |
 | [0029](0029-extension-functions.md) | Extension functions are Go functions called like methods | Accepted (spelling amended by 0031) |
 | [0030](0030-standard-library.md) | The standard library is compiled with the program | Accepted |
-| [0031](0031-go-spelling.md) | Go's spelling for what Go already has: `func`, `:=`, Go types, `[T]`, headers, `self` | Accepted (supersedes 0007 for locals and parts of 0011; amends 0009, 0012, 0016, 0023, 0024, 0028, 0029; amended by 0037, 0038, 0039, 0044) |
+| [0031](0031-go-spelling.md) | Go's spelling for what Go already has: `func`, `:=`, Go types, `[T]`, headers, `self` | Accepted (supersedes 0007 for locals and parts of 0011; amends 0009, 0012, 0016, 0023, 0024, 0028, 0029; amended by 0037, 0038, 0039, 0044, 0046) |
 | [0032](0032-typed-literals.md) | Go's typed literals for slices, arrays, and maps | Accepted (extends 0031) |
 | [0033](0033-agents-learn-from-the-compiler.md) | Coding agents learn Lyth from the installed compiler: `lyth guide`, `lyth fix` | Accepted |
 | [0034](0034-coverage-and-dense-line-directives.md) | Coverage in Lyth positions; `//line` on every line of build output | Accepted (amends 0005, 0006) |
@@ -50,3 +50,4 @@ Accepted ADRs are immutable; a superseding ADR links back.
 | [0043](0043-struct-embedding.md) | Struct embedding | Accepted |
 | [0044](0044-remaining-spellings.md) | Remaining spellings: `null`, import aliases, and `in` as a name | Accepted (amends 0031) |
 | [0045](0045-go-evaluation-order.md) | Go's evaluation order, with and without hoisting | Accepted (replaces language.md §6's rule) |
+| [0046](0046-smart-casts-between-assignments.md) | Smart casts between assignments | Accepted (amends 0031) |

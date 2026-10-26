@@ -56,10 +56,17 @@ type VarSym struct {
 	// replaces a parameter that a closure created earlier captured, which
 	// Go's ctx, cancel := ... would assign under the closure.
 	FreshName bool
-	// owner is the function or lambda that declares a parameter, and
-	// captured records that a nested function literal used it.
+	// owner is the function or lambda that declares a parameter or local,
+	// and captured records that a nested function literal used it.
 	owner    *funcCtx
 	captured bool
+	gen      int // assignments so far, for smart casts of reassigned locals (flow.go)
+	// loopForgot records that a loop, not an assignment, last ended the
+	// variable's smart casts.
+	loopForgot bool
+	// rawCall is the fallible call a value was destructured from, which
+	// makes the value null when the call fails; "" otherwise.
+	rawCall string
 }
 
 func (v *VarSym) Name() string          { return v.name }
@@ -237,7 +244,7 @@ type Scope struct {
 	kind   ScopeKind
 	syms   map[string]Symbol
 	order  []Symbol
-	narrow map[*VarSym]types.Type
+	narrow map[*VarSym]narrowEntry
 	fn     *funcCtx // set on function scopes
 }
 
@@ -265,22 +272,42 @@ func (s *Scope) Insert(sym Symbol) Symbol {
 // LookupLocal returns the symbol declared directly in s.
 func (s *Scope) LookupLocal(name string) Symbol { return s.syms[name] }
 
-// narrowed returns the smart-cast type of v visible from s. Only immutable
-// bindings are ever narrowed, so narrowings remain valid inside lambdas.
-func (s *Scope) narrowed(v *VarSym) (types.Type, bool) {
+// narrowed returns the smart-cast type of v visible from s in the function
+// fn. A smart cast of a variable that is never reassigned holds in lambdas
+// too; one of a reassigned local holds only in its own function and until
+// the variable's next assignment (flow.go).
+func (s *Scope) narrowed(v *VarSym, fn *funcCtx) (types.Type, bool) {
 	for sc := s; sc != nil; sc = sc.parent {
-		if t, ok := sc.narrow[v]; ok {
-			return t, true
+		if e, ok := sc.narrow[v]; ok {
+			if e.flow && (e.gen != v.gen || e.fn != fn) {
+				return nil, false
+			}
+			return e.t, true
 		}
 	}
 	return nil, false
 }
 
+// staleNarrow reports whether a smart cast of v recorded in s or its parents
+// was ended by an assignment or a loop.
+func (s *Scope) staleNarrow(v *VarSym) bool {
+	for sc := s; sc != nil; sc = sc.parent {
+		if e, ok := sc.narrow[v]; ok {
+			return e.flow && e.gen != v.gen
+		}
+	}
+	return false
+}
+
 func (s *Scope) setNarrow(v *VarSym, t types.Type) {
 	if s.narrow == nil {
-		s.narrow = map[*VarSym]types.Type{}
+		s.narrow = map[*VarSym]narrowEntry{}
 	}
-	s.narrow[v] = t
+	e := narrowEntry{t: t}
+	if !v.Settled() {
+		e.flow, e.gen, e.fn = true, v.gen, v.owner
+	}
+	s.narrow[v] = e
 }
 
 // Symbols returns the symbols of s in declaration order.

@@ -768,13 +768,17 @@ func (fl *fnLower) tupleAssign(s *syntax.AssignStmt, lhs *syntax.TupleExpr) {
 			xs[i] = fl.spillTarget(el, xs[i], &spills)
 		}
 		*fl.stmts = append(*fl.stmts, spills...)
-		names := fl.multiFallible(s.Rhs, len(lhs.Elems))
+		blank := make([]bool, len(xs))
+		for i, x := range xs {
+			id, ok := x.(*ast.Ident)
+			blank[i] = ok && id.Name == "_"
+		}
+		names := fl.multiFallible(s.Rhs, blank)
 		var dst, src []ast.Expr
 		for i, n := range names {
-			if id, ok := xs[i].(*ast.Ident); ok && id.Name == "_" {
-				continue
+			if !blank[i] {
+				dst, src = append(dst, xs[i]), append(src, ast.NewIdent(n))
 			}
-			dst, src = append(dst, xs[i]), append(src, ast.NewIdent(n))
 		}
 		if len(dst) > 0 {
 			fl.emit(&ast.AssignStmt{Lhs: dst, Tok: token.ASSIGN, TokPos: fl.l.pos(s.S), Rhs: src}, s.S)
@@ -1779,10 +1783,11 @@ func (fl *fnLower) multiFallibleExpr(e syntax.Expr, n int) bool {
 	return info != nil && len(info.Success) == n && n >= 2
 }
 
-// multiFallible lowers x? or x catch { ... } of a call with n success
-// values into fresh variables and returns their names; nil when e is not
-// such an expression.
-func (fl *fnLower) multiFallible(e syntax.Expr, n int) []string {
+// multiFallible lowers x? or x catch { ... } of a call with several success
+// values into fresh variables, _ where blank says so, and returns their
+// names; nil when e is not such an expression.
+func (fl *fnLower) multiFallible(e syntax.Expr, blank []bool) []string {
+	n := len(blank)
 	var info *check.TryInfo
 	switch x := syntax.Unparen(e).(type) {
 	case *syntax.TryExpr:
@@ -1795,7 +1800,10 @@ func (fl *fnLower) multiFallible(e syntax.Expr, n int) []string {
 	}
 	names := make([]string, n)
 	for i := range names {
-		names[i] = fl.temp("v")
+		names[i] = "_"
+		if !blank[i] {
+			names[i] = fl.temp("v")
+		}
 	}
 	switch x := syntax.Unparen(e).(type) {
 	case *syntax.TryExpr:

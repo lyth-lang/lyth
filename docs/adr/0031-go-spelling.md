@@ -1,6 +1,6 @@
 # ADR 0031: Go's spelling for what Go already has
 
-**Status:** Accepted and implemented (supersedes [0007](0007-val-var-and-immutability.md) for locals and the type spellings of [0011](0011-type-syntax.md); amends [0009](0009-nullability.md) and [0016](0016-type-tests.md) (smart casts), [0012](0012-rejected-features.md), [0023](0023-slice-types.md), [0024](0024-channel-operations.md), [0028](0028-generic-declarations.md), [0029](0029-extension-functions.md)); amended by [0037](0037-type-declarations.md) (`type` replaces `typealias`), [0038](0038-members-through-self.md) (members through `self.`), [0039](0039-rebinding-parameters.md) (parameters), and [0044](0044-remaining-spellings.md) (import aliases)
+**Status:** Accepted and implemented (supersedes [0007](0007-val-var-and-immutability.md) for locals and the type spellings of [0011](0011-type-syntax.md); amends [0009](0009-nullability.md) and [0016](0016-type-tests.md) (smart casts), [0012](0012-rejected-features.md), [0023](0023-slice-types.md), [0024](0024-channel-operations.md), [0028](0028-generic-declarations.md), [0029](0029-extension-functions.md)); amended by [0037](0037-type-declarations.md) (`type` replaces `typealias`), [0038](0038-members-through-self.md) (members through `self.`), [0039](0039-rebinding-parameters.md) (parameters), [0044](0044-remaining-spellings.md) (import aliases), and [0046](0046-smart-casts-between-assignments.md) (smart casts of reassigned locals)
 
 ## Context
 Lyth's first syntax borrowed Kotlin's spelling wherever Kotlin's semantics
