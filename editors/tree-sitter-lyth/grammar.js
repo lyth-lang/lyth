@@ -306,7 +306,9 @@ module.exports = grammar({
     empty_struct_type: (_) => prec(2, seq('struct', '{', '}')),
     empty_struct: (_) => prec.dynamic(10, seq('struct', '{', '}', '{', '}')),
     _simple_type: ($) => choice($.primitive_type, alias($.identifier, $.type_identifier)),
-    qualified_type: ($) => seq(field('package', $.identifier), '.', field('name', alias($.identifier, $.type_identifier))),
+    // sync.Mutex; preferred to a member access after a declared type (var mu: sync.Mutex)
+    qualified_type: ($) =>
+      prec.dynamic(1, seq(field('package', $.identifier), '.', field('name', alias($.identifier, $.type_identifier)))),
     generic_type: ($) => prec(2, seq(choice($._simple_type, $.qualified_type), field('arguments', $.type_arguments))),
     type_arguments: ($) => seq('[', commaSep1($._type), ']'),
     pointer_type: ($) => prec.right(seq('*', $._type)),
@@ -339,6 +341,7 @@ module.exports = grammar({
         alias($._header_call, $.call_expression),
         alias($._header_method_call, $.method_call),
         $.member_access,
+        $.typed_literal,
         $.parenthesized,
         $.bracketed,
       ),

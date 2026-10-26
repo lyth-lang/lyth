@@ -864,7 +864,8 @@ Typed literals spell the type, as in Go: `[]int64{1, 2}`,
 `map[string]any{"status": "ok", "count": 3}`, `[3]int{1, 2}` (the rest is
 zero), and `[...]string{"a", "b"}`. Elements are expressions typed by the
 element type (`[][]int{[1, 2]}`); Go's elided `{1, 2}` and indexed `{0: a}`
-elements are E0008, and in a header the literal must be parenthesized.
+elements are E0008. In a header, the braces after a slice, array, or map type
+are the literal's, as in Go: `for x in []int{1, 2} { ... }`.
 Go's struct literal `Point{X: 1}` is E0008 with the construction call
 `Point(X = 1)`, and Go's literal of a named map type `gin.H{"k": v}` is E0008
 with the conversion `gin.H(["k": v])` (ADR 0032). A constant map key given twice is E0102. A list literal lowers to a Go

@@ -1877,34 +1877,38 @@
       ]
     },
     "qualified_type": {
-      "type": "SEQ",
-      "members": [
-        {
-          "type": "FIELD",
-          "name": "package",
-          "content": {
-            "type": "SYMBOL",
-            "name": "identifier"
-          }
-        },
-        {
-          "type": "STRING",
-          "value": "."
-        },
-        {
-          "type": "FIELD",
-          "name": "name",
-          "content": {
-            "type": "ALIAS",
+      "type": "PREC_DYNAMIC",
+      "value": 1,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "FIELD",
+            "name": "package",
             "content": {
               "type": "SYMBOL",
               "name": "identifier"
-            },
-            "named": true,
-            "value": "type_identifier"
+            }
+          },
+          {
+            "type": "STRING",
+            "value": "."
+          },
+          {
+            "type": "FIELD",
+            "name": "name",
+            "content": {
+              "type": "ALIAS",
+              "content": {
+                "type": "SYMBOL",
+                "name": "identifier"
+              },
+              "named": true,
+              "value": "type_identifier"
+            }
           }
-        }
-      ]
+        ]
+      }
     },
     "generic_type": {
       "type": "PREC",
@@ -2324,6 +2328,10 @@
         {
           "type": "SYMBOL",
           "name": "member_access"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "typed_literal"
         },
         {
           "type": "SYMBOL",

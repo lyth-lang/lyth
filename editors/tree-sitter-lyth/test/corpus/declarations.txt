@@ -299,3 +299,56 @@ func stage(in: int) {
           (identifier)
           (member_access
             (identifier)))))))
+
+================================================================================
+Directives, zero-value vars, init, local structs, and literals in headers
+================================================================================
+
+//go:embed schema.sql
+var schema: string
+var mu: sync.Mutex
+
+func init() {
+    struct tc { in: string }
+    for x in []int{1, 2} {
+        defer f.Close()?
+    }
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (line_comment)
+  (var_declaration
+    (identifier)
+    (primitive_type))
+  (var_declaration
+    (identifier)
+    (qualified_type
+      (identifier)
+      (type_identifier)))
+  (function_declaration
+    (identifier)
+    (parameters)
+    (block
+      (struct_declaration
+        (type_identifier)
+        (field_list
+          (field_declaration
+            (identifier)
+            (primitive_type))))
+      (for_statement
+        (identifier)
+        (keyword)
+        (typed_literal
+          (slice_type
+            (primitive_type))
+          (number)
+          (number))
+        (block
+          (keyword)
+          (identifier)
+          (method_call
+            (identifier)
+            (parenthesized))
+          (operator))))))

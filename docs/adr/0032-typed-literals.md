@@ -35,9 +35,13 @@ default arguments (ADR 0019).
   is a construction call. Go's elided inner literals (`{1, 2}`, `{X: 1}`) are
   E0008, because `{...}` is a lambda in Lyth. Indexed elements (`{0: a}`) are
   E0008.
-- As in Go, a typed literal in an `if`, `while`, `for`, or `when` header must
+- ~~As in Go, a typed literal in an `if`, `while`, `for`, or `when` header must
   be parenthesized (`for x in ([]int{1, 2}) { ... }`); without parentheses it
-  is E0008 with that edit.
+  is E0008 with that edit.~~ Amended (2026-10-26): Go requires the
+  parentheses only for a literal written with a type name (`T{...}`), which
+  Lyth does not have. A slice, array, or map type is never a header's value,
+  so its braces are the literal's, as Go reads them:
+  `for x in []int{1, 2} { ... }` needs no parentheses.
 - Lyth's inferred literals stay: `[1, 2]`, `["a": 1]`, `[]` and `[:]` where a
   type is expected, and `a: [3]int = [1, 2, 3]`, which must give every
   element. A map literal that gives a constant key twice is E0102 in both

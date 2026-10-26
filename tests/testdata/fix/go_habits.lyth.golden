@@ -47,7 +47,7 @@ func main() {
     for i in 0..<2 {
         fmt.Println(i)
     }
-    for x in ([]int{1, 2}) {
+    for x in []int{1, 2} {
         fmt.Println(strings.Repeat("*", x))
     }
     q := u.Values(["q": ["lyth"], "page": ["2"]])

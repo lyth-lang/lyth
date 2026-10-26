@@ -2873,9 +2873,10 @@ func (p *parser) parsePostfix(x Expr) Expr {
 			x = p.parseCatch(x)
 		case LBRACE:
 			if t, ok := x.(*TypeOperand); ok {
-				// []T{...}, [N]T{...}, map[K]V{...}: Go's typed literals. In a
-				// header the { starts the body, as in Go.
-				if p.noLambda > 0 || p.tok().Span.StartPos().Line != x.Span().EndPos().Line {
+				// []T{...}, [N]T{...}, map[K]V{...}: Go's typed literals, also
+				// in a header (for x in []int{1, 2} { ... }), where a type is
+				// never the value, so the braces are the literal's, as in Go.
+				if p.tok().Span.StartPos().Line != x.Span().EndPos().Line {
 					return x
 				}
 				if lit := p.parseTypedLit(t); lit != nil {

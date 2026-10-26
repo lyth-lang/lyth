@@ -26,7 +26,7 @@ func main() {
     pg := Page[int]{Items: [1]} // ERROR E0008 "write Page[int](Items = [1])"
     n := []any{null} // ERROR E0201 "any is not nullable"
     println(a, b, c, d, e, f, g, h, fl, an, i, var2, p, pg, n)
-    for x in []int{1, 2} { // ERROR E0008 "a typed literal in a for header must be parenthesized"
+    for x in []int{1, 2} { // a type is never a header's value: the braces are the literal's
         println(x)
     }
 }
