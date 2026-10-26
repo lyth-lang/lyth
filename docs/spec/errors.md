@@ -335,12 +335,50 @@ g.Wait()?
 ## 7. `defer`, panic, and recover
 
 - `defer call` where `call` is fallible is E0303. Use one of:
-  - `defer f.Close()?` **[planned; E0601 today]**: if the function is
+  - `defer f.Close()?`, in a function that throws: if the function is
     otherwise returning successfully and `Close` fails, the function returns
     `Close`'s error instead. If it is already failing, the original error is
-    kept. Lowers to the idiomatic named-result deferred closure.
+    kept: the first error wins. The call and its arguments are evaluated as
+    in any `defer` (the arguments at the `defer` statement).
   - `defer f.Close() catch (err) { log.Warn("close", "err", err) }`.
   - `defer { _ = f.Close() }` to discard explicitly.
+- Inside `defer { ... }` in a function that throws, `?` and `throw` fail the
+  function the same way: they set its error unless it has one, and end the
+  deferred block.
+- `go f()?` is E0216 (a goroutine has no caller), and `defer f()?` in a lambda
+  is E0601: handle the error with `catch` there.
+
+A deferred block that recovers turns a panic into an error:
+
+```kotlin
+import "fmt"
+
+func safeDiv(a: int, b: int): int throws {
+    defer {
+        r := recover()
+        if r != null {
+            throw fmt.Errorf("recovered: %v", r)
+        }
+    }
+    return a / b
+}
+
+func main() {
+    println(safeDiv(6, 3) catch { 0 })
+    println(safeDiv(1, 0) catch (err) {
+        println(err)
+        0
+    })
+}
+```
+
+The function's Go error result is then named, the only way Go lets deferred
+code change a result: `func load() (_ []byte, err error)`, with
+`defer func() { if cerr := f.Close(); cerr != nil && err == nil { err = cerr } }()`.
+The name is `err` when every such `defer` is a statement of the function's
+outermost block, where the error variables of `?` are that result, and
+`retErr` otherwise.
+
 - Panics are Go panics. `?` does not catch panics, and `throw` never panics.
   `recover()` works in deferred calls as in Go. `x!!` on null panics with
   `lyth: unexpected null (file.lyth:line:col)`, a programming error rather than an

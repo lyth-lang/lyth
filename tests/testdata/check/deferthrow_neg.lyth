@@ -1,0 +1,32 @@
+// Deferred failures: only in functions and methods that throw.
+import "errors"
+
+func closer() throws {}
+
+func plain() {
+    defer closer()? // ERROR E0301 "? can only be used in a function that throws"
+    defer {
+        throw errors.New("x") // ERROR E0304 "throw can only be used in a lambda whose type is fallible"
+    }
+}
+
+func fallible(): int throws {
+    go closer()? // ERROR E0216 "a goroutine has no caller to return an error to"
+    defer 1? // ERROR E0216 "defer needs a function call or a block"
+    f := { ->
+        defer closer()? // ERROR E0301 "? can only be used in a lambda whose type is fallible"
+    }
+    g: () -> unit throws = {
+        defer closer()? // ERROR E0601 "defer with ? is supported in functions and methods, not in lambdas yet"
+    }
+    f()
+    g()?
+    defer {
+        go {
+            closer()? // ERROR E0301 "? can only be used in a lambda whose type is fallible"
+        }
+    }
+    return 1
+}
+
+func main() {}

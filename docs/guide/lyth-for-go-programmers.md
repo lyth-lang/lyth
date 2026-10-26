@@ -249,6 +249,41 @@ func main() {
 `err.wrap` with a template becomes a single `fmt.Errorf` with format verbs and
 `%w`, the same call (and the same allocations) as hand-written Go.
 
+## Closing resources
+
+```kotlin
+import "errors"
+
+struct Conn {
+    name: string
+}
+
+func *Conn.Close() throws {
+    println("closing", self.name)
+    if self.name == "flaky" {
+        throw errors.New("close ${self.name}: connection reset")
+    }
+}
+
+func dial(name: string): *Conn throws = &Conn(name = name)
+
+func query(name: string): string throws {
+    c := dial(name)?
+    defer c.Close()?
+    return "rows from ${name}"
+}
+
+func main() {
+    println(query("db") catch (err) { "error: ${err}" })
+    println(query("flaky") catch (err) { "error: ${err}" })
+}
+```
+
+Go code that reports the error of a deferred `Close` needs a named result
+and a deferred closure that sets it when nothing else failed; the Go tab
+shows it. `defer c.Close()?` is that closure. A `defer { ... }` block may use
+`?` and `throw` the same way, which turns a recovered panic into an error.
+
 ## Handling one kind of error
 
 ```kotlin

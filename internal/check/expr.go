@@ -1792,6 +1792,11 @@ func describeType(x *operand) string {
 func (c *Checker) requireFallible(span source.Span, what string) {
 	fn := c.fn
 	if fn != nil && fn.fallible {
+		if fn.deferOf != nil {
+			// In a deferred block: the error is the enclosing function's.
+			fn.deferOf.deferErr = true
+			c.info.FallibleDefers[fn.deferStmt] = true
+		}
 		return
 	}
 	code := diag.ETryOutside

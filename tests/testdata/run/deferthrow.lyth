@@ -1,0 +1,117 @@
+// Deferred code that can fail the function: defer f()? and ? or throw in a
+// deferred block of a throws function. The first error wins: a deferred
+// failure becomes the function's error only when it has none yet.
+import "errors"
+import "fmt"
+
+struct File {
+    name: string
+    failClose: bool
+}
+
+func *File.Close() throws {
+    fmt.Println("closing", self.name)
+    if self.failClose {
+        throw errors.New("close ${self.name} failed")
+    }
+}
+
+func *File.Read(): string throws {
+    if self.name == "bad" {
+        throw errors.New("read ${self.name} failed")
+    }
+    return "data of ${self.name}"
+}
+
+func open(name: string, failClose: bool = false): *File throws {
+    if name == "" {
+        throw errors.New("no name")
+    }
+    return &File(name = name, failClose = failClose)
+}
+
+func load(name: string, failClose: bool): string throws {
+    f := open(name, failClose)?
+    defer f.Close()?
+    return f.Read()?
+}
+
+func safeDiv(a: int, b: int): int throws {
+    defer {
+        r := recover()
+        if r != null {
+            throw fmt.Errorf("recovered: %v", r)
+        }
+    }
+    return a / b
+}
+
+func openAll(names: []string): int throws {
+    n := 0
+    for name in names {
+        f := open(name, failClose = name == "y")?
+        defer f.Close()?
+        n++
+    }
+    return n
+}
+
+func commit(fail: bool): string throws {
+    err := if fail { errors.New("commit failed") } else { null }
+    defer {
+        if err != null {
+            throw err.wrap("deferred")
+        }
+        fmt.Println("committed")
+    }
+    return "done"
+}
+
+struct Store {
+    log: []string
+}
+
+func *Store.flush(): int throws {
+    self.log = append(self.log, "flush")
+    throw errors.New("flush failed")
+}
+
+func *Store.Save(): string throws {
+    defer self.flush()?
+    return "saved"
+}
+
+func main() throws {
+    for c in [["a", "false"], ["b", "true"], ["bad", "true"]] {
+        fmt.Println(load(c[0], c[1] == "true") catch (err) { "error: ${err}" })
+    }
+    fmt.Println(safeDiv(6, 3)?)
+    fmt.Println(safeDiv(1, 0) catch (err) {
+        fmt.Println(err)
+        -2
+    })
+    fmt.Println(openAll(["x", "y", "z"]) catch { -1 })
+    fmt.Println(commit(false)?)
+    fmt.Println(commit(true) catch (err) { "${err}" })
+    s := &Store()
+    fmt.Println(s.Save() catch (err) { "${err}" }, s.log)
+}
+
+// Output:
+// closing a
+// data of a
+// closing b
+// error: close b failed
+// closing bad
+// error: read bad failed
+// 2
+// recovered: runtime error: integer divide by zero
+// -2
+// closing z
+// closing y
+// closing x
+// -1
+// committed
+// done
+// deferred: commit failed
+// flush failed [flush]

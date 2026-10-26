@@ -212,6 +212,9 @@ type FuncInfo struct {
 	Recv   *VarSym
 	Params []*VarSym
 	Unused []*VarSym
+	// DeferErr says a deferred call or block of the function may fail it
+	// (defer f.Close()?, throw in defer { }): Go names its error result.
+	DeferErr bool
 }
 
 // Info holds all results of type checking a package.
@@ -266,6 +269,9 @@ type Info struct {
 	// Entries maps enum entries used as values (Color.Red, or Red in a when
 	// over a Color) to the entry.
 	Entries map[syntax.Expr]*types.EnumEntry
+	// FallibleDefers marks the defer statements that may fail the function:
+	// defer f()?, or a deferred block with ? or throw.
+	FallibleDefers map[*syntax.DeferStmt]bool
 	// Exhaustive records when expressions over an enum or sealed interface
 	// that cover every entry or member without an else branch; the value is
 	// the subject's type. The generated switch gets a panicking default.
@@ -301,6 +307,8 @@ func newInfo() *Info {
 		SelectVars:   map[*syntax.SelectCase][]*VarSym{},
 		Entries:      map[syntax.Expr]*types.EnumEntry{},
 		Exhaustive:   map[*syntax.WhenExpr]types.Type{},
+
+		FallibleDefers: map[*syntax.DeferStmt]bool{},
 	}
 }
 

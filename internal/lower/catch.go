@@ -152,9 +152,11 @@ func (fl *fnLower) chainDispatch(clauses []*syntax.CatchExpr, final *syntax.Catc
 	if final != nil {
 		rest = fl.catchHandler(final, fl.info.Tries[final], target, want)
 	} else {
-		ret := &ast.ReturnStmt{Results: fl.failResults(ast.NewIdent(errName))}
-		markTree(fl.l, ret, tailSpan)
-		rest = &ast.BlockStmt{List: []ast.Stmt{ret}}
+		fail := fl.failStmts(ast.NewIdent(errName))
+		for _, s := range fail {
+			markTree(fl.l, s, tailSpan)
+		}
+		rest = &ast.BlockStmt{List: fail}
 	}
 	fl.release(ok)
 	if early {

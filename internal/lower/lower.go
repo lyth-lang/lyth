@@ -1014,6 +1014,17 @@ func (l *fileLowerer) funDecl(d *syntax.FunDecl) {
 	}
 	ft := l.funcType(sym.Sig, names)
 	ft.Func = l.pos(d.S)
+	if fi.DeferErr && d.Body != nil && ft.Results != nil {
+		// Deferred code sets the error result, which Go lets only a named
+		// result do: func f() (_ T, err error).
+		fl.deferErr = fl.deferResultName(d)
+		for i, r := range ft.Results.List {
+			r.Names = []*ast.Ident{ast.NewIdent("_")}
+			if i == len(ft.Results.List)-1 {
+				r.Names[0].Name = fl.deferErr
+			}
+		}
+	}
 	if len(sym.Sig.TypeParams) > 0 {
 		ft.TypeParams = l.typeParamList(sym.Sig.TypeParams)
 	}

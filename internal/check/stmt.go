@@ -135,9 +135,9 @@ func (c *Checker) stmt(s syntax.Stmt) bool {
 	case *syntax.SelectStmt:
 		return c.selectStmt(s)
 	case *syntax.DeferStmt:
-		c.deferGo(s.Call, s.Body, false)
+		c.deferGo(s.Call, s.Body, s)
 	case *syntax.GoStmt:
-		c.deferGo(s.Call, s.Body, true)
+		c.deferGo(s.Call, s.Body, nil)
 	case *syntax.BadStmt:
 	}
 	return false
@@ -1323,7 +1323,9 @@ func (c *Checker) countBreaks(b *syntax.Block, label *syntax.Ident) int {
 // ---------------------------------------------------------------------------
 // defer and go
 
-func (c *Checker) deferGo(call syntax.Expr, body *syntax.Block, isGo bool) {
+// deferGo checks a defer statement (ds, nil for go) or a go statement.
+func (c *Checker) deferGo(call syntax.Expr, body *syntax.Block, ds *syntax.DeferStmt) {
+	isGo := ds == nil
 	kw := "defer"
 	if isGo {
 		kw = "go"
@@ -1334,6 +1336,12 @@ func (c *Checker) deferGo(call syntax.Expr, body *syntax.Block, isGo bool) {
 		if saveFn != nil {
 			fn.recv, fn.recvDecl = saveFn.recv, saveFn.recvDecl
 			fn.reassigned = saveFn.reassigned
+			if !isGo && saveFn.fallible && !saveFn.isLambda {
+				// ? and throw in a deferred block of a function that can
+				// fail set the function's error, unless it has one already.
+				fn.fallible = true
+				fn.deferOf, fn.deferStmt = saveFn, ds
+			}
 		}
 		c.fn = fn
 		c.scope = newScope(saveScope, FuncScope)
@@ -1369,9 +1377,31 @@ func (c *Checker) deferGo(call syntax.Expr, body *syntax.Block, isGo bool) {
 	case *syntax.CatchExpr:
 		c.catchStmt(x)
 	case *syntax.TryExpr:
-		c.errorf(diag.EUnsupported, x.OpSpan, "%s with ? is not supported yet", kw).
-			WithHint("use %s %s catch (err) { ... }", kw, x.X.Span().Short())
-		c.expr(x.X, nil)
+		// defer f.Close()?: a failure of the deferred call becomes the
+		// function's error, unless it is failing already.
+		switch fn := c.fn; {
+		case isGo:
+			c.errorf(diag.EInvalidUse, x.OpSpan, "a goroutine has no caller to return an error to").
+				WithHint("handle the error inside: go { %s catch (err) { ... } }", x.X.Span().Short())
+			c.expr(x.X, nil)
+		case fn != nil && fn.fallible && fn.isLambda:
+			c.errorf(diag.EUnsupported, x.OpSpan, "defer with ? is supported in functions and methods, not in lambdas yet").
+				WithHint("use defer %s catch (err) { ... }", x.X.Span().Short())
+			c.expr(x.X, nil)
+		default:
+			switch syntax.Unparen(x.X).(type) {
+			case *syntax.CallExpr, *syntax.CatchExpr: // f(), or a typed catch chain f() catch (e: T) { }
+			default:
+				c.errorf(diag.EInvalidUse, call.Span(), "defer needs a function call or a block")
+				c.expr(x.X, nil)
+				return
+			}
+			c.tryMode(x, true)
+			if fn != nil && fn.fallible {
+				fn.deferErr = true
+				c.info.FallibleDefers[ds] = true
+			}
+		}
 	default:
 		c.errorf(diag.EInvalidUse, call.Span(), "%s needs a function call or a block", kw)
 		c.expr(call, nil)

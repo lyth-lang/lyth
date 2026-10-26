@@ -1,0 +1,36 @@
+// Deferred failures name the error result, as Go code does.
+import "errors"
+import "fmt"
+import "os"
+
+func readConfig(path: string): []byte throws {
+    f := os.Open(path)?
+    defer f.Close()?
+    info := f.Stat()?
+    buf := make([]byte, info.Size())
+    f.Read(buf)?
+    return buf
+}
+
+func safely(f: () -> int): int throws {
+    defer {
+        r := recover()
+        if r != null {
+            throw fmt.Errorf("panic: %v", r)
+        }
+    }
+    return f()
+}
+
+func copyAll(paths: []string): int throws {
+    n := 0
+    for p in paths {
+        f := os.Open(p)?
+        defer f.Close()?
+        n++
+    }
+    if n == 0 {
+        throw errors.New("nothing to copy")
+    }
+    return n
+}

@@ -71,6 +71,11 @@
   },
   {
     "file": "docs/guide/lyth-for-go-programmers.md",
+    "source": "import \"errors\"\n\nstruct Conn {\n    name: string\n}\n\nfunc *Conn.Close() throws {\n    println(\"closing\", self.name)\n    if self.name == \"flaky\" {\n        throw errors.New(\"close ${self.name}: connection reset\")\n    }\n}\n\nfunc dial(name: string): *Conn throws = \u0026Conn(name = name)\n\nfunc query(name: string): string throws {\n    c := dial(name)?\n    defer c.Close()?\n    return \"rows from ${name}\"\n}\n\nfunc main() {\n    println(query(\"db\") catch (err) { \"error: ${err}\" })\n    println(query(\"flaky\") catch (err) { \"error: ${err}\" })\n}\n",
+    "output": "closing db\nrows from db\nclosing flaky\nerror: close flaky: connection reset\n"
+  },
+  {
+    "file": "docs/guide/lyth-for-go-programmers.md",
     "source": "import \"errors\"\nimport \"fmt\"\n\nstruct NotFound {\n    ID: int\n}\n\nfunc *NotFound.Error(): string = \"user ${self.ID} not found\"\n\nfunc find(id: int): string throws {\n    if id \u003c 0 {\n        throw errors.New(\"database unavailable\")\n    }\n    if id != 1 {\n        throw fmt.Errorf(\"find: %w\", \u0026NotFound(ID = id))\n    }\n    return \"Ada\"\n}\n\nfunc status(id: int): int {\n    find(id) catch (_: *NotFound) {\n        return 404\n    } catch {\n        return 500\n    }\n    return 200\n}\n\nfunc nameOr(id: int, fallback: string): string throws {\n    name := find(id) catch (_: *NotFound) { fallback }?\n    return name\n}\n\nfunc main() {\n    println(status(1), status(2), status(-1))\n    println(nameOr(2, \"guest\") catch { \"?\" }, nameOr(-1, \"guest\") catch (err) { \"error: ${err}\" })\n}\n",
     "output": "200 404 500\nguest error: database unavailable\n"
   },
@@ -188,6 +193,11 @@
     "file": "docs/guide/writing-lyth.md",
     "source": "import \"errors\"\nimport \"fmt\"\nimport \"strconv\"\nimport \"strings\"\nimport \"lyth/coll\"\n\nenum Role { Admin, Member }\n\nstruct User {\n    Name: string\n    Age: int\n    Role: Role\n    Email: string?\n}\n\nfunc User.Label(): string = \"${self.Name} (${self.Age})\"\n\nfunc *User.Birthday() {\n    self.Age++\n}\n\nstruct NotFound {\n    Name: string\n}\n\nfunc *NotFound.Error(): string = \"no user named ${self.Name}\"\n\nfunc parseAge(s: string): int throws {\n    n := strconv.Atoi(strings.TrimSpace(s)) catch (err) {\n        throw err.wrap(\"age ${s}\")\n    }\n    if n !in 0..150 {\n        throw errors.New(\"age ${n} is out of range\")\n    }\n    return n\n}\n\nfunc find(users: []User, name: string): *User throws {\n    for i, u in users {\n        if u.Name == name {\n            return \u0026users[i]\n        }\n    }\n    throw \u0026NotFound(Name = name)\n}\n\nfunc main() throws {\n    users := [\n        User(Name = \"ada\", Age = parseAge(\"36\")?, Role = Role.Admin),\n        User(Name = \"bob\", Age = parseAge(\" 41 \")?, Role = Role.Member, Email = \"bob@example.com\"),\n    ]\n    ada := find(users, \"ada\")?\n    ada.Birthday()\n    fmt.Println(ada.Label())\n\n    for u in users {\n        role := when u.Role {\n            Admin -\u003e \"admin\"\n            Member -\u003e \"member\"\n        }\n        fmt.Println(\"${u.Name}: ${role}, ${u.Email ?: \"no email\"}\")\n    }\n\n    names := users.Filter { it.Age \u003e 40 }.Map { strings.ToUpper(it.Name) }\n    fmt.Println(names)\n\n    guest := find(users, \"eve\") catch (e: *NotFound) {\n        fmt.Println(e.Error())\n        \u0026User(Name = \"guest\")\n    }?\n    fmt.Println(guest.Label())\n\n    age := parseAge(\"abc\") catch (err) {\n        fmt.Println(err)\n        0\n    }\n    fmt.Println(age)\n}\n",
     "output": "ada (37)\nada: admin, no email\nbob: member, bob@example.com\n[BOB]\nno user named eve\nguest (0)\nage abc: strconv.Atoi: parsing \"abc\": invalid syntax\n0\n"
+  },
+  {
+    "file": "docs/spec/errors.md",
+    "source": "import \"fmt\"\n\nfunc safeDiv(a: int, b: int): int throws {\n    defer {\n        r := recover()\n        if r != null {\n            throw fmt.Errorf(\"recovered: %v\", r)\n        }\n    }\n    return a / b\n}\n\nfunc main() {\n    println(safeDiv(6, 3) catch { 0 })\n    println(safeDiv(1, 0) catch (err) {\n        println(err)\n        0\n    })\n}\n",
+    "output": "2\nrecovered: runtime error: integer divide by zero\n0\n"
   },
   {
     "file": "docs/spec/language.md",

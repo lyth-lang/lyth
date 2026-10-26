@@ -803,9 +803,11 @@ Continue = "continue" [ "@" identifier ] .
   labels, emitted only where a jump needs one.
 - `defer call` and `go call` behave as in Go. Both also accept a block:
   `go { ... }` is `go func() { ... }()`. A deferred call that returns an error
-  must be handled with `catch` (`defer f.Close() catch {}`), or with `?` once
-  that is implemented ([errors.md §7](errors.md#7-defer-panic-and-recover)). A
-  `go` call cannot return an unhandled error.
+  must be handled with `catch` (`defer f.Close() catch {}`), or, in a function
+  that throws, propagated with `?` (`defer f.Close()?`), which makes its error
+  the function's when the function is not failing already
+  ([errors.md §7](errors.md#7-defer-panic-and-recover)). A `go` call cannot
+  return an unhandled error.
 
 ### 4.5 Expression statements
 

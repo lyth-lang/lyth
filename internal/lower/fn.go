@@ -6,6 +6,7 @@ import (
 	"go/constant"
 	"go/token"
 	gotypes "go/types"
+	"slices"
 	"strconv"
 
 	"github.com/lyth-lang/lyth/internal/check"
@@ -45,6 +46,11 @@ type fnLower struct {
 	// assignedFields names the fields the function assigns (x.f = ...), so
 	// that reading resp.Body at a defer and at exit is known to agree.
 	assignedFields map[string]bool
+	// deferErr is the Go name of the function's error result when deferred
+	// code may set it (defer f()?, throw in defer { }); inDefer marks the
+	// lowerer of a deferred block, where ? and throw set it.
+	deferErr string
+	inDefer  bool
 }
 
 // breakCtx is an enclosing Go statement that an unlabeled break exits.
@@ -880,7 +886,16 @@ func (fl *fnLower) jump(j *syntax.JumpExpr) {
 		fl.returnStmt(j.Values, j.S)
 	case syntax.JumpThrow:
 		err := fl.expr(j.Values[0])
-		fl.emit(&ast.ReturnStmt{Return: fl.l.pos(j.S), Results: fl.failResults(err)}, j.S)
+		for _, s := range fl.failStmts(err) {
+			if fl.inDefer {
+				// err = e is the throw's own line
+				ast.Inspect(s, func(n ast.Node) bool {
+					fl.l.mark(n, j.S)
+					return true
+				})
+			}
+			fl.emit(s, j.S)
+		}
 	case syntax.JumpBreak, syntax.JumpContinue:
 		tok := token.BREAK
 		if j.Kind == syntax.JumpContinue {
@@ -974,6 +989,21 @@ func (fl *fnLower) emitLoop(loop ast.Stmt, ctx *breakCtx, span source.Span) {
 
 // failResults returns the Go results for returning err from the current
 // function: zero values for the other results, then err.
+// failStmts returns the statements that fail the function with err: a
+// return, or in a deferred block, the assignment of the function's named
+// error result while it is nil (the first error wins), then a return from
+// the deferred function.
+func (fl *fnLower) failStmts(err ast.Expr) []ast.Stmt {
+	if !fl.inDefer {
+		return []ast.Stmt{&ast.ReturnStmt{Results: fl.failResults(err)}}
+	}
+	set := &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(fl.deferErr)}, Tok: token.ASSIGN, Rhs: []ast.Expr{err}}
+	return []ast.Stmt{
+		&ast.IfStmt{Cond: nilCmp(ast.NewIdent(fl.deferErr), token.EQL), Body: &ast.BlockStmt{List: []ast.Stmt{set}}},
+		&ast.ReturnStmt{},
+	}
+}
+
 func (fl *fnLower) failResults(err ast.Expr) []ast.Expr {
 	var out []ast.Expr
 	results := fl.shape.results
@@ -1419,12 +1449,21 @@ func (fl *fnLower) deferGo(call syntax.Expr, body *syntax.Block, isGo bool, span
 		child := fl.child(&types.Signature{})
 		var stmts []ast.Stmt
 		child.stmts = &stmts
+		if !isGo && fl.deferErr != "" {
+			// ? and throw set the function's error result; the block's own
+			// error variables need other names than it.
+			child.deferErr, child.inDefer = fl.deferErr, true
+			fl.live[fl.deferErr]++
+			defer func() { fl.live[fl.deferErr]-- }()
+		}
 		child.castScope(func() {
 			for _, s := range body.Stmts {
 				child.stmt(s)
 			}
 		})
 		callExpr = &ast.CallExpr{Fun: &ast.FuncLit{Type: &ast.FuncType{Params: &ast.FieldList{}}, Body: &ast.BlockStmt{List: stmts}}}
+	} else if t, ok := syntax.Unparen(call).(*syntax.TryExpr); ok && !isGo && fl.deferErr != "" {
+		callExpr = fl.deferTry(t)
 	} else if c, ok := syntax.Unparen(call).(*syntax.CatchExpr); ok {
 		// Go evaluates a deferred call's function value and arguments at
 		// the defer statement; the handler's closure would read them at
@@ -1449,6 +1488,55 @@ func (fl *fnLower) deferGo(call syntax.Expr, body *syntax.Block, isGo bool, span
 	} else {
 		fl.emit(&ast.DeferStmt{Defer: fl.l.pos(span), Call: callExpr}, span)
 	}
+}
+
+// deferTry lowers defer f()?, which makes a failure of the deferred call the
+// function's error unless it is failing already, as Go code does it:
+//
+//	defer func() {
+//		if cerr := f.Close(); cerr != nil && err == nil {
+//			err = cerr
+//		}
+//	}()
+func (fl *fnLower) deferTry(t *syntax.TryExpr) *ast.CallExpr {
+	fl.evalOperandsNow(t.X)
+	child := fl.child(&types.Signature{})
+	var stmts []ast.Stmt
+	child.stmts = &stmts
+	child.deferErr, child.inDefer = fl.deferErr, true
+	fl.live[fl.deferErr]++
+	defer func() { fl.live[fl.deferErr]-- }()
+	info := fl.info.Tries[t]
+	if _, isCall := syntax.Unparen(t.X).(*syntax.CallExpr); isCall && info != nil {
+		cerr := child.alloc("cerr")
+		init := &ast.AssignStmt{Lhs: append(blanks(len(info.Success)), ast.NewIdent(cerr)), Tok: token.DEFINE, Rhs: []ast.Expr{child.expr(t.X)}}
+		cond := &ast.BinaryExpr{X: nilCmp(ast.NewIdent(cerr), token.NEQ), Op: token.LAND, Y: nilCmp(ast.NewIdent(fl.deferErr), token.EQL)}
+		set := &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(fl.deferErr)}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(cerr)}}
+		child.emit(&ast.IfStmt{Init: init, Cond: cond, Body: &ast.BlockStmt{List: []ast.Stmt{set}}}, t.S)
+	} else {
+		child.stmt(&syntax.ExprStmt{X: t}) // a typed catch chain ending in ?
+	}
+	return &ast.CallExpr{Fun: &ast.FuncLit{Type: &ast.FuncType{Params: &ast.FieldList{}}, Body: &ast.BlockStmt{List: stmts}}}
+}
+
+// deferResultName picks the Go name of the error result that deferred code
+// sets: err, as Go code names it, when every fallible defer is a statement
+// of the function's outermost block, where the err of x, err := f() is the
+// result itself; retErr when a defer in an inner block could see an inner
+// err instead, or when the code has a variable named err.
+func (fl *fnLower) deferResultName(d *syntax.FunDecl) string {
+	top := true
+	syntax.Walk(d.Body, func(n syntax.Node) {
+		if ds, ok := n.(*syntax.DeferStmt); ok && fl.info.FallibleDefers[ds] && !slices.Contains(d.Body.Stmts, syntax.Stmt(ds)) {
+			top = false
+		}
+	})
+	if top && !fl.plain["err"] && !fl.reserved["err"] && len(*fl.errNames) == 0 {
+		*fl.errNames = append(*fl.errNames, "err")
+		fl.taken["err"] = true
+		return "err"
+	}
+	return fl.alloc("retErr")
 }
 
 // evalOperandsNow evaluates the receiver and arguments of the call e that a

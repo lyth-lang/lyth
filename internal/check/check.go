@@ -87,6 +87,13 @@ type funcCtx struct {
 	locals     []*VarSym
 	throwsSpan source.Span
 	noJumps    bool // defer/go blocks
+	// deferOf is the function whose error a deferred block's ? and throw
+	// set (when it has none yet), and deferStmt that defer statement.
+	deferOf   *funcCtx
+	deferStmt *syntax.DeferStmt
+	// deferErr says a deferred call or block may fail the function: its Go
+	// error result is then named, so that the deferred code can set it.
+	deferErr bool
 	// reassigned holds the names the enclosing function body may assign
 	// after declaring them; nil when unknown (nothing is settled then).
 	reassigned map[string]bool

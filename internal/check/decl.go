@@ -1741,6 +1741,7 @@ func (c *Checker) funcBody(sym *FuncSym) {
 		}
 	}
 	info.Unused = c.finishLocals(fn)
+	info.DeferErr = fn.deferErr
 	c.scope, c.fn = saveScope, saveFn
 	c.info.Funcs[d] = info
 }

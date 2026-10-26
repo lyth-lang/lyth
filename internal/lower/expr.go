@@ -889,8 +889,7 @@ func (fl *fnLower) tryInto(e *syntax.TryExpr, names []string, define bool, span 
 	if _, isResult := fl.info.TypeOf(e.X).(*types.Result); !isResult {
 		// `err?` on an Error value.
 		v := fl.stash(e.X, operand)
-		ret := &ast.ReturnStmt{Results: fl.failResults(cloneIdentExpr(v))}
-		fl.emitSynth(&ast.IfStmt{If: fl.l.pos(span), Cond: nilCmp(v, token.NEQ), Body: &ast.BlockStmt{List: []ast.Stmt{ret}}}, opSpan)
+		fl.emitSynth(&ast.IfStmt{If: fl.l.pos(span), Cond: nilCmp(v, token.NEQ), Body: &ast.BlockStmt{List: fl.failStmts(cloneIdentExpr(v))}}, opSpan)
 		return
 	}
 	errName := fl.errVar()
@@ -903,9 +902,11 @@ func (fl *fnLower) tryInto(e *syntax.TryExpr, names []string, define bool, span 
 		// if _, err := call; err != nil { return ..., err } (value discarded)
 		init := &ast.AssignStmt{Lhs: append(blanks(len(info.Success)), ast.NewIdent(errName)), Tok: token.DEFINE, Rhs: []ast.Expr{operand}}
 		fl.l.mark(init, e.X.Span())
-		ret := &ast.ReturnStmt{Results: fl.failResults(ast.NewIdent(errName))}
-		markTree(fl.l, ret, opSpan)
-		ifs := &ast.IfStmt{If: fl.l.pos(span), Init: init, Cond: nilCmp(ast.NewIdent(errName), token.NEQ), Body: &ast.BlockStmt{List: []ast.Stmt{ret}}}
+		fail := fl.failStmts(ast.NewIdent(errName))
+		for _, s := range fail {
+			markTree(fl.l, s, opSpan)
+		}
+		ifs := &ast.IfStmt{If: fl.l.pos(span), Init: init, Cond: nilCmp(ast.NewIdent(errName), token.NEQ), Body: &ast.BlockStmt{List: fail}}
 		fl.l.markSynth(ifs.Cond, opSpan)
 		fl.emit(ifs, span)
 		return
@@ -924,8 +925,7 @@ func (fl *fnLower) tryInto(e *syntax.TryExpr, names []string, define bool, span 
 		tok = token.ASSIGN
 	}
 	fl.emit(&ast.AssignStmt{Lhs: lhs, Tok: tok, TokPos: fl.l.pos(span), Rhs: []ast.Expr{operand}}, span)
-	ret := &ast.ReturnStmt{Results: fl.failResults(ast.NewIdent(errName))}
-	fl.emitSynth(&ast.IfStmt{If: fl.l.pos(span), Cond: nilCmp(ast.NewIdent(errName), token.NEQ), Body: &ast.BlockStmt{List: []ast.Stmt{ret}}}, opSpan)
+	fl.emitSynth(&ast.IfStmt{If: fl.l.pos(span), Cond: nilCmp(ast.NewIdent(errName), token.NEQ), Body: &ast.BlockStmt{List: fl.failStmts(ast.NewIdent(errName))}}, opSpan)
 }
 
 // catchInto lowers `x catch (err) { ... }`, binding the value to name

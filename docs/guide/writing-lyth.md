@@ -201,6 +201,9 @@ func main() throws {
   misses a wrapped one (warning W0007).
 - An error that is not handled is a compile error. `func main() throws` prints the error and
   exits with status 1, and tests may be `throws`.
+- In a `throws` function, `defer f.Close()?` makes a failure of the deferred call the function's
+  error, unless the function is failing already. `?` and `throw` inside `defer { ... }` do the
+  same: `defer { r := recover(); if r != null { throw fmt.Errorf("panic: %v", r) } }`.
 - `n, err := strconv.Atoi(s)` also works, as in Go.
 
 ## Null safety
@@ -259,6 +262,7 @@ What Go programmers write by habit, and the Lyth for it:
 | `go func() { ... }()` | `go { ... }` |
 | `nil` | `null` |
 | `if err != nil { return err }` | `f()?` |
+| `defer func() { if cerr := f.Close(); cerr != nil && err == nil { err = cerr } }()` | `defer f.Close()?` |
 | `[T cmp.Ordered]` | `[T: cmp.Ordered]` |
 | `var x = 1` in a function | `x := 1` |
 | `var mu sync.Mutex` (package level) | `var mu: sync.Mutex` |
@@ -291,10 +295,10 @@ What Go programmers write by habit, and the Lyth for it:
 
 ## Not supported yet
 
-`when` over errors, `defer f()?`, external test packages (`package x_test`), packages mixing
-Lyth and non-test Go files, anonymous struct types (declare a struct, also inside a function),
-`T?` on type parameters, and named arguments and default values on generic functions. The
-compiler reports each of these with a way around it.
+`when` over errors, external test packages (`package x_test`), packages mixing Lyth and
+non-test Go files, anonymous struct types (declare a struct, also inside a function), `T?` on
+type parameters, and named arguments and default values on generic functions. The compiler
+reports each of these with a way around it.
 
 ## Changes between versions
 
