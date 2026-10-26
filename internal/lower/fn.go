@@ -1461,6 +1461,10 @@ func (fl *fnLower) rangeLoop(s *syntax.ForStmt, r *syntax.RangeExpr, names []str
 	if name == "_" {
 		name = fl.temp("i")
 	}
+	if !r.Exclusive && types.IsSmallInt(t) && !endsBelowMax(fl.info.Types[r.Hi].Value, t) {
+		fl.wideRangeLoop(s, r, name, lo, hi, t)
+		return
+	}
 	op := token.LEQ
 	if r.Exclusive {
 		op = token.LSS
@@ -1478,10 +1482,61 @@ func (fl *fnLower) rangeLoop(s *syntax.ForStmt, r *syntax.RangeExpr, names []str
 	fl.emitLoop(fs, ctx, s.S)
 }
 
+// wideRangeLoop lowers lo..hi over an integer type of at most 32 bits whose
+// upper bound may be the type's largest value, where i <= hi would hold
+// forever: the counter is an int64, converted for the body.
+//
+//	for v := int64(lo); v <= int64(hi); v++ {
+//		b := byte(v)
+func (fl *fnLower) wideRangeLoop(s *syntax.ForStmt, r *syntax.RangeExpr, name string, lo, hi ast.Expr, t types.Type) {
+	counter := fl.temp("v")
+	// A constant bound is written as its value: int64(250), v <= 255.
+	if v := fl.info.Types[r.Lo].Value; v != nil {
+		lo = &ast.BasicLit{Kind: token.INT, Value: v.ExactString()}
+	}
+	if v := fl.info.Types[r.Hi].Value; v != nil {
+		hi = &ast.BasicLit{Kind: token.INT, Value: v.ExactString()}
+	} else {
+		hi = &ast.CallExpr{Fun: ast.NewIdent("int64"), Args: []ast.Expr{hi}}
+	}
+	wide := func(x ast.Expr) ast.Expr { return &ast.CallExpr{Fun: ast.NewIdent("int64"), Args: []ast.Expr{x}} }
+	body, ctx := fl.loopBody(s.Label, s.Body)
+	if s.Names[0].Name != "_" {
+		decl := &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(name)}, Tok: token.DEFINE,
+			Rhs: []ast.Expr{&ast.CallExpr{Fun: fl.l.typeExpr(t), Args: []ast.Expr{ast.NewIdent(counter)}}}}
+		body.List = append([]ast.Stmt{decl}, body.List...)
+	}
+	fs := &ast.ForStmt{For: fl.l.pos(s.S),
+		Init: &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(counter)}, Tok: token.DEFINE, Rhs: []ast.Expr{wide(lo)}},
+		Cond: &ast.BinaryExpr{X: ast.NewIdent(counter), Op: token.LEQ, Y: hi},
+		Post: &ast.IncDecStmt{X: ast.NewIdent(counter), Tok: token.INC},
+		Body: body}
+	fl.emitLoop(fs, ctx, s.S)
+}
+
+// endsBelowMax reports whether hi, the upper bound of an inclusive range of
+// type t, is a constant below t's largest value, so that i <= hi ends.
+func endsBelowMax(hi constant.Value, t types.Type) bool {
+	b, ok := types.Lower(t).Underlying().(*gotypes.Basic)
+	if hi == nil || !ok {
+		return false
+	}
+	max := map[gotypes.BasicKind]uint64{
+		gotypes.Int8: 1<<7 - 1, gotypes.Int16: 1<<15 - 1, gotypes.Int32: 1<<31 - 1,
+		gotypes.Uint8: 1<<8 - 1, gotypes.Uint16: 1<<16 - 1, gotypes.Uint32: 1<<32 - 1,
+	}[b.Kind()]
+	return constant.Compare(hi, token.LSS, constant.MakeUint64(max))
+}
+
 func constKindTypeFor(info *check.Info, e syntax.Expr) gotypes.Type {
 	tv := info.Types[e]
 	if tv.Value == nil {
 		return types.Lower(tv.Type)
+	}
+	if call, ok := syntax.Unparen(e).(*syntax.CallExpr); ok {
+		if ci := info.Calls[call]; ci != nil && ci.Kind == check.CallConvert {
+			return types.Lower(ci.Target) // byte(0) has its type in Go too
+		}
 	}
 	if lit, ok := syntax.Unparen(e).(*syntax.BasicLit); ok && lit.Kind == syntax.RUNE {
 		return gotypes.Typ[gotypes.UntypedRune]

@@ -1,0 +1,42 @@
+// Inclusive ranges of integers up to 32 bits end at the type's largest
+// value: they count in int64.
+import "math"
+
+func count(lo: int8, hi: int8): int {
+    n := 0
+    for j in lo..hi {
+        n++
+        if j == hi && n > 300 {
+            break
+        }
+    }
+    return n
+}
+
+func main() {
+    println(count(125, math.MaxInt8), count(-128, 127), count(3, 1))
+    sum := 0
+    for b in byte(250)..255 {
+        sum += int(b)
+    }
+    println(sum)
+    odd := 0
+    for b in byte(0)..10 {
+        if b % 2 == 0 {
+            continue
+        }
+        odd++
+    }
+    println(odd)
+    last: uint16 = 0
+    for v in uint16(65534)..65535 {
+        last = v
+    }
+    println(last)
+}
+
+// Output:
+// 3 256 0
+// 1515
+// 5
+// 65535

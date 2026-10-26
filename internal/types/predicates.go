@@ -544,3 +544,18 @@ func ResultOf(sig *Signature) *Result {
 	}
 	return nil
 }
+
+// IsSmallInt reports whether t's basic type is an integer of at most 32
+// bits, whose inclusive ranges are counted in int64 so that a range ending
+// at the type's largest value ends (for b in byte(0)..255).
+func IsSmallInt(t Type) bool {
+	b := BasicOf(t)
+	if b == nil {
+		return false
+	}
+	switch b.Kind {
+	case Int8Kind, Int16Kind, Int32Kind, UInt8Kind, UInt16Kind, UInt32Kind:
+		return true
+	}
+	return false
+}

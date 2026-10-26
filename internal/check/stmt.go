@@ -1265,12 +1265,10 @@ func (c *Checker) rangeType(lo, hi *operand, r *syntax.RangeExpr) types.Type {
 		c.errorf(diag.ETypeMismatch, r.S, "range bounds must be integers, not %s", t)
 		return types.Invalid
 	}
-	if !r.Exclusive && hi.val != nil && !c.representable(constant.BinaryOp(hi.val, token.ADD, constant.MakeInt64(1)), types.Base(t)) {
-		// for i := lo; i <= 255; i++ never ends for a byte: i wraps to 0.
-		d := c.errorf(diag.EOverflow, r.Hi.Span(), "a range of %s up to %s never ends: %s is the largest %s, so the counter wraps around", t, hi.val, hi.val, t)
-		if b := types.BasicOf(t); b != nil && b.Kind != types.IntKind && b.Kind != types.Int64Kind && b.Kind != types.UIntKind && b.Kind != types.UInt64Kind && b.Kind != types.UIntPtrKind {
-			d.WithHint("count with an int and convert: for i in int(%s)..%s { v := %s(i) ... }", r.Lo.Span().Short(), hi.val, t)
-		}
+	if !r.Exclusive && hi.val != nil && !types.IsSmallInt(t) && !c.representable(constant.BinaryOp(hi.val, token.ADD, constant.MakeInt64(1)), types.Base(t)) {
+		// for i := lo; i <= max; i++ never ends: i wraps around. Ranges of
+		// smaller integers are counted in int64 (lower.rangeLoop).
+		c.errorf(diag.EOverflow, r.Hi.Span(), "a range of %s up to %s never ends: %s is the largest %s, so the counter wraps around", t, hi.val, hi.val, t)
 		return types.Invalid
 	}
 	return types.Base(t)

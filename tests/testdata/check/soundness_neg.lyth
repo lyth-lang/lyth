@@ -34,11 +34,11 @@ func breakInCatch(s: string): int {
     }
 } // ERROR E0206 "missing return in breakInCatch"
 
-func rangeToMax(lo: byte) {
-    for b in lo..255 { // ERROR E0215 "a range of byte up to 255 never ends"
-        println(b)
+func rangeToMax(lo: int64, small: byte) {
+    for i in lo..9223372036854775807 { // ERROR E0215 "a range of int64 up to 9223372036854775807 never ends"
+        println(i)
     }
-    for b in lo..<255 {
+    for b in small..255 {
         println(b)
     }
 }
