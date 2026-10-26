@@ -3471,11 +3471,6 @@ func (p *parser) parsePrimary() Expr {
 	switch t.Kind {
 	case IDENT:
 		p.next()
-		if t.Text == "this" {
-			p.errorf(diag.EUnsupportedSyntax, t.Span, "the receiver is called self").
-				WithFix(t.Span, "self", "write self")
-			return &ThisExpr{S: t.Span}
-		}
 		return &Ident{Name: t.Text, S: t.Span}
 	case INT, FLOAT, RUNE, STRING, RAWSTRING:
 		p.next()

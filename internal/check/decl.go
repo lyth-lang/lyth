@@ -1351,6 +1351,15 @@ func (c *Checker) resolveExtension(d *syntax.FunDecl) {
 	var recv types.Type
 	c.withScope(scope, func() {
 		recv = c.resolveType(d.Recv.Type)
+		if d.Recv.Pointer && types.IsNullable(recv) {
+			// *Node? reads as a pointer to Node?, never a nullable *Node.
+			dg := c.errorf(diag.EUnsupported, d.Recv.Type.Span(), "a receiver cannot be nullable")
+			if nt, ok := d.Recv.Type.(*syntax.NullableType); ok {
+				elem := nt.Elem.Span().Text()
+				dg.WithEdit(nt.S, elem+".", "a pointer receiver may be nil when Go code calls the method: declare it on *%s and test self == null", elem)
+			}
+			recv = types.Invalid
+		}
 		if d.Recv.Pointer && recv != types.Invalid {
 			recv = &types.Pointer{Elem: recv}
 		}

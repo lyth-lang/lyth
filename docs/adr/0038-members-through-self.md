@@ -119,6 +119,13 @@ silent difference:
   name. The error names both ("limit is a field of self and also names the
   package-level variable limit"), the edit is a hint, and `lyth fix` leaves
   the choice to the author.
+- **A called builtin is the builtin, with a warning.** Amended after porting
+  Go packages: a type with a method `append` (or a function field `print`)
+  left the builtin unreachable in all of its methods, since nothing
+  qualifies a builtin. A bare call of a builtin there now calls the
+  builtin, with warning W0011 naming `self.append` for the member, while
+  code from before this ADR is migrated. A package-level name can be
+  renamed or reached otherwise, so the other collisions stay errors.
 - **Calls of fields that are not functions cannot have meant the member,**
   so they take the new meaning without an error during the migration window,
   because calling such a field never compiled: `Config(Name = "x")` with a

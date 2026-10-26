@@ -57,9 +57,10 @@ func Query.span(): int {
     return max - low + widest // ERROR E0101 "max is a field of self; write self.max"
 }
 
-// A field that is a function, named like a builtin: both calls are valid.
+// A field that is a function, named like a builtin: the bare call is the
+// builtin, the only way to reach it, with a warning (ADR 0038).
 func Query.say() {
-    print("x") // ERROR E0101 "print is a field of self and also names the builtin print"
+    print("x") // WARN W0011 "this calls the builtin print; the field of self is self.print"
 }
 
 // A local, a parameter, or a lambda parameter of the same name is not a

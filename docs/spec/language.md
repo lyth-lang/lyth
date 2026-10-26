@@ -293,9 +293,12 @@ self.Name"), and so is one that before ADR 0038 meant the member, even where it
 now also names something else, so no meaning changes silently. `lyth fix`
 inserts `self.` where the name can mean only the member; where it also names
 something valid in that position (a package-level variable, constant, or
-function, an import before a dot, a type or builtin that is called), the
+function, an import before a dot, or a type that is called), the
 error says so and the edit is a hint for the author
-([ADR 0038](../adr/0038-members-through-self.md)). A call of a field that is
+([ADR 0038](../adr/0038-members-through-self.md)). A called builtin is the
+exception, since nothing else reaches it: `append(xs, x)` in a type with a
+method `append` calls the builtin, with warning W0011 while code from before
+ADR 0038 is migrated. A call of a field that is
 not a function, which never compiled, means the other name:
 `Config(Name = "x")` constructs the type, `max(a, b)` calls the builtin, and
 `strings.Join(...)` calls the package when the field has no member `Join`.

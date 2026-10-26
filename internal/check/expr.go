@@ -294,12 +294,29 @@ func (c *Checker) ident(e *syntax.Ident) *operand {
 	}
 	var sym Symbol
 	if m := c.implicitMember(e.Name); m != nil && !c.callsOther(e, m) {
-		if c.bareMember(e, m) {
+		if b, ok := c.lookup(e.Name).(*BuiltinSym); ok && c.callee == syntax.Expr(e) {
+			// append(...) in a type with a member append: the builtin, the
+			// only way to reach it (ADR 0038).
+			kind := "field"
+			if m.Method != nil {
+				kind = "method"
+			}
+			c.warnf(diag.WBuiltinMember, e.S, "this calls the builtin %s; the %s of self is self.%s", e.Name, kind, e.Name).
+				WithNote("before ADR 0038 a bare %s meant the %s", e.Name, kind)
+			sym = b
+		} else if c.bareMember(e, m) {
 			return invalid(e)
+		} else {
+			sym = m
 		}
-		sym = m
 	} else {
 		sym = c.lookup(e.Name)
+	}
+	if sym == nil && e.Name == "this" && c.fn != nil && c.fn.recv != nil {
+		// this is an ordinary name; undeclared in a method, it is Kotlin's receiver.
+		c.errorf(diag.EUnsupportedSyntax, e.S, "the receiver is called self").
+			WithFix(e.S, "self", "write self")
+		return c.expr(&syntax.ThisExpr{S: e.S}, nil)
 	}
 	if sym == nil {
 		d := c.errorf(diag.EUndefined, e.S, "undefined: %s", e.Name)
@@ -986,9 +1003,12 @@ func (c *Checker) equality(e *syntax.BinaryExpr, x, y *operand) *operand {
 				}
 				return invalid(e)
 			}
-			if !types.IsInterface(other.typ) {
+			_, isSelf := syntax.Unparen(other.expr).(*syntax.ThisExpr)
+			_, isPtr := types.Base(other.typ).(*types.Pointer)
+			if !types.IsInterface(other.typ) && !(isSelf && isPtr) {
 				// An interface value may still be nil when Go code stored
-				// it (json.Unmarshal into []any), so only other types warn.
+				// it (json.Unmarshal into []any), and Go code may call a
+				// pointer method on nil, so only other values warn.
 				c.warnf(diag.WUnnecessary, e.S, "%s has non-nullable type %s, so this comparison is always %v",
 					other.expr.Span().Short(), other.typ, e.Op == syntax.NEQ)
 			}
