@@ -202,9 +202,9 @@ func (p *parser) parseIdent(context string) *Ident {
 		p.next()
 		return &Ident{Name: "_", S: t.Span}
 	}
-	if t.Kind.IsKeyword() && p.peek(1).Kind == COLON {
-		// func f(in: int), struct fields, typed locals: the keyword names
-		// what is declared; report it and read on.
+	if t.Kind.IsKeyword() && (p.peek(1).Kind == COLON || p.peek(1).Kind == LPAREN || p.peek(1).Kind == LBRACK) {
+		// func f(in: int), struct fields, typed locals, func val(): the
+		// keyword names what is declared; report it and read on.
 		p.errorf(diag.EUnexpectedToken, t.Span, "%s is a keyword and cannot be a name", t.Text).
 			WithHint("choose another name, such as %sValue", t.Text)
 		p.next()
