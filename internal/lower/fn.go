@@ -37,6 +37,7 @@ type fnLower struct {
 	temps       map[string]int
 	declCount   map[string]int // Lyth declarations per name in the function
 	recvName    string
+	recvVar     *check.VarSym // the receiver, which self names
 	initializer bool
 	parent      *fnLower
 	casts       map[*check.VarSym]*castBinding // smart casts served by a binding, see typetest.go
@@ -91,7 +92,7 @@ func (fl *fnLower) setShape(sig *types.Signature) {
 func (fl *fnLower) child(sig *types.Signature) *fnLower {
 	c := &fnLower{l: fl.l, info: fl.info, locals: fl.locals, taken: fl.taken, reserved: fl.reserved,
 		plain: fl.plain, live: fl.live, errNames: fl.errNames,
-		temps: fl.temps, declCount: fl.declCount, recvName: fl.recvName, parent: fl, casts: fl.casts,
+		temps: fl.temps, declCount: fl.declCount, recvName: fl.recvName, recvVar: fl.recvVar, parent: fl, casts: fl.casts,
 		breaks: &[]*breakCtx{}, labels: map[string]bool{}, pre: fl.pre, assignedFields: fl.assignedFields}
 	c.setShape(sig)
 	return c
@@ -1085,8 +1086,27 @@ func (fl *fnLower) failResults(err ast.Expr) []ast.Expr {
 
 func (fl *fnLower) returnStmt(values []syntax.Expr, span source.Span) {
 	if len(values) == 1 && fl.info.PassThrough[values[0]] {
-		// return f(): the call's results, error included, as they are.
-		fl.emit(&ast.ReturnStmt{Return: fl.l.pos(span), Results: []ast.Expr{fl.expr(values[0])}}, span)
+		// return f(): the call's results, error included, as they are; so
+		// is return f()? where f's success values are the function's.
+		v := values[0]
+		if try, ok := syntax.Unparen(v).(*syntax.TryExpr); ok {
+			v = try.X
+		}
+		fl.emit(&ast.ReturnStmt{Return: fl.l.pos(span), Results: []ast.Expr{fl.expr(v)}}, span)
+		return
+	}
+	if len(values) == 1 && len(fl.shape.results) > 1 && fl.multiFallibleExpr(values[0], len(fl.shape.results)) {
+		// return r.Pair()?: zero values with the error on failure, as ?
+		// returns them, then the success values.
+		names := fl.multiFallible(values[0], make([]bool, len(fl.shape.results)))
+		var results []ast.Expr
+		for _, n := range names {
+			results = append(results, ast.NewIdent(n))
+		}
+		if fl.shape.throws {
+			results = append(results, ast.NewIdent("nil"))
+		}
+		fl.emit(&ast.ReturnStmt{Return: fl.l.pos(span), Results: results}, span)
 		return
 	}
 	if len(values) == 1 && len(fl.shape.results) == 1 && fl.info.Implicit[values[0]] == check.ConvNilIface {
@@ -1111,7 +1131,7 @@ func (fl *fnLower) returnStmt(values []syntax.Expr, span source.Span) {
 		// return if/when: each branch returns its value.
 		switch x := syntax.Unparen(values[0]).(type) {
 		case *syntax.IfExpr, *syntax.WhenExpr:
-			if fl.info.UsedAsValue[x] {
+			if fl.info.UsedAsValue[x] && fl.info.Implicit[values[0]] == check.ConvNone {
 				fl.exprInto(x, returnTarget, fl.shape.results[0])
 				return
 			}
@@ -1193,6 +1213,18 @@ func (fl *fnLower) exprInto(e syntax.Expr, target ast.Expr, targetType types.Typ
 		fl.returnInto(e, targetType)
 		return
 	}
+	if fl.info.Implicit[e] != check.ConvNone {
+		// An if or when whose value converts (boxed into an int? when an
+		// outer branch is null) is computed first, then converted.
+		v := fl.exprAs(e, targetType)
+		fl.emit(&ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: token.ASSIGN, Rhs: []ast.Expr{v}}, e.Span())
+		return
+	}
+	fl.exprIntoRaw(e, target, targetType)
+}
+
+// exprIntoRaw is exprInto for e's own value, without its conversion.
+func (fl *fnLower) exprIntoRaw(e syntax.Expr, target ast.Expr, targetType types.Type) {
 	switch x := syntax.Unparen(e).(type) {
 	case *syntax.IfExpr:
 		fl.ifStmt(x, target, targetType)
@@ -1226,6 +1258,10 @@ var returnTarget = &ast.Ident{Name: "<return>"}
 
 // returnInto lowers a branch value of a returned if/when.
 func (fl *fnLower) returnInto(e syntax.Expr, targetType types.Type) {
+	if fl.info.Implicit[e] != check.ConvNone {
+		fl.returnStmt([]syntax.Expr{e}, e.Span()) // converts the value
+		return
+	}
 	switch x := syntax.Unparen(e).(type) {
 	case *syntax.IfExpr:
 		fl.ifStmt(x, returnTarget, targetType)

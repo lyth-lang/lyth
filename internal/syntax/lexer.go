@@ -622,10 +622,12 @@ func (l *lexer) scanOperator(start int) {
 			one(DOT)
 		}
 	case '?':
-		switch n1 {
-		case '.':
+		switch {
+		case n1 == '.' && n2 == '.':
+			one(QUESTION) // f()?..<n: a ? before a range
+		case n1 == '.':
 			two(SAFE_DOT)
-		case ':':
+		case n1 == ':':
 			two(ELVIS)
 		default:
 			one(QUESTION)

@@ -1,0 +1,180 @@
+// Valid programs the checker once rejected.
+import "errors"
+import "slices"
+import "strconv"
+import "sync/atomic"
+
+interface Shape {
+    Area(): float64
+}
+
+struct Sq {
+    S: float64
+}
+
+func Sq.Area(): float64 = self.S * self.S
+
+// self smart-casts in an extension function on an interface.
+func Shape.Describe(): string {
+    if self is Sq {
+        return "square ${self.S}"
+    }
+    return "shape"
+}
+
+struct NotFound {
+    Key: string
+}
+
+func NotFound.Error(): string = "not found"
+
+func count(k: string): int throws {
+    if k == "missing" {
+        throw &NotFound(Key = k)
+    }
+    if k == "" {
+        throw errors.New("empty")
+    }
+    return len(k)
+}
+
+func pair(): (int, string) {
+    return 1, "a"
+}
+
+func must[T](v: T, err: error?): T {
+    if err != null {
+        panic(err)
+    }
+    return v
+}
+
+func two(s: string): (int, int) throws {
+    n := strconv.Atoi(s)?
+    return n, n * 2
+}
+
+// return f()? passes f's success values on.
+func both(s: string): (int, int) throws {
+    return two(s)?
+}
+
+func sumFrom(s: string): int throws {
+    n := 0
+    for i in strconv.Atoi(s)?..<6 {
+        n += i
+    }
+    return n
+}
+
+func run[T](f: () -> T): T = f()
+
+func each(xs: []int, f: (int) -> (int, int)): int {
+    s := 0
+    for x in xs {
+        a, b := f(x)
+        s += a + b
+    }
+    return s
+}
+
+sealed interface Node {
+    Size(): int
+}
+
+struct Leaf : Node {
+    N: int
+}
+
+func Leaf.Size(): int = self.N
+
+// A member may embed another member.
+struct Branch : Node {
+    Leaf
+    Kids: int
+}
+
+func kind(n: Node): string = when n {
+    is Leaf -> "leaf"
+    is Branch -> "branch"
+}
+
+const Ready = true && !false || false
+const Letter = string('a') + string(rune(98))
+
+func opt(c: bool, d: bool): int? {
+    return if c { null } else if d { 1 } else { 2 }
+}
+
+func main() {
+    println(Sq(S = 2).Describe())
+    println(sumFrom("3") catch { -1 })
+    c := true
+    v := strconv.Atoi("x") catch { if c { null } else { 3 } }
+    println(v)
+    n := count("missing") catch (_: *NotFound) { null } catch { -1 }
+    m := count("") catch (_: *NotFound) { null } catch { -1 }
+    println(n, m)
+    println(pair())
+    println(must(strconv.Atoi("12")))
+    a, b := both("4") catch { return }
+    println(a, b)
+    floats := []float64{1, 2, 3}
+    println(slices.Contains(floats, 2))
+    ready := make(chan int, 1)
+    ready.send(7)
+    off: (chan int)? = null
+    select {
+        x := ready.receive() -> println("got", x)
+        y := off?.receive() -> println("never", y)
+    }
+    sendOnly: chan<- int = ready
+    println(sendOnly == ready)
+    xs := [1, 2, 3, 4]
+    ys := xs[1:2:3]
+    println(len(ys), cap(ys))
+    arr := [3]int{4, 5, 6}
+    p := &arr
+    println(p[1:], len(p))
+    println(Ready, Letter)
+    println(run[string] { "ran" })
+    mul := { x: int -> { y: int -> x * y } }
+    println(mul(3)(4))
+    mixed := if c { 1 } else { 2.5 }
+    println(mixed)
+    println(each([1, 2]) { return it, it * 2 }, each([1]) { pair2(it) })
+    println(kind(Leaf(N = 1)), kind(Branch(Leaf = Leaf(N = 2), Kids = 1)))
+    println(opt(true, true), opt(false, true), opt(false, false))
+    ap: atomic.Pointer[int]
+    fallback := 5
+    println(*ap.LoadOr(&fallback))
+}
+
+// An extension on a generic type of another package.
+func *atomic.Pointer[T].LoadOr[T](d: *T): *T = self.Load() ?: d
+
+func pair2(x: int): (int, int) {
+    return x, x
+}
+
+// Output:
+// square 2
+// 12
+// null
+// null -1
+// 1 a
+// 12
+// 4 8
+// true
+// got 7
+// true
+// 1 2
+// [5 6] 3
+// true ab
+// ran
+// 12
+// 1
+// 9 2
+// leaf branch
+// null 1 2
+// 5

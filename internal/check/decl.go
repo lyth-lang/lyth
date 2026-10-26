@@ -2014,6 +2014,10 @@ func (c *Checker) joinSealed(ts *TypeSym, it types.Type, span source.Span) bool 
 	}
 	recv := gotypes.NewVar(token.NoPos, c.shadow, "", ts.Decl.Shadow)
 	ts.Decl.Shadow.AddMethod(gotypes.NewFunc(token.NoPos, c.shadow, sd.Marker, gotypes.NewSignatureType(recv, nil, nil, nil, nil, false)))
+	if sd.Joined == nil {
+		sd.Joined = map[*types.TypeDecl]bool{}
+	}
+	sd.Joined[ts.Decl] = true
 	return true
 }
 

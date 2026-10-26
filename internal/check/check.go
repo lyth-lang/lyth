@@ -30,6 +30,10 @@ type Config struct {
 // Checker holds the state of checking one package.
 type Checker struct {
 	gens int // generations handed out, for smart casts of reassigned locals (flow.go)
+	// widen is the if or when whose value is a catch handler's value: a
+	// null branch makes it T? instead of failing the expected T, as the
+	// handler's own null would.
+	widen syntax.Expr
 	// implementing holds the (type, interface) pairs whose methods
 	// methodNullability is comparing, so recursive types terminate.
 	implementing map[[2]string]bool

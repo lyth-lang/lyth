@@ -877,6 +877,42 @@ func (c *Checker) joinBranches(results []blockResult, blocks []*syntax.Block, wa
 	if allTerminate {
 		return &operand{mode: ModeValue, typ: types.Nothing}
 	}
+	if want == nil {
+		// if c { 1 } else { 2.5 }: untyped constants of several kinds take
+		// the largest kind's type, as Go's constant expressions do.
+		var top types.Type
+		hasNull, mixed, all := false, false, true
+		for _, r := range results {
+			switch {
+			case r.op == nil || r.terminates:
+			case r.op.typ == types.Null:
+				hasNull = true
+			case constRank(r.op.typ) > 0:
+				if top != nil && constRank(r.op.typ) != constRank(top) {
+					mixed = true
+				}
+				if top == nil || constRank(r.op.typ) > constRank(top) {
+					top = r.op.typ
+				}
+			default:
+				all = false
+			}
+		}
+		if all && mixed {
+			want = types.DefaultType(top)
+			if hasNull {
+				want = types.MakeNullable(want)
+			}
+		}
+	}
+	if want != nil && e == c.widen {
+		for _, r := range results {
+			if r.op != nil && (r.op.typ == types.Null || types.IsNullable(r.op.typ)) {
+				want = c.nullableOf(want, e.Span()) // catch { if c { null } else { 3 } }
+				break
+			}
+		}
+	}
 	if want != nil {
 		ok := true
 		for _, r := range results {
@@ -1139,10 +1175,8 @@ func whenSubjectVar(c *Checker, e *syntax.WhenExpr) *VarSym {
 		v, _ := c.info.Defs[e.Bind].(*VarSym)
 		return v
 	}
-	if id, ok := syntax.Unparen(e.Subject).(*syntax.Ident); ok {
-		if v, ok := c.info.Uses[id].(*VarSym); ok && v.Settled() {
-			return v
-		}
+	if v := c.varOf(e.Subject); v != nil && v.Settled() {
+		return v
 	}
 	return nil
 }
@@ -1361,6 +1395,15 @@ func (c *Checker) selectOp(sc *syntax.SelectCase) {
 	case x.mode == ModeInvalid:
 	case prelude == PreludeReceive:
 		elems = []types.Type{x.typ, types.Bool}
+		if call := syntax.Unparen(sc.Op).(*syntax.CallExpr); c.info.Calls[call].Safe {
+			// off?.receive(): a null channel is never ready, as Go's nil
+			// channel, so the branch runs only with a received value.
+			if sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr); ok {
+				if ch, ok := collectionOf(c.info.TypeOf(sel.X)).(*types.Chan); ok {
+					elems[0] = ReceiveType(ch)
+				}
+			}
+		}
 	case prelude == PreludeSend:
 		if sc.Names != nil {
 			c.errorf(diag.EInvalidUse, sc.Names[0].S.Join(sc.Names[len(sc.Names)-1].S), "a send has no value to bind")

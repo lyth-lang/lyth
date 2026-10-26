@@ -36,8 +36,30 @@ func (c *Checker) inferCall(e *syntax.CallExpr, sig *types.Signature, args []*sy
 	ops := make([]*operand, len(args))
 	isLambda := func(a *syntax.Arg) bool { _, ok := syntax.Unparen(a.Value).(*syntax.LambdaExpr); return ok }
 	var genericArgs []int // generic function values (cmp.Compare), instantiated last
+	if len(args) == 1 && np >= 2 && !sig.Variadic && !args[0].Spread && args[0].Name == nil {
+		if _, isCall := syntax.Unparen(args[0].Value).(*syntax.CallExpr); isCall {
+			// must(strconv.Atoi(s)): the call's results are the arguments,
+			// as in Go; checkArgs forwards them (forwardedArgs).
+			x := c.expr(args[0].Value, nil)
+			var raw []types.Type
+			switch t := x.typ.(type) {
+			case *types.Result:
+				raw = t.Raw
+			case *types.Tuple:
+				raw = t.Elems
+			}
+			if len(raw) == np && x.mode == ModeValue {
+				for i, t := range raw {
+					unify(sig.Params[i], t, bind)
+				}
+			} else {
+				x = c.singleValue(x)
+			}
+			ops[0] = x
+		}
+	}
 	for i, a := range args {
-		if isLambda(a) {
+		if isLambda(a) || ops[i] != nil {
 			continue
 		}
 		pt := paramFor(i, a)
@@ -56,6 +78,9 @@ func (c *Checker) inferCall(e *syntax.CallExpr, sig *types.Signature, args []*sy
 		}
 		unify(pt, x.typ, bind)
 	}
+	// Core types first, as Go does: slices.Contains(floats, 2) gets E from
+	// []float64 before 2 could make it int.
+	c.inferCore(sig, bind)
 	// Untyped constants bind their default type to bare type parameters,
 	// the largest kind among them as in Go: pair(1, 2.5) is pair[float64].
 	untyped := map[*gotypes.TypeParam]types.Type{}

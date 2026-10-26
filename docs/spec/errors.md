@@ -169,7 +169,9 @@ Values that would have to change on the way cannot pass through: boxing into
 `T?`, and a concrete value into an interface, which would turn the nil pointer
 of a failing call into a non-nil interface (Go's typed-nil trap). Interface
 values and identical types pass. Elsewhere write `return f()?`, which returns
-zero values on failure. Functions declaring a raw result tuple return exactly
+zero values on failure, also for several success values
+(`return pair(s)?`); when `f` is a `throws` function, whose failures carry
+zero values anyway, that is Go's `return f()` too. Functions declaring a raw result tuple return exactly
 what is written anyway (§2.3); `return w.Write(p)` there returns the call's
 results when they have the function's result types. A lambda whose expected
 type is a Go callback returning `(T, error)` may likewise end with such a call:
@@ -218,7 +220,10 @@ non-null type that implements `error`: usually a pointer to an error struct
 `errors.AsType[T]`, so it sees through wrapping, and binds `e` as a `T`. Clauses
 are tried in order. Errors no clause handles are still errors, so the
 expression stays fallible and ends with `?` to propagate them or with an
-untyped `catch` to handle them; leaving them unhandled is E0303.
+untyped `catch` to handle them; leaving them unhandled is E0303. A handler
+that yields `null` makes the chain's value `T?`, as an untyped `catch { null }`
+does (`find(id) catch (_: *NotFound) { null }?` is a `*User?`), and an `if` or
+`when` that is a handler's value may have a `null` branch for the same reason.
 
 ```kotlin
 user := repo.Find(id) catch (_: *NotFound) { guest }?          // others propagate

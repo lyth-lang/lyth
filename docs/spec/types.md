@@ -371,7 +371,8 @@ without a check. `copy(dst, src)` needs element types that are assignable
 without a conversion: a `[]*User?` cannot be copied into a `[]*User`.
 
 **Comparison.** `==` and `!=` require operands of identical type (ignoring
-nullability), with one Go exception: a value may be compared with an interface
+nullability), with two Go exceptions: a channel compares with a directional
+view of it (`chan int` and `chan<- int`), and a value may be compared with an interface
 value whose type it implements (`x == "zero"` for `x: any` is true when `x`
 holds the string `"zero"`). An untyped constant compared with an interface takes
 its default type. Both operands must be comparable.

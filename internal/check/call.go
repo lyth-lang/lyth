@@ -7,6 +7,7 @@ import (
 	gotypes "go/types"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/lyth-lang/lyth/internal/diag"
 	"github.com/lyth-lang/lyth/internal/source"
@@ -591,6 +592,26 @@ func (c *Checker) typeCall(e *syntax.CallExpr, t types.Type, args []*syntax.Arg,
 		}
 		return invalid(e)
 	}
+	if x.val != nil && types.BasicOf(t) != nil && !types.IsInterface(t) {
+		// A constant converts to a constant, as in Go: string(rune(98)),
+		// int64(N).
+		switch {
+		case types.IsNumeric(src) && types.IsNumeric(t):
+			if c.representable(x.val, t) && (!types.IsInteger(t) || isIntegral(x.val)) {
+				return &operand{mode: ModeValue, typ: t, val: c.convertConst(x.val, t)}
+			}
+		case types.IsInteger(src) && types.IsString(t):
+			if n, ok := constant.Int64Val(x.val); ok {
+				r := rune(n)
+				if n < 0 || n > utf8.MaxRune {
+					r = utf8.RuneError
+				}
+				return &operand{mode: ModeValue, typ: t, val: constant.MakeString(string(r))}
+			}
+		case types.IsString(src) && types.IsString(t):
+			return &operand{mode: ModeValue, typ: t, val: x.val}
+		}
+	}
 	return &operand{mode: ModeValue, typ: t}
 }
 
@@ -850,6 +871,26 @@ func (c *Checker) builtinCall(e *syntax.CallExpr, k BuiltinKind, args []*syntax.
 	}
 	switch k {
 	case BuiltinPrint, BuiltinPrintln:
+		if len(args) == 1 && !args[0].Spread {
+			if _, isCall := syntax.Unparen(args[0].Value).(*syntax.CallExpr); isCall {
+				// println(pair()) prints both values, as fmt.Println does.
+				x := c.expr(args[0].Value, nil)
+				if t, ok := x.typ.(*types.Tuple); ok && x.mode == ModeValue {
+					for _, el := range t.Elems {
+						if types.IsNullable(el) {
+							c.errorf(diag.EMultiValue, args[0].Value.Span(), "%s cannot print the values of %s as one argument: %s would print as a pointer", name, args[0].Value.Span().Short(), el).
+								WithHint("destructure them first: a, b := %s", args[0].Value.Span().Short())
+							break
+						}
+					}
+					return &operand{mode: ModeNoValue, typ: types.Unit}
+				}
+				if x = c.singleValue(x); x.mode != ModeInvalid {
+					c.defaultValueType(x, name+" argument")
+				}
+				return &operand{mode: ModeNoValue, typ: types.Unit}
+			}
+		}
 		for _, a := range args {
 			x := c.value(a.Value, nil)
 			if x.mode != ModeInvalid {

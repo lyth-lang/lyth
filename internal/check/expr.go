@@ -167,7 +167,21 @@ func (c *Checker) expr0(e syntax.Expr, want types.Type) *operand {
 			c.errorf(diag.EInvalidUse, e.S, "self is only available inside methods")
 			return invalid(e)
 		}
-		return &operand{mode: ModeValue, typ: c.fn.recv.Type, sym: c.fn.recv}
+		v := c.fn.recv
+		t := v.Type
+		if nt, ok := c.scope.narrowed(v, c.fn); ok {
+			// if self is Square { self.S }
+			if types.IdenticalIgnoringNull(nt, t) {
+				if !types.IsNilable(types.Base(t)) && types.IsNullable(t) {
+					c.info.Implicit[e] = ConvUnbox
+				}
+			} else {
+				c.info.Implicit[e] = ConvAssert
+				c.info.Asserts[e] = nt
+			}
+			t = nt
+		}
+		return &operand{mode: ModeValue, typ: t, sym: v}
 	case *syntax.ParenExpr:
 		x := c.expr(e.X, want)
 		return &operand{mode: x.mode, typ: x.typ, val: x.val, sym: x.sym, builtin: x.builtin, pkg: x.pkg}
@@ -725,11 +739,25 @@ func (c *Checker) matchOperands(e *syntax.BinaryExpr, x, y *operand) bool {
 	case yu:
 		return c.convertUntyped(y, x.typ, e)
 	}
-	if !types.IdenticalIgnoringNull(x.typ, y.typ) && !c.interfaceComparable(x.typ, y.typ) {
+	if !types.IdenticalIgnoringNull(x.typ, y.typ) && !c.interfaceComparable(x.typ, y.typ) && !c.chanComparable(e, x.typ, y.typ) {
 		c.operandMismatch(e, x, y)
 		return false
 	}
 	return true
+}
+
+// chanComparable reports an == or != of a channel and a directional view of
+// it (chan int and chan<- int), which Go allows.
+func (c *Checker) chanComparable(e *syntax.BinaryExpr, xt, yt types.Type) bool {
+	if e.Op != syntax.EQL && e.Op != syntax.NEQ {
+		return false
+	}
+	xc, ok1 := collectionOf(xt).(*types.Chan)
+	yc, ok2 := collectionOf(yt).(*types.Chan)
+	if !ok1 || !ok2 || !types.Identical(xc.Elem, yc.Elem) {
+		return false
+	}
+	return xc.Dir == types.SendRecv || yc.Dir == types.SendRecv
 }
 
 // interfaceComparable reports whether one operand has an interface type the
@@ -1048,6 +1076,16 @@ func (c *Checker) cond(e syntax.Expr) (*operand, narrowing, narrowing) {
 			res := &operand{mode: ModeValue, typ: types.Bool, expr: e}
 			if l.mode == ModeInvalid || r.mode == ModeInvalid {
 				res = invalid(e)
+			} else if l.val != nil && r.val != nil && l.val.Kind() == constant.Bool && r.val.Kind() == constant.Bool {
+				// const ok = a && !b
+				op := token.LAND
+				if x.Op == syntax.LOR {
+					op = token.LOR
+				}
+				res.val = constant.BinaryOp(l.val, op, r.val)
+				if types.IsUntyped(l.typ) && types.IsUntyped(r.typ) {
+					res.typ = types.UntypedBool
+				}
 			}
 			c.record(res)
 			if x != e {
@@ -1075,10 +1113,8 @@ func (c *Checker) cond(e syntax.Expr) (*operand, narrowing, narrowing) {
 			return op, nil, nil
 		}
 		var n narrowing
-		if id, ok := syntax.Unparen(x.X).(*syntax.Ident); ok {
-			if v, ok := c.info.Uses[id].(*VarSym); ok && v.Settled() {
-				n = narrowing{v: c.info.TypeTests[x]}
-			}
+		if v := c.varOf(x.X); v != nil && v.Settled() {
+			n = narrowing{v: c.info.TypeTests[x]}
 		}
 		if x.Not {
 			return c.boolCond(op), nil, n
@@ -1133,15 +1169,26 @@ func (c *Checker) nullCheck(x *syntax.BinaryExpr) (*VarSym, bool) {
 	default:
 		return nil, false
 	}
-	id, ok := syntax.Unparen(other).(*syntax.Ident)
-	if !ok {
-		return nil, true
-	}
-	v, ok := c.info.Uses[id].(*VarSym)
-	if !ok || !c.castable(v) || v.Type == nil || !types.MayBeNull(v.Type) {
+	v := c.varOf(other)
+	if v == nil || !c.castable(v) || v.Type == nil || !types.MayBeNull(v.Type) {
 		return nil, true
 	}
 	return v, true
+}
+
+// varOf returns the variable e names: a local, parameter, or global, or the
+// receiver for self; nil for any other expression.
+func (c *Checker) varOf(e syntax.Expr) *VarSym {
+	switch x := syntax.Unparen(e).(type) {
+	case *syntax.Ident:
+		v, _ := c.info.Uses[x].(*VarSym)
+		return v
+	case *syntax.ThisExpr:
+		if c.fn != nil {
+			return c.fn.recv
+		}
+	}
+	return nil
 }
 
 func isNullLit(e syntax.Expr) bool {
@@ -1789,25 +1836,32 @@ func (c *Checker) constBound(e syntax.Expr, v constant.Value, n int64, slice boo
 
 func (c *Checker) sliceExpr(e *syntax.SliceExpr) *operand {
 	x := c.value(e.X, nil)
-	var lo, hi constant.Value
+	var lo, hi, max constant.Value
 	if e.Lo != nil {
 		lo = c.indexValue(e.Lo)
 	}
 	if e.Hi != nil {
 		hi = c.indexValue(e.Hi)
 	}
+	if e.Max != nil {
+		max = c.indexValue(e.Max)
+	}
 	if x.mode == ModeInvalid {
 		return invalid(e)
 	}
 	if lo != nil && hi != nil && constant.Compare(lo, token.GTR, hi) {
 		c.errorf(diag.EInvalidOp, e.S, "invalid slice bounds: %s is greater than %s", lo, hi)
+	} else if hi != nil && max != nil && constant.Compare(hi, token.GTR, max) {
+		c.errorf(diag.EInvalidOp, e.S, "invalid slice bounds: %s is greater than %s", hi, max)
 	}
 	bounds := func(n int64) {
-		if e.Lo != nil {
-			c.constBound(e.Lo, lo, n, true)
-		}
-		if e.Hi != nil {
-			c.constBound(e.Hi, hi, n, true)
+		for _, b := range []struct {
+			e syntax.Expr
+			v constant.Value
+		}{{e.Lo, lo}, {e.Hi, hi}, {e.Max, max}} {
+			if b.e != nil {
+				c.constBound(b.e, b.v, n, true)
+			}
 		}
 	}
 	switch t := collectionOf(x.typ).(type) {
@@ -1819,8 +1873,18 @@ func (c *Checker) sliceExpr(e *syntax.SliceExpr) *operand {
 		}
 		bounds(t.Len)
 		return &operand{mode: ModeValue, typ: &types.Slice{Elem: t.Elem}}
+	case *types.Pointer:
+		if a, ok := types.Base(t.Elem).(*types.Array); ok {
+			// p[1:] slices the array p points to, as in Go.
+			bounds(a.Len)
+			return &operand{mode: ModeValue, typ: &types.Slice{Elem: a.Elem}}
+		}
 	}
 	if types.IsString(types.Base(x.typ)) {
+		if e.Max != nil {
+			c.errorf(diag.EInvalidOp, e.Max.Span(), "a string has no capacity to limit: slice it with s[lo:hi]")
+			return invalid(e)
+		}
 		if x.val != nil && x.val.Kind() == constant.String {
 			bounds(int64(len(constant.StringVal(x.val))))
 		}
@@ -1998,7 +2062,17 @@ func (c *Checker) catchMode(e *syntax.CatchExpr, want types.Type, discard bool) 
 		bwant = want
 	}
 	var res blockResult
+	saveWiden := c.widen
+	if n := len(e.Body.Stmts); n > 0 && bwant != nil && !types.MayBeNull(bwant) {
+		if es, ok := e.Body.Stmts[n-1].(*syntax.ExprStmt); ok {
+			switch x := syntax.Unparen(es.X).(type) {
+			case *syntax.IfExpr, *syntax.WhenExpr:
+				c.widen = x
+			}
+		}
+	}
 	c.withScope(scope, func() { res = c.blockValue(e.Body, bwant, needValue) })
+	c.widen = saveWiden
 	info.ValueExpr = res.valueExpr
 	// A typed catch handles only some errors, so its result is still
 	// fallible: the rest go to ?, a further catch, or a catch of all errors.
@@ -2031,11 +2105,17 @@ func (c *Checker) catchMode(e *syntax.CatchExpr, want types.Type, discard bool) 
 		return invalid(e)
 	}
 	if catchType != nil {
-		if !types.Identical(t, succ) {
-			// The rest of the chain still produces succ; the handler's value
-			// must convert to it.
-			c.assign(res.op, succ, "catch handler value")
+		if types.Identical(t, succ) {
+			return still
 		}
+		if r, ok := x.typ.(*types.Result); ok && len(r.Success) == 1 && types.Identical(t, types.MakeNullable(succ)) {
+			// catch (e: *NotFound) { null }: the rest of the chain
+			// produces succ?, a null where this handler ran.
+			return &operand{mode: ModeValue, typ: &types.Result{Success: []types.Type{t}, Raw: r.Raw}}
+		}
+		// The rest of the chain still produces succ; the handler's value
+		// must convert to it.
+		c.assign(res.op, succ, "catch handler value")
 		return still
 	}
 	return &operand{mode: ModeValue, typ: t}
@@ -2173,6 +2253,29 @@ func (c *Checker) returnValues(e *syntax.JumpExpr) {
 			x = c.singleValue(x)
 			c.assign(x, results[0], "return value")
 			return
+		}
+		if t, ok := x.typ.(*types.Tuple); ok && x.mode == ModeValue {
+			if try, isTry := syntax.Unparen(e.Values[0]).(*syntax.TryExpr); isTry && len(t.Elems) == len(results) {
+				// return two(s)?: the success values are the function's.
+				same := true
+				for i, el := range t.Elems {
+					ok, conv, _ := c.assignable(el, results[i])
+					same = same && ok && conv == ConvNone && gotypes.Identical(types.Lower(el), types.Lower(results[i]))
+				}
+				if !same {
+					c.errorf(diag.EReturnMismatch, e.S, "%s returns %s, but %s gives %s", fn.name, resultString(fn.sig), e.Values[0].Span().Short(), t).
+						WithHint("destructure the values first: a, b := %s", e.Values[0].Span().Short())
+					return
+				}
+				if call, ok := syntax.Unparen(try.X).(*syntax.CallExpr); ok {
+					if ci := c.info.Calls[call]; ci != nil && ci.Sig != nil && ci.Sig.Throws && !ci.Safe {
+						// A throws function fails with zero values, so the
+						// call's results pass through: Go's return two(s).
+						c.info.PassThrough[e.Values[0]] = true
+					}
+				}
+				return
+			}
 		}
 		c.errorf(diag.EReturnMismatch, e.S, "%s returns %s, but 1 value given", fn.name, plural(len(results), "value")).
 			WithNote("%s returns %s", fn.name, resultString(fn.sig))

@@ -139,6 +139,9 @@ func Children(n Node, f func(Node)) {
 		if x.Hi != nil {
 			visit(x.Hi)
 		}
+		if x.Max != nil {
+			visit(x.Max)
+		}
 	case *TryExpr:
 		visit(x.X)
 	case *NotNullExpr:

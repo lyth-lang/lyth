@@ -865,6 +865,13 @@ expected (`http.Header`, `url.Values`, `gin.H`), the literal has that type and
 its elements are typed by the type's elements: `h: http.Header = ["Accept":
 ["text/plain"]]` lowers to `http.Header{"Accept": {"text/plain"}}`.
 
+Index and slice expressions are Go's: `xs[i]`, `m[k]`, `s[lo:hi]` with
+either bound optional, and the full slice expression `xs[lo:hi:max]`, whose
+capacity is `max - lo` (not for strings, E0209). A pointer to an array is
+indexed and sliced like the array (`p[1:]`). A constant index or bound
+outside an array or a constant string, a negative one, and `lo > hi` are
+E0209, as Go rejects them.
+
 Typed literals spell the type, as in Go: `[]int64{1, 2}`,
 `map[string]any{"status": "ok", "count": 3}`, `[3]int{1, 2}` (the rest is
 zero), and `[...]string{"a", "b"}`. Elements are expressions typed by the
@@ -895,7 +902,8 @@ type is a literal of that type: `gin.H(["error": msg, "code": 7])` lowers to
 `gin.H{"error": msg, "code": 7}`. A trailing lambda may follow the
 argument list on the same line: `strings.FieldsFunc(s) { r -> r == ',' }`.
 Explicit type arguments follow the name in brackets, `Max[int](xs)` or
-`errors.AsType[*NotFound](err)`: `x[A]` is an instantiation when `x` names a
+`errors.AsType[*NotFound](err)`, and a trailing lambda may follow them
+(`run[string] { "ok" }`): `x[A]` is an instantiation when `x` names a
 generic function or type, and an index otherwise
 ([types.md §10](types.md#10-generics)).
 
@@ -977,6 +985,13 @@ LambdaParam = identifier [ ":" Type ] .
 - The value of the last expression is the lambda's result. `return` returns from
   the lambda, never from the enclosing function. This is Rust closure semantics;
   Lyth has no non-local returns because lambdas are ordinary Go closures.
+- A lambda with several results returns them with `return a, b`, or ends in
+  a call that returns exactly them (`each(xs) { pair(it) }`).
+- A lambda may return a lambda: `{ a: int -> { b: int -> a * b } }`. A `{` at
+  the start of a statement is a lambda when parameters and `->` follow it,
+  and a block otherwise.
+- An annotated parameter must accept every value the caller passes: where
+  the expected type passes `*User?`, `{ u: *User -> ... }` is E0201.
 - If the expected function type is fallible (declared `throws`, or a Go
   callback type returning `error`), the lambda body may use `?` and `throw`.
   A Lyth function type with an `error` result returns the error as a value
@@ -1032,7 +1047,9 @@ the value (`v := ch.receive() -> ...`), or the value and `ok`
 (E0216), and a branch that is not a channel operation is E0216. As in `when`,
 `break` inside a branch exits the enclosing loop. A `select` whose branches
 all end in `return`, `throw`, or another terminating statement terminates, so
-nothing needs to follow it.
+nothing needs to follow it. A null channel in a branch (`off?.receive()`,
+`off?.send(v)`) is never ready, as Go's nil channel, which turns a branch off;
+its binding has the element type.
 
 ```kotlin
 import "time"
@@ -1079,7 +1096,8 @@ operand never matches.
 | `x as? T` | `x` as a `T`, or null | `t, _ := x.(T)` (boxed for value types) |
 
 A successful `is` test **smart-casts** a variable to `T` like a null check,
-for a parameter, `self`, or a local the function never reassigns
+for a parameter, `self` (in an extension of an interface:
+`if self is Square { self.S }`), or a local the function never reassigns
 (types.md §5.3): in the guarded branch, in the clauses of a
 `when x { is T -> ... }`, and after `if x !is T { return }`. The lowering binds
 the cast value once, as idiomatic Go does:

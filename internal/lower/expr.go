@@ -386,6 +386,9 @@ func (fl *fnLower) expr0(e syntax.Expr) ast.Expr {
 		if e.Hi != nil {
 			ops = append(ops, e.Hi)
 		}
+		if e.Max != nil {
+			ops = append(ops, e.Max)
+		}
 		xs := fl.exprList(ops, nil)
 		se := &ast.SliceExpr{X: xs[0]}
 		k := 1
@@ -395,6 +398,10 @@ func (fl *fnLower) expr0(e syntax.Expr) ast.Expr {
 		}
 		if e.Hi != nil {
 			se.High = xs[k]
+			k++
+		}
+		if e.Max != nil {
+			se.Max, se.Slice3 = xs[k], true
 		}
 		return se
 	case *syntax.TryExpr:
@@ -461,7 +468,7 @@ func (fl *fnLower) valueViaTemp(e syntax.Expr) ast.Expr {
 	}
 	spec := &ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(name)}, Type: fl.l.typeExpr(t)}
 	fl.emitSynth(&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{spec}}}, e.Span())
-	fl.exprInto(e, ast.NewIdent(name), t)
+	fl.exprIntoRaw(e, ast.NewIdent(name), t)
 	return ast.NewIdent(name)
 }
 

@@ -175,6 +175,18 @@ func (c *Checker) lambda(e *syntax.LambdaExpr, want types.Type) *operand {
 					info.ResultExpr = lastExpr
 				}
 			}
+		} else if _, isCall := syntax.Unparen(lastExpr).(*syntax.CallExpr); isCall && len(sig.Results) > 1 {
+			// { pair(it) } for a (int) -> (int, int): the call's results are
+			// the lambda's, as return pair(it) would be.
+			terminated := c.stmtList(stmts[:n-1])
+			x := c.expr(lastExpr, nil)
+			switch {
+			case terminated || x.mode == ModeInvalid:
+			case c.passThrough(x, sig.Results) || c.tupleFits(x, sig.Results):
+				info.ResultExpr = lastExpr
+			default:
+				c.errorf(diag.EMissingReturn, e.Body.Rbrace, "lambda must return %s, but %s gives %s", (&types.Tuple{Elems: sig.Results}).String(), lastExpr.Span().Short(), describeType(x))
+			}
 		} else {
 			terminated := c.stmtList(stmts)
 			if needValue && !terminated {
@@ -265,4 +277,20 @@ func isStatementCall(e syntax.Expr, x *operand) bool {
 		return len(t.Elems) != 1
 	}
 	return false
+}
+
+// tupleFits reports whether x, a call with several results, gives exactly
+// results (Go types identical), so return x passes them on.
+func (c *Checker) tupleFits(x *operand, results []types.Type) bool {
+	t, ok := x.typ.(*types.Tuple)
+	if !ok || len(t.Elems) != len(results) {
+		return false
+	}
+	for i, el := range t.Elems {
+		ok, conv, _ := c.assignable(el, results[i])
+		if !ok || conv != ConvNone || !gotypes.Identical(types.Lower(el), types.Lower(results[i])) {
+			return false
+		}
+	}
+	return true
 }

@@ -192,6 +192,8 @@ func main() throws {
 - `m[k]` and `ch.receive()` give the zero value when nothing is there, as in Go; when the value
   type has none (a struct with a non-null pointer field, a `*User`), they give a `T?` that is
   null then: `job := jobs.receive() ?: break`.
+- Slicing is Go's: `xs[lo:hi]`, `xs[lo:hi:max]`. Conversions are `T(x)`, and `(*T)(p)` for a
+  pointer type (`unsafe.Pointer` works as in Go).
 
 ## Errors
 
@@ -238,7 +240,8 @@ func main() throws {
 - `x in xs`, `k in m`, `"@" in email`, `code in 200..299`, and `!in`.
 - Labels: `outer@ for x in xs { ... break@outer }`. `break` inside `when` exits the loop.
 - Lambdas: `{ a, b -> a + b }`, `{ it * 2 }`, and a trailing lambda `xs.Map { it * 2 }`. A loop
-  or `if` header cannot end in a trailing lambda: parenthesize the call.
+  or `if` header cannot end in a trailing lambda: parenthesize the call. A lambda with several
+  results returns them with `return a, b`.
 - `go { ... }`, `defer { ... }`, `defer f.Close() catch {}`.
 - Channels: `make(chan int, 10)`, `ch.send(v)`, `ch.receive()`, `v, ok := ch.receive()`,
   `ch.close()`, `for v in ch`, and `select { v := ch.receive() -> ...; else -> ... }`.

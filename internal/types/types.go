@@ -226,6 +226,9 @@ type TypeDecl struct {
 	Sealed  bool
 	Marker  string
 	Members []Type
+	// Joined holds the structs that declare membership (struct T : I),
+	// recorded before Members, which also says whether *T is the member.
+	Joined map[*TypeDecl]bool
 }
 
 // EnumEntry is one entry of an enum: a Go constant named GoName (the type's

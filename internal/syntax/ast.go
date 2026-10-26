@@ -618,6 +618,7 @@ type IndexExpr struct {
 type SliceExpr struct {
 	X      Expr
 	Lo, Hi Expr // may be nil
+	Max    Expr // x[lo:hi:max]; nil for x[lo:hi]
 	S      source.Span
 }
 

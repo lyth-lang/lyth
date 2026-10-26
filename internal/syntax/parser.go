@@ -1804,7 +1804,9 @@ func (p *parser) parsePrefixType() TypeExpr {
 			nt.Name = p.parseIdent("")
 		}
 		switch {
-		case p.at(LBRACK) && p.tok().Span.Start == nt.Name.S.End && !(p.receiverType && nt.Pkg != nil):
+		case p.at(LBRACK) && p.tok().Span.Start == nt.Name.S.End && !(p.receiverType && nt.Pkg != nil && p.afterBrackets(p.pos).Kind != DOT):
+			// In a receiver, T.Map[T, R]( names a function; box.Box[T].Get
+			// is a generic type of another package before the method.
 			nt.Args = p.parseTypeArgs()
 		case p.at(LSS):
 			args := p.parseTypeArgs()
@@ -2064,6 +2066,9 @@ func (p *parser) parseStmt() Stmt {
 	case DEFER, GO:
 		return p.parseDeferGo()
 	case LBRACE:
+		if p.lambdaAhead() {
+			return &ExprStmt{X: p.parseExpr()}
+		}
 		return p.parseBlock()
 	case RETURN:
 		p.next()
@@ -2824,10 +2829,11 @@ func startsSliceElem(k Kind) bool {
 
 // canTakeTrailingLambda reports whether `x { ... }` is a call of x with a
 // trailing lambda: x must name something callable (identifier, selector, or
-// instantiation).
+// instantiation; run[string] { ... } parses as an index, which the checker
+// reads as an instantiation).
 func canTakeTrailingLambda(x Expr) bool {
 	switch x.(type) {
-	case *Ident, *SelectorExpr, *InstantiateExpr:
+	case *Ident, *SelectorExpr, *InstantiateExpr, *IndexExpr:
 		return true
 	}
 	return false
@@ -2961,11 +2967,25 @@ func (p *parser) parseIndex(x Expr) Expr {
 		return &InstantiateExpr{X: x, Args: args, S: p.spanFrom(x.Span())}
 	}
 	if p.accept(COLON) {
-		if !p.at(RBRACK) {
+		if !p.at(RBRACK) && !p.at(COLON) {
 			hi = p.parseExpr()
 		}
+		var max Expr
+		if p.at(COLON) {
+			// x[lo:hi:max], Go's full slice expression: hi and max are required.
+			colon := p.tok().Span
+			p.next()
+			if hi == nil {
+				p.errorf(diag.EUnexpectedToken, colon, "a slice expression with a capacity needs its upper bound: x[lo:hi:max]")
+			}
+			if p.at(RBRACK) {
+				p.errorf(diag.EUnexpectedToken, p.tok().Span, "expected the capacity after the second ':'")
+			} else {
+				max = p.parseExpr()
+			}
+		}
 		p.expect(RBRACK, "to close the slice expression")
-		return &SliceExpr{X: x, Lo: lo, Hi: hi, S: p.spanFrom(x.Span())}
+		return &SliceExpr{X: x, Lo: lo, Hi: hi, Max: max, S: p.spanFrom(x.Span())}
 	}
 	p.expect(RBRACK, "to close the index expression")
 	return &IndexExpr{X: x, Index: lo, S: p.spanFrom(x.Span())}
@@ -3347,48 +3367,68 @@ func (p *parser) parseLambda() *LambdaExpr {
 	lam := &LambdaExpr{}
 	p.skipNL()
 	p.selfAsName()
-	if p.at(ARROW) {
-		p.next()
-		lam.HasArrow = true
-	} else if p.at(IDENT) || p.at(IN) {
-		// Speculatively parse parameters followed by '->'.
-		save := p.pos
-		saveSink, saveLast := p.sink, p.lastErr
-		scratch := &diag.Sink{}
-		p.sink = scratch
-		var params []*LambdaParam
-		for {
-			if !p.at(IDENT) && !p.at(IN) {
-				break
-			}
-			start := p.tok().Span
-			lp := &LambdaParam{Name: p.parseIdent("")}
-			if p.accept(COLON) {
-				lp.Type = p.parseType()
-			}
-			lp.S = p.spanFrom(start)
-			params = append(params, lp)
-			if !p.accept(COMMA) {
-				break
-			}
-			p.skipNL() // a line may end after a comma (spec §1.3)
-		}
-		p.skipNL()
-		ok := p.at(ARROW) && !scratch.HasErrors()
-		p.sink, p.lastErr = saveSink, saveLast
-		if ok {
-			p.next()
-			lam.Params = params
-			lam.HasArrow = true
-		} else {
-			p.pos = save
-		}
-	}
+	lam.Params, lam.HasArrow = p.lambdaHeader()
 	stmts := p.parseStmtList()
 	rb := p.expect(RBRACE, "to close the lambda")
 	lam.Body = &Block{Stmts: stmts, Lbrace: lb.Span, Rbrace: rb.Span, S: lb.Span.Join(rb.Span)}
 	lam.S = lam.Body.S
 	return lam
+}
+
+// lambdaHeader parses the parameters and '->' that may start a lambda's
+// body, after its '{': it returns the parameters and whether there was an
+// arrow, and leaves the cursor where it was when there was none.
+func (p *parser) lambdaHeader() ([]*LambdaParam, bool) {
+	if p.at(ARROW) {
+		p.next()
+		return nil, true
+	}
+	if !p.at(IDENT) && !p.at(IN) {
+		return nil, false
+	}
+	// Speculatively parse parameters followed by '->'.
+	save := p.pos
+	saveSink, saveLast := p.sink, p.lastErr
+	scratch := &diag.Sink{}
+	p.sink = scratch
+	var params []*LambdaParam
+	for {
+		if !p.at(IDENT) && !p.at(IN) {
+			break
+		}
+		start := p.tok().Span
+		lp := &LambdaParam{Name: p.parseIdent("")}
+		if p.accept(COLON) {
+			lp.Type = p.parseType()
+		}
+		lp.S = p.spanFrom(start)
+		params = append(params, lp)
+		if !p.accept(COMMA) {
+			break
+		}
+		p.skipNL() // a line may end after a comma (spec §1.3)
+	}
+	p.skipNL()
+	ok := p.at(ARROW) && !scratch.HasErrors()
+	p.sink, p.lastErr = saveSink, saveLast
+	if !ok {
+		p.pos = save
+		return nil, false
+	}
+	p.next()
+	return params, true
+}
+
+// lambdaAhead reports whether the '{' at the cursor starts a lambda with a
+// header ({ a -> ... }, { -> ... }) rather than a block, which cannot start
+// that way: a lambda body may then return a lambda ({ a -> { b -> a * b } }).
+func (p *parser) lambdaAhead() bool {
+	save := p.pos
+	p.next() // {
+	p.skipNL()
+	_, arrow := p.lambdaHeader()
+	p.pos = save
+	return arrow
 }
 
 func (p *parser) parseIf() Expr {

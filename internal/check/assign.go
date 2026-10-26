@@ -309,6 +309,11 @@ func embeddedSealed(src, dst types.Type) string {
 	if !ok || n.Decl == nil || n.Decl.Kind != types.StructDecl || n.Decl.PkgPath != sd.PkgPath {
 		return ""
 	}
+	if sd.Joined[n.Decl] && !slices.ContainsFunc(sd.Members, func(m types.Type) bool {
+		return memberKey(m) == memberKey(n) || memberKey(m) == memberKey(&types.Pointer{Elem: n})
+	}) {
+		return "" // being declared a member right now (struct Big : Shape)
+	}
 	for _, m := range sd.Members {
 		if mn, ok := types.Base(m).(*types.Named); ok && mn.Decl == n.Decl {
 			if isPtr {

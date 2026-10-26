@@ -997,13 +997,13 @@ func (l *fileLowerer) funDecl(d *syntax.FunDecl) {
 	var extParam *ast.Field // an extension's receiver, its first parameter
 	if fi.Recv != nil && sym.ExtRecv != nil {
 		rname := fl.freeRecvName(recvParamName(sym.ExtRecv))
-		fl.recvName = rname
+		fl.recvName, fl.recvVar = rname, fi.Recv
 		fl.locals[fi.Recv] = rname
 		fl.taken[rname] = true
 		extParam = &ast.Field{Names: []*ast.Ident{ast.NewIdent(rname)}, Type: l.typeExpr(sym.ExtRecv)}
 	} else if fi.Recv != nil {
 		rname := fl.freeRecvName(strings.ToLower(sym.Recv.Name[:1]))
-		fl.recvName = rname
+		fl.recvName, fl.recvVar = rname, fi.Recv
 		fl.locals[fi.Recv] = rname
 		fl.taken[rname] = true
 		var rt ast.Expr = ast.NewIdent(sym.Recv.GoName)

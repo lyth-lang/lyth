@@ -45,12 +45,14 @@ func (b *castBinding) finish() {
 
 // castFor returns the binding that serves the smart-cast read e, if any.
 func (fl *fnLower) castFor(e syntax.Expr) *castBinding {
-	id, ok := e.(*syntax.Ident)
-	if !ok {
-		return nil
+	var v *check.VarSym
+	switch x := e.(type) {
+	case *syntax.Ident:
+		v, _ = fl.info.Uses[x].(*check.VarSym)
+	case *syntax.ThisExpr:
+		v = fl.recvVar
 	}
-	v, ok := fl.info.Uses[id].(*check.VarSym)
-	if !ok {
+	if v == nil {
 		return nil
 	}
 	if b := fl.casts[v]; b != nil && types.Identical(b.typ, fl.info.Asserts[e]) {
@@ -88,12 +90,13 @@ func (fl *fnLower) castScope(f func()) {
 // castVar returns the variable a type test of x smart-casts: an immutable
 // variable named by x (the checker narrows only those).
 func (fl *fnLower) castVar(x syntax.Expr) *check.VarSym {
-	id, ok := syntax.Unparen(x).(*syntax.Ident)
-	if !ok {
-		return nil
-	}
-	if v, ok := fl.info.Uses[id].(*check.VarSym); ok && v.Settled() && v.Kind != check.ReceiverVar {
-		return v
+	switch e := syntax.Unparen(x).(type) {
+	case *syntax.Ident:
+		if v, ok := fl.info.Uses[e].(*check.VarSym); ok && v.Settled() && v.Kind != check.ReceiverVar {
+			return v
+		}
+	case *syntax.ThisExpr:
+		return fl.recvVar // self is read-only
 	}
 	return nil
 }
