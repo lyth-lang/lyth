@@ -86,7 +86,7 @@ func *Server.healthz(w: http.ResponseWriter, r: *http.Request) {
 // parameter) for the following page, absent on the last page.
 struct listResponse {
     Todos: []todo.Todo
-    Next: int64?   `json:"next,omitempty"`
+    Next: int64? `json:"next,omitempty"`
 }
 
 func *Server.list(w: http.ResponseWriter, r: *http.Request, user: string) throws {

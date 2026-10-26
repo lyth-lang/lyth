@@ -15,9 +15,9 @@ you remember about Lyth, they are right.
 - A Lyth project is a Go module: `go.mod` at the root, `.lyth` files in package directories,
   `_test.lyth` files beside them. `lyth init` creates one. Imports come from `go.mod` as in Go;
   `lyth mod tidy` adds the modules your `.lyth` files import.
-- Run `lyth check` after each change and fix what it reports before writing more. It is fast,
-  and test files are included. Diagnostics point at `.lyth` lines and speak Lyth; many end with a
-  `hint:` that gives the exact edit.
+- Run `lyth check` after each change and fix what it reports before writing more. It is fast, and
+  test files are included. `lyth fmt` lays the files out canonically. Diagnostics point at `.lyth`
+  lines and speak Lyth; many end with a `hint:` that gives the exact edit.
 - `lyth fix` applies the edits that only respell code: older Lyth syntax, and Kotlin and Go
   spellings of Lyth constructs (the [table below](#changes-between-versions)). When a project
   shows many errors after a Lyth upgrade, run `lyth fix` first, then fix the rest by hand.

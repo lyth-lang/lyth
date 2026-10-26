@@ -99,3 +99,83 @@ func dump(b *strings.Builder, v reflect.Value, indent int, label string) {
 		fmt.Fprintf(b, "%s%v\n", prefix, v.Interface())
 	}
 }
+
+// DumpShape renders a syntax tree like Dump, without positions: two files
+// that differ only in layout have the same shape. Carriage returns are left
+// out of the text, as Lyth leaves them out of raw strings, and trailing
+// spaces of doc comment lines.
+func DumpShape(n any) string {
+	var b strings.Builder
+	dumpShape(&b, reflect.ValueOf(n), 0, "")
+	return b.String()
+}
+
+func dumpShape(b *strings.Builder, v reflect.Value, indent int, label string) {
+	pad := strings.Repeat("  ", indent)
+	prefix := pad
+	if label != "" {
+		prefix += label + ": "
+	}
+	switch v.Kind() {
+	case reflect.Interface, reflect.Pointer:
+		if !v.IsNil() {
+			dumpShape(b, v.Elem(), indent, label)
+		}
+	case reflect.Slice:
+		if v.Len() == 0 || v.Type().Elem() == reflect.TypeOf(Comment{}) || v.Type().Elem() == spanType {
+			return
+		}
+		fmt.Fprintf(b, "%s[%d]\n", prefix, v.Len())
+		for i := 0; i < v.Len(); i++ {
+			dumpShape(b, v.Index(i), indent+1, "")
+		}
+	case reflect.Struct:
+		if v.Type() == spanType {
+			return
+		}
+		t := v.Type()
+		var head strings.Builder
+		head.WriteString(prefix + t.Name())
+		for i := 0; i < t.NumField(); i++ {
+			f, fv := t.Field(i), v.Field(i)
+			if !f.IsExported() {
+				continue
+			}
+			switch fv.Kind() {
+			case reflect.String:
+				if s := fv.String(); s != "" {
+					s = strings.ReplaceAll(s, "\r", "")
+					if f.Name == "Doc" {
+						lines := strings.Split(s, "\n")
+						for i, l := range lines {
+							lines[i] = strings.TrimRight(l, " \t")
+						}
+						s = strings.Join(lines, "\n")
+					}
+					fmt.Fprintf(&head, " %s=%q", f.Name, s)
+				}
+			case reflect.Bool:
+				if fv.Bool() {
+					fmt.Fprintf(&head, " %s", f.Name)
+				}
+			case reflect.Int:
+				if fv.Int() != 0 {
+					fmt.Fprintf(&head, " %s=%d", f.Name, fv.Int())
+				}
+			}
+		}
+		b.WriteString(head.String() + "\n")
+		for i := 0; i < t.NumField(); i++ {
+			f, fv := t.Field(i), v.Field(i)
+			if !f.IsExported() || f.Name == "Src" {
+				continue
+			}
+			switch fv.Kind() {
+			case reflect.Pointer, reflect.Interface, reflect.Slice, reflect.Struct:
+				dumpShape(b, fv, indent+1, f.Name)
+			}
+		}
+	default:
+		fmt.Fprintf(b, "%s%v\n", prefix, v.Interface())
+	}
+}

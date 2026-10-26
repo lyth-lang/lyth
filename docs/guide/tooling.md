@@ -36,6 +36,7 @@ go install ./cmd/lyth
 | `lyth cover -func=c.out` | Prints the coverage of each function in a profile written by `lyth test -coverprofile` ([testing](testing.md#coverage)). Other modes, such as `-html=c.out`, run `go tool cover`. |
 | `lyth gen [-stdout \| -in-tree] [packages]` | Writes the generated Go: to stdout, or next to the sources as `*.lyth.go` files. |
 | `lyth fix [packages]` | Rewrites older Lyth syntax, and Go and Kotlin spellings of Lyth constructs, in the packages' files, test files included, then reports the errors left ([below](#lyth-fix)). |
+| `lyth fmt [-l] [-d] [paths]` | Formats `.lyth` files in place in Lyth's canonical layout ([below](#lyth-fmt)), the current directory and those below it by default; `-l` lists the files that differ and `-d` prints the changes, without writing; `-stdin` formats standard input. |
 | `lyth generate [-run re] [-skip re] [-n] [-v] [-x] [packages]` | Runs the `//go:generate` lines of `.lyth` files, test files included, as `go generate` does for `.go` files (which is all it reads): in the package directory, with `$GOFILE`, `$GOLINE`, `$GOPACKAGE`, `$GOOS`, `$GOARCH`, and `$DOLLAR`, quoted arguments, and `-command` aliases. Run `go generate` for the directives in `.go` files. |
 | `lyth mod tidy` | `go mod tidy` that also sees imports in `.lyth` files ([interop](go-interop.md#modules-and-third-party-packages)). |
 | `lyth init [module-path]` | Makes the current directory a Lyth module: `go.mod` (through `go mod init`; the path defaults to the directory's name), `main.lyth` when there is no Lyth code yet, `AGENTS.md` and `CLAUDE.md` for coding agents, and `.lyth/` in `.gitignore`. In an existing module it adds only what is missing. |
@@ -94,6 +95,25 @@ vim.filetype.add({ extension = { lyth = "lyth" } })
 vim.lsp.config("lyth", { cmd = { "lyth", "lsp" }, filetypes = { "lyth" }, root_markers = { "go.mod" } })
 vim.lsp.enable("lyth")
 ```
+
+## lyth fmt
+
+`lyth fmt` gives Lyth code one layout, as `gofmt` does for Go: four spaces of
+indentation per level, one space around `:=`, `=`, comparisons, `&&`, `->`,
+and `?:` and after commas and the colon of `name: Type`, none inside
+parentheses and brackets or around `.`, `?.`, and ranges (`0..<n`), and
+spaces inside the braces of blocks and lambdas (`{ it * 2 }`) but not inside a
+typed literal's (`[]int{1, 2}`). Arithmetic keeps the spacing you chose, so
+`a*b + c` can show precedence, as gofmt writes it. Trailing comments and
+struct tags of consecutive lines are aligned in a column, and runs of blank
+lines become one.
+
+Lyth is newline-sensitive, so `lyth fmt` changes only spaces inside lines,
+indentation, and blank lines: it never moves a token to another line. It
+checks that the formatted file parses to the same syntax tree, and leaves a
+file with syntax errors as it is. Editors format through the language server
+(**Format Document** in VS Code); in CI, `test -z "$(lyth fmt -l)"` fails
+when a file is not formatted.
 
 ## What a build does
 

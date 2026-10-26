@@ -26,7 +26,7 @@ struct errorResponse {
 struct errorDetail {
     Code: string
     Message: string
-    Fields: map[string]string    `json:"fields,omitempty"`
+    Fields: map[string]string `json:"fields,omitempty"`
 }
 
 // writeError reports err to the client. Errors outside the API contract are

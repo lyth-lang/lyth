@@ -164,6 +164,8 @@ func (s *Server) request(method string, params json.RawMessage) (any, error) {
 		return s.inlayHints(params)
 	case "textDocument/codeAction":
 		return s.codeActions(params)
+	case "textDocument/formatting":
+		return s.formatting(params)
 	case "workspace/executeCommand":
 		return s.executeCommand(params)
 	}
@@ -182,21 +184,22 @@ func (s *Server) initialize(params json.RawMessage) any {
 	}
 	return map[string]any{
 		"capabilities": map[string]any{
-			"textDocumentSync":          map[string]any{"openClose": true, "change": 1, "save": map[string]any{"includeText": false}},
-			"hoverProvider":             true,
-			"definitionProvider":        true,
-			"declarationProvider":       true,
-			"typeDefinitionProvider":    true,
-			"referencesProvider":        true,
-			"documentHighlightProvider": true,
-			"renameProvider":            map[string]any{"prepareProvider": true},
-			"documentSymbolProvider":    true,
-			"workspaceSymbolProvider":   true,
-			"completionProvider":        map[string]any{"triggerCharacters": []string{".", "\""}, "resolveProvider": false},
-			"signatureHelpProvider":     map[string]any{"triggerCharacters": []string{"(", ","}, "retriggerCharacters": []string{","}},
-			"inlayHintProvider":         true,
-			"codeActionProvider":        map[string]any{"codeActionKinds": []string{"quickfix"}},
-			"executeCommandProvider":    map[string]any{"commands": []string{"lyth.showGo"}},
+			"textDocumentSync":           map[string]any{"openClose": true, "change": 1, "save": map[string]any{"includeText": false}},
+			"hoverProvider":              true,
+			"definitionProvider":         true,
+			"declarationProvider":        true,
+			"typeDefinitionProvider":     true,
+			"referencesProvider":         true,
+			"documentHighlightProvider":  true,
+			"renameProvider":             map[string]any{"prepareProvider": true},
+			"documentSymbolProvider":     true,
+			"workspaceSymbolProvider":    true,
+			"completionProvider":         map[string]any{"triggerCharacters": []string{".", "\""}, "resolveProvider": false},
+			"signatureHelpProvider":      map[string]any{"triggerCharacters": []string{"(", ","}, "retriggerCharacters": []string{","}},
+			"inlayHintProvider":          true,
+			"codeActionProvider":         map[string]any{"codeActionKinds": []string{"quickfix"}},
+			"documentFormattingProvider": true,
+			"executeCommandProvider":     map[string]any{"commands": []string{"lyth.showGo"}},
 		},
 		"serverInfo": map[string]any{"name": "lyth", "version": s.opts.Version},
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	gotypes "go/types"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/lyth-lang/lyth/internal/check"
 	"github.com/lyth-lang/lyth/internal/diag"
+	"github.com/lyth-lang/lyth/internal/format"
 	"github.com/lyth-lang/lyth/internal/source"
 	"github.com/lyth-lang/lyth/internal/syntax"
 	"github.com/lyth-lang/lyth/internal/types"
@@ -991,4 +993,21 @@ func obviousType(info *check.Info, e syntax.Expr) bool {
 		return obviousType(info, x.X)
 	}
 	return false
+}
+
+// formatting formats a document as lyth fmt does, as one edit of the whole
+// text; a document with syntax errors is left as it is (no edits), since
+// formatting on save must not fail while the code is being written.
+func (s *Server) formatting(params json.RawMessage) (any, error) {
+	path := documentParam(params)
+	text, ok := s.doc(path)
+	if !ok {
+		return []TextEdit{}, nil
+	}
+	out, err := format.Source(filepath.Base(path), []byte(text))
+	if err != nil || string(out) == text {
+		return []TextEdit{}, nil
+	}
+	idx := newLineIndex([]byte(text))
+	return []TextEdit{{Range: idx.rangeOf(0, len(text)), NewText: string(out)}}, nil
 }

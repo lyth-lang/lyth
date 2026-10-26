@@ -7,12 +7,12 @@ import "unicode/utf8"
 // Todo is a task owned by one user.
 struct Todo {
     ID: int64
-    Owner: string          `json:"-"`
+    Owner: string `json:"-"`
     Title: string
     Done: bool
-    Due: time.Time?        `json:"due,omitempty"`
-    CreatedAt: time.Time   `db:"created_at"`
-    UpdatedAt: time.Time   `db:"updated_at"`
+    Due: time.Time?      `json:"due,omitempty"`
+    CreatedAt: time.Time `db:"created_at"`
+    UpdatedAt: time.Time `db:"updated_at"`
 }
 
 // NewTodo is the input for creating a todo.
