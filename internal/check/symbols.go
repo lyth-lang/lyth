@@ -99,6 +99,7 @@ type FuncSym struct {
 	PtrRecv bool
 	Span    source.Span
 	IsMain  bool
+	IsInit  bool // func init: not in the package scope, and there may be several
 	// IsTest marks a function that go test runs (TestXxx, BenchmarkXxx,
 	// FuzzXxx, ExampleXxx, TestMain) declared in a _test.lyth file.
 	IsTest bool

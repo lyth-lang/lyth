@@ -1,0 +1,12 @@
+// func init: no parameters, results, type parameters, or throws; it cannot
+// be referenced, and a package may declare several.
+func init(x: int) {} // ERROR E0216 "func init must have no parameters and no results"
+func init(): int { return 1 } // ERROR E0216 "func init must have no parameters and no results"
+func init() throws {} // ERROR E0216 "func init cannot throw"
+func init[T]() {} // ERROR E0216 "func init cannot have type parameters"
+func init() {}
+func init() {}
+
+func main() {
+    init() // ERROR E0101 "undefined: init"
+}

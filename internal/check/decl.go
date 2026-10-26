@@ -790,6 +790,17 @@ func (c *Checker) resolveFuncDecls() {
 					WithNote("read arguments with os.Args; report failure by declaring func main() throws")
 			}
 		}
+		if fs.IsInit {
+			switch {
+			case len(d.TypeParams) > 0:
+				c.errorf(diag.EInvalidUse, d.Name.S, "func init cannot have type parameters")
+			case len(d.Params) > 0 || d.Result != nil || d.ExprBody != nil && fs.Sig != nil && len(fs.Sig.Results) > 0:
+				c.errorf(diag.EInvalidUse, d.Name.S, "func init must have no parameters and no results")
+			case d.Throws:
+				c.errorf(diag.EInvalidUse, d.ThrowsSpan, "func init cannot throw: Go runs it before main, with no caller to return an error to").
+					WithHint("handle the error in the body, or panic: f() catch (err) { panic(err) }")
+			}
+		}
 		if fs.IsTest {
 			c.checkTestFunc(fs)
 		}
@@ -1014,7 +1025,7 @@ func paramReference(e syntax.Expr, params map[string]bool) *syntax.Ident {
 // too, so that their callers see the type instead of follow-on errors.
 func inferable(fs *FuncSym) bool {
 	d := fs.Decl
-	return d != nil && d.ExprBody != nil && d.Result == nil && !d.Throws && !fs.IsMain && !fs.IsTest && len(d.TypeParams) == 0
+	return d != nil && d.ExprBody != nil && d.Result == nil && !d.Throws && !fs.IsMain && !fs.IsInit && !fs.IsTest && len(d.TypeParams) == 0
 }
 
 // ensureInferred infers fs's result type if it is still pending, by checking

@@ -326,7 +326,13 @@ func (c *Checker) collect(files []*syntax.File) {
 					c.pkg.HasMain = true
 				}
 				if sym.name == "init" {
-					c.errorf(diag.EUnsupported, d.Name.S, "init functions are not supported; initialize package state with package-level var declarations")
+					// Go runs every init function of a package before main; a
+					// package may have several, and nothing can refer to one,
+					// so they are not declared in the package scope.
+					sym.IsInit = true
+					sym.GoName = "init"
+					c.pkg.Funcs = append(c.pkg.Funcs, sym)
+					continue
 				}
 				if c.declare(c.pkgScope, sym, d.Name.S) {
 					c.claimGoName(sym.GoName, d.Name.S, sym.name)

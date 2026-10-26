@@ -252,6 +252,13 @@ FuncBody    = Block | "=" Expression .
   exist only as results and are consumed by destructuring (§4.2).
 - `func main() throws` is allowed. The generated `main` prints the error to
   stderr and exits with status 1.
+- `func init()` declares an initialization function, as in Go: after the
+  package-level variables are initialized, the package's `init` functions run
+  in the order they appear (files in name order), before `main`. A package may
+  declare several. `init` takes no parameters, returns no results, has no type
+  parameters, and cannot throw (E0216); nothing can call or refer to it
+  (E0101). Another package-level declaration named `init` gets the Go name
+  `init_`.
 - A parameter may have a **default value**:
   `func connect(host: string, port: int = 5432, timeout: time.Duration = 30 * time.Second)`.
   A call that leaves the parameter out gets the default expression at the call

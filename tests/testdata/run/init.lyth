@@ -1,0 +1,35 @@
+// Package initialization: package-level vars first, in dependency order,
+// then every func init in the order written, then main.
+import "fmt"
+import "strings"
+
+var registry: map[string]int = [:]
+var order: []string
+var greeting = strings.ToUpper(base) + "!"
+var base = "hello"
+
+func init() {
+    registry["a"] = 1
+    order = append(order, "first init sees ${greeting}")
+}
+
+func register(name: string, n: int) {
+    registry[name] = n
+}
+
+func init() {
+    register("b", len(registry) + 1)
+    order = append(order, "second init")
+}
+
+func main() {
+    fmt.Println(registry)
+    for o in order {
+        fmt.Println(o)
+    }
+}
+
+// Output:
+// map[a:1 b:2]
+// first init sees HELLO!
+// second init

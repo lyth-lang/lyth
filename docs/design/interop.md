@@ -115,6 +115,7 @@ works, no heuristics that break on `URL`/`IPv4`/`MD5Sum`, and no collisions.
 | Package vars/consts | `pkg.Name` | |
 | Build tags | `//go:build` lines at the top of a `.lyth` file are copied verbatim; `_linux.lyth` file suffixes work | Validated by `go/build`. A misplaced `//go:build` is E0008. |
 | `//go:embed`, compiler directives | `//go:embed` above a package-level `var x: string` / `[]byte` / `embed.FS`; `//go:noinline`, `//go:nosplit`, `//go:norace`, `//go:nocheckptr` above a `func` | Copied to the generated declaration; anything else is an error, never silently dropped (language.md §1.2). |
+| `func init()` | the same, several per package | language.md §3.2 |
 | cgo | not inside `.lyth` files; put cgo in a Go file of a separate package and import it | Mixed packages are planned (§8). |
 | Variadic | `fmt.Println(a, b)`; spread `append(xs, ys...)` | |
 | Labels / goto / `fallthrough` | labeled loops (`outer@ for x in xs`, `break@outer`); no `goto` or `fallthrough` | Lyth's control flow is structured; `when` branches never fall through. |
