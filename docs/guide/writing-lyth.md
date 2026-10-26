@@ -337,13 +337,16 @@ The table lists older Lyth forms and the Go and Kotlin habits the compiler recog
 | `Point{X: 1}` | `Point(X = 1)` | yes |
 | `gin.H{"k": v}` | `gin.H(["k": v])` | yes |
 | `strings.split(s, ",")` | `strings.Split(s, ",")` | yes |
-| `for i := 0; i < n; i++` | `for i in 0..<n` | yes |
+| `for i := 0; i < n; i++` | `for i in 0..<n` | yes when `n` cannot change in the loop (a range reads it once), else a hint |
 | `go func() { ... }()` | `go { ... }` | yes |
 | `outer: for ...`, `break outer` | `outer@ for ...`, `break@outer` | yes |
 | `import "net/http" as h` | `import h "net/http"` | yes |
 | `typealias Handler = (Ctx) -> unit` | `type Handler = (Ctx) -> unit` | yes |
-| `type User struct { ... }` | `struct User { ... }` | yes (the name and keyword) |
-| `Name Type` (a Go struct field) | `Name: Type` | yes |
+| `type User struct { ... }`, `type Box[T any] struct` | `struct User { ... }`, `struct Box[T: any]` | yes (the name, keyword, and type parameters) |
+| `Name Type` (a Go struct field), `X, Y int` | `Name: Type`, one field per line | yes |
+| `func f(name string, a, b int) int` | `func f(name: string, a: int, b: int): int` | yes |
+| `Area() float64` in an interface | `Area(): float64` | yes |
+| `func f() (int, error)`, `func f() error` | `func f(): int throws`, `func f() throws` | no: the returns change |
 | `func (p *T) M()` | `func *T.M()`, and `self` in the body | no |
 | a field or method by bare name in a method (`Count++`, `validate()`) | `self.Count++`, `self.validate()` | yes, unless the name also names a package-level declaration or import there |
 | automatic json key `iDs` for `IDs`, `urLs` for `URLs`, `iPv4` for `IPv4` | the key is now `ids`, `urls`, `ipv4`; tag `json:"iDs"` keeps the old one (W0009) | no: a wire change |

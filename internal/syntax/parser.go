@@ -737,11 +737,19 @@ func (p *parser) parseTypeDecl(start source.Span, doc string) Decl {
 		return d
 	}
 	if p.at(STRUCT) || p.at(INTERFACE) {
-		// Go's type User struct { ... }: Lyth names the kind first.
+		// Go's type User struct { ... }: Lyth names the kind first. The
+		// name and type parameters stay where they are (type Box[T any]
+		// struct becomes struct Box[T any], whose brackets have a fix of
+		// their own).
 		kind := p.tok()
 		head := kw.Span.Join(kind.Span)
+		before := name.S
+		if len(tps) > 0 {
+			before = p.toks[p.pos-1].Span // the ]
+		}
 		p.errorf(diag.EUnsupportedSyntax, head, "a %s is declared %s %s { ... }", kind.Text, kind.Text, name.Name).
-			WithFix(head, kind.Text+" "+name.Name, "write %s %s", kind.Text, name.Name)
+			WithFix(kw.Span, kind.Text, "write %s %s", kind.Text, name.Name).
+			WithFix(source.Span{File: kind.Span.File, Start: before.End, End: kind.Span.End}, "", "and remove the %s after the name", kind.Text)
 		p.syncDecl()
 		return &BadDecl{S: p.spanFrom(start)}
 	}
@@ -1219,6 +1227,11 @@ func (p *parser) parseFunDecl(start source.Span, doc string) *FunDecl {
 	d.Params = p.parseParams()
 	if p.accept(COLON) {
 		d.Result = p.parseResultType()
+	} else if res, throws, ok := p.goResult(d.Name); ok {
+		d.Result, d.Throws = res, throws
+		if throws {
+			defer func() { p.damaged = append(p.damaged, d.S) }() // the returns still say nil
+		}
 	}
 	if p.at(THROWS) {
 		d.Throws = true
@@ -1386,10 +1399,19 @@ func (p *parser) parseParams() []*Param {
 	for !p.at(RPAREN) && !p.at(EOF) {
 		start := p.tok().Span
 		prm := &Param{Name: p.parseIdent("for parameter name")}
+		if group := p.goParamGroup(prm.Name); group != nil {
+			// Go's (a, b int).
+			params = append(params, group...)
+			if !p.accept(COMMA) {
+				break
+			}
+			continue
+		}
 		if !p.at(COLON) {
 			d := p.errorf(diag.EUnexpectedToken, p.tok().Span, "expected ':' after parameter name %s", prm.Name.Name)
-			if p.at(IDENT) || p.at(MUL) || p.at(LBRACK) {
-				d.WithHint("Lyth writes parameters as name: Type, e.g. %s: %s", prm.Name.Name, p.tok().Text)
+			if startsSliceElem(p.tok().Kind) && p.file.Position(p.tok().Span.Start).Line == p.file.Position(prm.Name.S.End).Line {
+				// Go's (name string): only the colon is missing.
+				d.WithFix(prm.Name.S.EndSpan(), ":", "Lyth writes parameters as name: Type: %s: %s", prm.Name.Name, p.tok().Text)
 			}
 		} else {
 			p.next()
@@ -1413,6 +1435,101 @@ func (p *parser) parseParams() []*Param {
 }
 
 // parseResultType parses a declared result: Type or (T1, T2, ...).
+// goResult reads a result type written Go's way, without the colon
+// (func f() int, Area() float64 in an interface), after the parameter
+// list. A result that only lacks the colon gets a fix; one ending in error
+// is how Go says throws, which needs the returns changed too, so it gets a
+// hint, and comes back as throws with the other results. ok is false when
+// no result follows.
+func (p *parser) goResult(name *Ident) (res *ResultType, throws, ok bool) {
+	close := p.toks[p.pos-1]
+	t := p.tok()
+	if close.Kind != RPAREN || p.file.Position(t.Span.Start).Line != p.file.Position(close.Span.End).Line {
+		return nil, false, false
+	}
+	switch t.Kind {
+	case IDENT, MUL, LBRACK, LPAREN, MAP, CHAN, STRUCT, INTERFACE:
+	default:
+		return nil, false, false
+	}
+	save := p.pos
+	saveSink, saveLast := p.sink, p.lastErr
+	scratch := &diag.Sink{}
+	p.sink = scratch
+	res = p.parseResultType()
+	p.sink, p.lastErr = saveSink, saveLast
+	if scratch.HasErrors() || !(p.at(LBRACE) || p.at(ASSIGN) || p.at(THROWS) || p.at(NEWLINE) || p.at(SEMI) || p.at(RBRACE) || p.at(EOF)) {
+		p.pos = save // Go's named results (n int, err error): report as before
+		return nil, false, false
+	}
+	text := res.S.Text()
+	fname := "f"
+	if name != nil {
+		fname = name.Name
+	}
+	last := res.Types[len(res.Types)-1]
+	if nt, isNamed := last.(*NamedType); isNamed && nt.Pkg == nil && nt.Name.Name == "error" && len(nt.Args) == 0 {
+		d := p.errorf(diag.EUnsupportedSyntax, res.S, "a function that can fail is declared throws, not with an error result")
+		rest := res.Types[:len(res.Types)-1]
+		if len(rest) == 0 {
+			d.WithHint("write %s(...) throws, and return without the error (return, throw err)", fname)
+			return nil, true, true
+		}
+		var names []string
+		for _, r := range rest {
+			names = append(names, r.Span().Text())
+		}
+		result := strings.Join(names, ", ")
+		if len(rest) > 1 {
+			result = "(" + result + ")"
+		}
+		d.WithHint("write %s(...): %s throws, and return the values without the error (return v; throw err)", fname, result)
+		return &ResultType{Types: rest, Tuple: len(rest) > 1, S: res.S}, true, true
+	}
+	p.errorf(diag.EUnsupportedSyntax, res.S, "the result type follows a colon in Lyth: %s(...): %s", fname, text).
+		WithFix(close.Span.EndSpan(), ":", "write %s(...): %s", fname, text)
+	return res, false, true
+}
+
+// goParamGroup reads Go's grouped parameters (a, b int) after the first
+// name and returns them, each with the type, after reporting the fix that
+// writes a: int, b: int; nil, with the cursor unmoved, for anything else.
+func (p *parser) goParamGroup(first *Ident) []*Param {
+	if !p.at(COMMA) {
+		return nil
+	}
+	save := p.pos
+	names := []*Ident{first}
+	for p.at(COMMA) && (p.peek(1).Kind == IDENT || p.peek(1).Kind == IN) {
+		p.next()
+		names = append(names, p.parseIdent(""))
+	}
+	if len(names) < 2 || p.at(COLON) || !startsSliceElem(p.tok().Kind) {
+		p.pos = save
+		return nil
+	}
+	saveSink, saveLast := p.sink, p.lastErr
+	scratch := &diag.Sink{}
+	p.sink = scratch
+	t := p.parseType()
+	p.sink, p.lastErr = saveSink, saveLast
+	if scratch.HasErrors() || !(p.at(COMMA) || p.at(RPAREN)) {
+		p.pos = save
+		return nil
+	}
+	typ := t.Span().Text()
+	var parts []string
+	var out []*Param
+	for _, n := range names {
+		parts = append(parts, n.Name+": "+typ)
+		out = append(out, &Param{Name: n, Type: t, S: n.S.Join(t.Span())})
+	}
+	span := first.S.Join(t.Span())
+	p.errorf(diag.EUnsupportedSyntax, span, "each parameter has its own type in Lyth").
+		WithFix(span, strings.Join(parts, ", "), "write %s", strings.Join(parts, ", "))
+	return out
+}
+
 func (p *parser) parseResultType() *ResultType {
 	start := p.tok().Span
 	if p.at(LPAREN) {
@@ -1490,6 +1607,10 @@ func (p *parser) parseStructDecl(start source.Span, doc string) *StructDecl {
 		if p.at(RBRACE) || p.at(EOF) {
 			break
 		}
+		if p.unclosedBody("struct") {
+			d.S = p.spanFrom(start)
+			return d
+		}
 		fstart := p.tok().Span
 		f := &Field{Doc: p.docFor(fstart.Start)}
 		if p.at(PUB) || p.at(PRIVATE) {
@@ -1514,6 +1635,14 @@ func (p *parser) parseStructDecl(start source.Span, doc string) *StructDecl {
 			p.errorf(diag.EUnsupportedSyntax, p.tok().Span, "methods are declared outside the struct").
 				WithHint("write func %s.name(...) { ... } at top level", d.Name.Name)
 			p.syncStmt()
+			continue
+		}
+		if group := p.goFieldGroup(); group != nil {
+			// Go's X, Y int.
+			for _, gf := range group {
+				gf.Doc = f.Doc
+				d.Fields = append(d.Fields, gf)
+			}
 			continue
 		}
 		switch {
@@ -1550,6 +1679,83 @@ func (p *parser) parseStructDecl(start source.Span, doc string) *StructDecl {
 	p.expect(RBRACE, "to close the struct body")
 	d.S = p.spanFrom(start)
 	return d
+}
+
+// unclosedBody reports a declaration keyword at the start of a line inside a
+// struct, enum, or interface body: the body's } is missing, and the line
+// starts the next top-level declaration, which must not be read (or fixed)
+// as a member.
+func (p *parser) unclosedBody(kind string) bool {
+	t := p.tok()
+	if p.file.Position(t.Span.Start).Col != 1 {
+		return false
+	}
+	switch t.Kind {
+	case FUN, STRUCT, INTERFACE, ENUM, TYPE, VAR, CONST, IMPORT, SEALED:
+	default:
+		if t.Kind != IDENT || t.Text != "fun" {
+			return false
+		}
+	}
+	p.errorf(diag.EUnexpectedToken, t.Span, "expected '}' to close the %s body before this declaration", kind)
+	for p.pos > 0 && (p.toks[p.pos-1].Kind == NEWLINE || p.toks[p.pos-1].Kind == SEMI) {
+		p.pos-- // the declaration ends at the line break, as a closed body would
+	}
+	return true
+}
+
+// goFieldGroup reads Go's grouped fields (X, Y int) at the start of a struct
+// body line and returns them, each with the type, after reporting the fix
+// that writes one field per line; nil, with the cursor unmoved, otherwise.
+func (p *parser) goFieldGroup() []*Field {
+	if !p.at(IDENT) || p.peek(1).Kind != COMMA {
+		return nil
+	}
+	save := p.pos
+	first := p.parseIdent("")
+	names := []*Ident{first}
+	for p.at(COMMA) && p.peek(1).Kind == IDENT {
+		p.next()
+		names = append(names, p.parseIdent(""))
+	}
+	line := p.file.Position(first.S.Start).Line
+	if len(names) < 2 || !startsSliceElem(p.tok().Kind) || p.file.Position(p.tok().Span.Start).Line != line {
+		p.pos = save
+		return nil
+	}
+	saveSink, saveLast := p.sink, p.lastErr
+	scratch := &diag.Sink{}
+	p.sink = scratch
+	t := p.parseType()
+	p.sink, p.lastErr = saveSink, saveLast
+	var tag Token
+	if p.at(RAWSTRING) || p.at(STRING) {
+		tag = p.next()
+	}
+	if scratch.HasErrors() || !(p.at(NEWLINE) || p.at(SEMI) || p.at(RBRACE)) {
+		p.pos = save
+		return nil
+	}
+	end := t.Span()
+	suffix := ""
+	if tag.Kind != 0 {
+		end, suffix = tag.Span, " "+tag.Span.Text()
+	}
+	indent := string(p.file.Content[p.file.LineStart(line):first.S.Start])
+	var lines []string
+	var out []*Field
+	for _, n := range names {
+		lines = append(lines, n.Name+": "+t.Span().Text()+suffix)
+		f := &Field{Name: n, Type: t, S: n.S.Join(end)}
+		if tag.Kind != 0 {
+			f.Tag, f.HasTag, f.TagSpan = tag.Value, true, tag.Span
+		}
+		out = append(out, f)
+	}
+	span := first.S.Join(end)
+	p.errorf(diag.EUnsupportedSyntax, span, "each field has its own line and type in Lyth").
+		WithFix(span, strings.Join(lines, "\n"+indent), "write %s", strings.Join(lines, "; "))
+	return out
 }
 
 // embedLine reports whether a struct body line is a type alone, which embeds
@@ -1623,6 +1829,10 @@ func (p *parser) parseEnumDecl(start source.Span, doc string) *EnumDecl {
 		if p.at(RBRACE) || p.at(EOF) {
 			break
 		}
+		if p.unclosedBody("enum") {
+			d.S = p.spanFrom(start)
+			return d
+		}
 		if !p.at(IDENT) {
 			p.errorf(diag.EUnexpectedToken, p.tok().Span, "expected an enum entry name, found %s", describe(p.tok()))
 			p.syncStmt()
@@ -1661,6 +1871,10 @@ func (p *parser) parseInterfaceDecl(start source.Span, doc string) *InterfaceDec
 		if p.at(RBRACE) || p.at(EOF) {
 			break
 		}
+		if p.unclosedBody("interface") {
+			d.S = p.spanFrom(start)
+			return d
+		}
 		mstart := p.tok().Span
 		if kw := p.tok(); kw.Kind == FUN || kw.Kind == IDENT && kw.Text == "fun" && p.peek(1).Kind == IDENT {
 			// Go's interfaces list methods without a keyword.
@@ -1674,6 +1888,8 @@ func (p *parser) parseInterfaceDecl(start source.Span, doc string) *InterfaceDec
 			m.Params = p.parseParams()
 			if p.accept(COLON) {
 				m.Result = p.parseResultType()
+			} else if res, throws, ok := p.goResult(m.Name); ok {
+				m.Result, m.Throws = res, throws
 			}
 			if p.at(THROWS) {
 				m.Throws = true
@@ -2461,26 +2677,21 @@ func (p *parser) goCountingFor(s *ForStmt, closer Kind) (string, bool) {
 
 // countingRewrite decides how a Go counting loop recognized by
 // goCountingFor is rewritten: the loop variable's name (_ when the body
-// does not use it), and whether the rewrite is exact. It is not when the
-// body mentions a name the bound uses: for i := 0; i < len(xs); i++ reads
-// len(xs) on every iteration, a Lyth range once. The body starts at the
+// does not use it), and whether the rewrite is exact. Go reads the bound on
+// every iteration and a Lyth range once, so it is exact only when the bound
+// cannot change while the loop runs (stableBound). The body starts at the
 // next '{'.
 func (p *parser) countingRewrite(s *ForStmt, rng string) (string, bool) {
 	r, ok := s.Iter.(*RangeExpr)
 	if !ok {
 		return s.Names[0].Name, false
 	}
-	bound := map[string]bool{}
-	Walk(r.Hi, func(n Node) {
-		if id, ok := n.(*Ident); ok {
-			bound[id.Name] = true
-		}
-	})
 	i := p.pos
 	for i < len(p.toks) && p.toks[i].Kind != LBRACE {
 		i++
 	}
-	exact, used := true, false
+	exact := p.stableBound(r.Hi, i)
+	used := false
 	depth := 0
 	for ; i < len(p.toks); i++ {
 		t := p.toks[i]
@@ -2490,9 +2701,6 @@ func (p *parser) countingRewrite(s *ForStmt, rng string) (string, bool) {
 		case RBRACE:
 			depth--
 		case IDENT:
-			if bound[t.Text] {
-				exact = false
-			}
 			if t.Text == s.Names[0].Name {
 				used = true
 			}
@@ -2506,6 +2714,133 @@ func (p *parser) countingRewrite(s *ForStmt, rng string) (string, bool) {
 		name = "_"
 	}
 	return name, exact
+}
+
+// stableBound reports whether hi, the bound of a counting loop whose body
+// starts at token body, cannot change while the loop runs: it is built from
+// constants, parameters of the enclosing function (read-only in Lyth), and
+// locals the function declares once and never assigns again or takes the
+// address of, possibly through len or cap. A call, a field, or a variable
+// declared elsewhere may change through code the loop calls.
+func (p *parser) stableBound(hi Expr, body int) bool {
+	ok := true
+	var names []string
+	var visit func(e Expr)
+	visit = func(e Expr) {
+		switch x := e.(type) {
+		case *Ident:
+			names = append(names, x.Name)
+		case *BasicLit:
+		case *ParenExpr:
+			visit(x.X)
+		case *BinaryExpr:
+			visit(x.X)
+			visit(x.Y)
+		case *CallExpr:
+			if id, isID := x.Fun.(*Ident); isID && (id.Name == "len" || id.Name == "cap") && len(x.Args) == 1 && x.Trailing == nil {
+				visit(x.Args[0].Value)
+			} else {
+				ok = false
+			}
+		default:
+			ok = false
+		}
+	}
+	visit(hi)
+	if !ok {
+		return false
+	}
+	// The enclosing function: its header from func to the body's {.
+	fn := body
+	for fn >= 0 && !(p.toks[fn].Kind == FUN && p.file.Position(p.toks[fn].Span.Start).Col == 1) {
+		fn--
+	}
+	if fn < 0 {
+		return false
+	}
+	params := map[string]bool{}
+	open, depth := -1, 0
+	for i := fn + 1; i < len(p.toks) && open < 0; i++ {
+		switch t := p.toks[i]; t.Kind {
+		case LPAREN:
+			depth++
+		case RPAREN:
+			depth--
+		case LBRACE:
+			if depth == 0 {
+				open = i
+			}
+		case IDENT:
+			if depth == 1 && p.toks[i+1].Kind == COLON {
+				params[t.Text] = true
+			}
+		case EOF:
+			return false
+		}
+	}
+	if open < 0 {
+		return false
+	}
+	close := open
+	for depth = 0; close < len(p.toks); close++ {
+		if p.toks[close].Kind == LBRACE {
+			depth++
+		} else if p.toks[close].Kind == RBRACE {
+			depth--
+			if depth == 0 {
+				break
+			}
+		}
+	}
+	for _, name := range names {
+		if !params[name] && !p.declaredOnce(name, open, close) {
+			return false
+		}
+	}
+	return true
+}
+
+// declaredOnce reports whether the tokens from..to declare name exactly
+// once, with := or name: Type, and never assign it again or take its address.
+func (p *parser) declaredOnce(name string, from, to int) bool {
+	decls := 0
+	for i := from; i < to; i++ {
+		t := p.toks[i]
+		if t.Kind != IDENT || t.Text != name || i > 0 && p.toks[i-1].Kind == DOT {
+			continue
+		}
+		if i > 0 && p.toks[i-1].Kind == AND {
+			return false // &name
+		}
+		// The end of a list of names this one may be in: a, name := f().
+		j := i + 1
+		for j+1 < to && p.toks[j].Kind == COMMA && p.toks[j+1].Kind == IDENT {
+			j += 2
+		}
+		switch p.toks[j].Kind {
+		case DEFINE:
+			decls++
+		case IN:
+			k := i // for a, name in xs: a read-only loop variable
+			for k >= 2 && p.toks[k-1].Kind == COMMA && p.toks[k-2].Kind == IDENT {
+				k -= 2
+			}
+			if k > 0 && p.toks[k-1].Kind == FOR {
+				decls++
+			}
+		case COLON:
+			if i == from+1 || p.toks[i-1].Kind == NEWLINE || p.toks[i-1].Kind == SEMI || p.toks[i-1].Kind == LBRACE {
+				decls++ // name: T at the start of a statement
+			}
+		case ASSIGN, ADD_ASSIGN, SUB_ASSIGN, MUL_ASSIGN, QUO_ASSIGN, REM_ASSIGN,
+			AND_ASSIGN, OR_ASSIGN, XOR_ASSIGN, SHL_ASSIGN, SHR_ASSIGN, INC, DEC:
+			return false
+		}
+		if p.toks[i+1].Kind == COMMA && p.toks[j].Kind == ASSIGN {
+			return false // name, b = ...
+		}
+	}
+	return decls == 1
 }
 
 func isIdentNamed(e Expr, name string) bool {

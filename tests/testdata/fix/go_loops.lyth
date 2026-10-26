@@ -1,0 +1,26 @@
+// Go's counting loops whose bound cannot change become ranges.
+func sum(xs: []int): int {
+    t := 0
+    for i := 0; i < len(xs); i++ {
+        t += xs[i]
+    }
+    return t
+}
+
+func count(): int {
+    n := 3
+    c := 0
+    for i := 0; i <= n; i++ {
+        c += i
+    }
+    for k in 0..<3 {
+        for x := 0; x < k; x++ {
+            c += 10
+        }
+    }
+    return c
+}
+
+func main() {
+    println(sum([1, 2, 3]), count())
+}

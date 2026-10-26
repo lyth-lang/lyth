@@ -1,0 +1,38 @@
+// Go's declaration spellings that lyth fix rewrites.
+struct Box[T: any] {
+    V: T
+}
+
+struct Pair[K: comparable, V: any] {
+    Key: K
+    Val: V
+}
+
+interface Shape {
+    Area(): float64
+    Scale(f: float64): Shape
+}
+
+interface Store[T: any] {
+    Get(id: string): T
+}
+
+struct Point {
+    X: int
+    Y: int
+    Name: string
+}
+
+func Get(): int {
+    return 1
+}
+
+func Add(a: int, b: int, scale: float64): int {
+    return (a + b) * int(scale)
+}
+
+func Hello(): string { return "hi" }
+
+func main() {
+    println(Get(), Add(1, 2, 2.0), Hello())
+}
