@@ -143,6 +143,9 @@ func Compile(cfg *Config, target Target) (*Session, error) {
 	if err := s.checkToolchain(); err != nil {
 		return s, err
 	}
+	if !s.checkGoDirective() {
+		return s, nil
+	}
 	t = s.phase("setup", t)
 	s.parse()
 	if s.StdRoot != "" {
@@ -290,6 +293,39 @@ func (s *Session) addPkg(p *pkgDir) *Package {
 	s.Packages = append(s.Packages, pkg)
 	s.byPath[p.ImportPath] = pkg
 	return pkg
+}
+
+// checkGoDirective reports a go.mod whose go directive is older than the
+// Go Lyth's semantics and generated code need: Go 1.22 gives each loop
+// iteration its own variable, as Lyth's loops promise, and the generated
+// code uses Go 1.26's new(expr).
+func (s *Session) checkGoDirective() bool {
+	if s.Mod.Synthetic {
+		return true
+	}
+	path := filepath.Join(s.Mod.Root, "go.mod")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return true
+	}
+	v, line := GoDirective(string(data))
+	if goMinor(v) >= MinGoMinor {
+		return true
+	}
+	f := source.NewFile(path, displayName(path, s.cfg.WorkDir), data)
+	span := source.Span{File: f}
+	if line > 0 {
+		start := f.LineStart(line)
+		span = source.Span{File: f, Start: start, End: start + len(strings.TrimRight(f.LineText(line), "\r"))}
+	}
+	what := "go.mod has no go directive, which means go 1.16"
+	if v != "" {
+		what = "go.mod declares go " + v
+	}
+	s.Sink.Errorf(diag.EToolchain, span, "%s; Lyth needs go 1.%d or newer", what, MinGoMinor).
+		WithNote("Lyth's loops give each iteration its own variable, as Go does since go 1.22, and the generated code uses Go 1.%d's new(expr)", MinGoMinor).
+		WithHint("update the module: go mod edit -go=1.%d", MinGoMinor)
+	return false
 }
 
 func (s *Session) checkToolchain() error {

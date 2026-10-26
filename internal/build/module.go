@@ -60,6 +60,43 @@ func canonical(path string) (string, error) {
 	return abs, nil
 }
 
+// GoDirective returns the version of go.mod's go directive ("1.26"), and
+// its line (1-based), or "" when there is none.
+func GoDirective(gomod string) (string, int) {
+	for i, line := range strings.Split(gomod, "\n") {
+		f := strings.Fields(line)
+		if len(f) >= 2 && f[0] == "go" {
+			return f[1], i + 1
+		}
+	}
+	return "", 0
+}
+
+// GoVersionBelow reports whether the go directive version v is older than
+// Go 1.minor (an empty v, no directive, is Go 1.16).
+func GoVersionBelow(v string, minor int) bool { return goMinor(v) < minor }
+
+// goMinor returns the minor version of a Go version (1.26.1 -> 26), or -1.
+func goMinor(v string) int {
+	rest, ok := strings.CutPrefix(v, "1.")
+	if !ok {
+		return -1
+	}
+	n := 0
+	digits := 0
+	for _, r := range rest {
+		if r < '0' || r > '9' {
+			break
+		}
+		n = n*10 + int(r-'0')
+		digits++
+	}
+	if digits == 0 {
+		return -1
+	}
+	return n
+}
+
 func modulePath(gomod string) string {
 	sc := bufio.NewScanner(strings.NewReader(gomod))
 	for sc.Scan() {

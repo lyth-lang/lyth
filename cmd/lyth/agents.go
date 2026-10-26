@@ -100,10 +100,6 @@ const helloLyth = `func main() {
 }
 `
 
-// cmdInit makes the current directory a Lyth module, or prepares an
-// existing Go module: go.mod (through go mod init), main.lyth when there is
-// no Lyth code yet, AGENTS.md and CLAUDE.md for coding agents, and .lyth/ in
-// .gitignore. Files that exist are kept.
 // modulePathFor turns a directory name into a module path go mod init
 // accepts: "my proj 2" becomes "my-proj-2".
 func modulePathFor(dir string) string {
@@ -123,6 +119,11 @@ func modulePathFor(dir string) string {
 	return path
 }
 
+// cmdInit makes the current directory a Lyth module, or prepares an
+// existing Go module: go.mod (through go mod init), main.lyth when there is
+// no Lyth code yet, AGENTS.md and CLAUDE.md for coding agents, and .lyth/ in
+// .gitignore. Files that exist are kept; an existing go.mod's go directive
+// is raised to the version Lyth needs.
 func cmdInit(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 1 || len(args) == 1 && strings.HasPrefix(args[0], "-") {
 		fmt.Fprintln(stderr, "usage: lyth init [module-path]")
@@ -145,6 +146,9 @@ func cmdInit(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "lyth: %s is already in module %s (%s)\n", wd, mod.Path, filepath.Join(root, "go.mod"))
 			return 1
 		}
+		if !raiseGoVersion(root, stdout, stderr, true) {
+			return 1
+		}
 	default:
 		path := modulePathFor(filepath.Base(wd))
 		if len(args) == 1 {
@@ -154,6 +158,10 @@ func cmdInit(args []string, stdout, stderr io.Writer) int {
 		cmd.Dir, cmd.Stdout, cmd.Stderr = wd, stdout, stderr
 		if err := cmd.Run(); err != nil {
 			fmt.Fprintf(stderr, "lyth: go mod init %s failed; give a module path: lyth init example.com/app\n", path)
+			return 1
+		}
+		// Go 1.26's go mod init writes the previous release (go 1.25.0).
+		if !raiseGoVersion(wd, stdout, stderr, false) {
 			return 1
 		}
 	}
@@ -180,6 +188,31 @@ func cmdInit(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// raiseGoVersion raises the go directive of root's go.mod to the version
+// Lyth needs (build.MinGoMinor), saying so when announce is set. It reports
+// false after an error.
+func raiseGoVersion(root string, stdout, stderr io.Writer, announce bool) bool {
+	data, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		return true
+	}
+	v, _ := build.GoDirective(string(data))
+	if !build.GoVersionBelow(v, build.MinGoMinor) {
+		return true
+	}
+	want := fmt.Sprintf("1.%d", build.MinGoMinor)
+	cmd := exec.Command("go", "mod", "edit", "-go="+want)
+	cmd.Dir, cmd.Stderr = root, stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(stderr, "lyth: go.mod declares go %s; Lyth needs go %s: go mod edit -go=%s failed\n", v, want, want)
+		return false
+	}
+	if announce {
+		fmt.Fprintf(stdout, "lyth: raised the go version in go.mod from %s to %s, which Lyth needs\n", v, want)
+	}
+	return true
 }
 
 // hasLyth reports whether the module at root has a .lyth file.

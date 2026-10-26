@@ -1575,3 +1575,22 @@ func main() {}
 		t.Error("the directive after a failing one ran")
 	}
 }
+
+// TestGoDirectiveTooOld reports a module whose go directive predates what
+// Lyth needs (per-iteration loop variables, new(expr)) at the go line,
+// instead of silently sharing loop variables or failing in go build.
+func TestGoDirectiveTooOld(t *testing.T) {
+	root := writeModule(t, "old", map[string]string{"main.lyth": "func main() {}\n"})
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module old\n\ngo 1.21\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := build.Compile(&build.Config{WorkDir: root, Stdout: os.Stdout, Stderr: os.Stderr}, build.Target{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ds := s.Sink.All()
+	if len(ds) != 1 || ds[0].Code != diag.EToolchain || !strings.Contains(ds[0].Message, "go.mod declares go 1.21; Lyth needs go 1.26") ||
+		ds[0].Span.StartPos().Line != 3 {
+		t.Fatalf("diagnostics:\n%s", render(ds))
+	}
+}
