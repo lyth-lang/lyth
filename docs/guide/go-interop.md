@@ -311,9 +311,10 @@ go get github.com/jackc/pgx/v5
 lyth mod tidy
 ```
 
-Use `lyth mod tidy` instead of `go mod tidy`: the `go` command cannot see
-imports inside `.lyth` files and would remove modules only Lyth code uses. The
-[REST API example](../../examples/todoapi/README.md) uses `pgx` this way.
+Use `lyth mod tidy` instead of `go mod tidy`, and `lyth mod vendor` instead
+of `go mod vendor`: the `go` command cannot see imports inside `.lyth` files,
+and would remove modules only Lyth code uses, or leave them out of `vendor/`.
+The [REST API example](../../examples/todoapi/README.md) uses `pgx` this way.
 
 A module in a `go.work` workspace builds against the workspace's other
 modules, as Go code does. Lyth compiles the Lyth packages of the module it

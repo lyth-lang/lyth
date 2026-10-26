@@ -1708,3 +1708,44 @@ func main() {
 		t.Fatalf("got %q, %v", out, err)
 	}
 }
+
+// TestModVendor checks lyth mod vendor: the packages .lyth files import are
+// vendored, which go mod vendor alone cannot see, and the module then builds
+// from vendor/.
+func TestModVendor(t *testing.T) {
+	ws := t.TempDir()
+	if real, err := filepath.EvalSymlinks(ws); err == nil {
+		ws = real
+	}
+	files := map[string]string{
+		"dep/go.mod":     "module example.com/dep\n\ngo 1.26\n",
+		"dep/words/w.go": "package words\n\nfunc Hello() string { return \"hello\" }\n",
+		"app/go.mod":     "module example.com/app\n\ngo 1.26\n\nrequire example.com/dep v0.0.0\n\nreplace example.com/dep => ../dep\n",
+		"app/main.lyth":  "import \"example.com/dep/words\"\n\nfunc main() {\n    println(words.Hello())\n}\n",
+	}
+	for name, content := range files {
+		p := filepath.Join(ws, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root := filepath.Join(ws, "app")
+	if _, err := build.ModVendor(&build.Config{WorkDir: root, Stdout: os.Stdout, Stderr: os.Stderr}, nil); err != nil {
+		t.Fatal(err)
+	}
+	list, err := os.ReadFile(filepath.Join(root, "vendor", "modules.txt"))
+	if err != nil || !strings.Contains(string(list), "example.com/dep/words") {
+		t.Fatalf("vendor/modules.txt: %v\n%s", err, list)
+	}
+	s := compileModule(t, root, false)
+	bin := filepath.Join(t.TempDir(), "app")
+	if ok, err := s.GoBuild(bin, []string{"example.com/app"}, nil); err != nil || !ok {
+		t.Fatalf("build from vendor/ failed: %v\n%s", err, render(s.Sink.All()))
+	}
+	if out, err := exec.Command(bin).CombinedOutput(); err != nil || strings.TrimSpace(string(out)) != "hello" {
+		t.Fatalf("got %q, %v", out, err)
+	}
+}

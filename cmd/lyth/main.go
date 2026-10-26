@@ -69,6 +69,7 @@ Usage:
   lyth fmt [-l] [-d] [paths]                              format .lyth files in Lyth's canonical layout
   lyth generate [-run re] [-n] [-v] [-x] [packages]       run the //go:generate lines of .lyth files
   lyth mod tidy                                           go mod tidy that sees imports in .lyth files
+  lyth mod vendor                                         go mod vendor that sees imports in .lyth files
   lyth init [module-path]                                 create a Lyth module, with AGENTS.md for coding agents
   lyth guide [topics | topic]                             the guide to writing this version of Lyth
   lyth lsp [-no-vet]                                      run the language server on stdin and stdout
@@ -166,9 +167,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "lsp":
 		return cmdLSP(rest, os.Stdin, stdout, stderr)
 	case "mod":
-		if len(rest) == 1 && rest[0] == "tidy" {
+		if len(rest) == 1 && (rest[0] == "tidy" || rest[0] == "vendor") {
 			var c common
-			sink, err := build.ModTidy(c.config(stdout, stderr), nil)
+			run := build.ModTidy
+			if rest[0] == "vendor" {
+				run = build.ModVendor
+			}
+			sink, err := run(c.config(stdout, stderr), nil)
 			if sink != nil && len(sink.All()) > 0 {
 				diag.Render(stderr, sink.All(), diag.RenderOptions{Color: isTerminal(stderr)})
 			}
@@ -178,7 +183,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			}
 			return 0
 		}
-		fmt.Fprintln(stderr, "usage: lyth mod tidy")
+		fmt.Fprintln(stderr, "usage: lyth mod tidy | lyth mod vendor")
 		return 2
 	}
 	if strings.HasSuffix(cmd, ".lyth") {

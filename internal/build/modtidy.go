@@ -21,6 +21,16 @@ import (
 // missing dependencies get added), so the overlay contains one stub per Lyth
 // file with a blank import for each of the file's imports.
 func ModTidy(cfg *Config, env []string) (*diag.Sink, error) {
+	return modCommand(cfg, env, "tidy")
+}
+
+// ModVendor runs `go mod vendor` with the same stubs as ModTidy, so that the
+// packages .lyth files import are vendored too.
+func ModVendor(cfg *Config, env []string) (*diag.Sink, error) {
+	return modCommand(cfg, env, "vendor")
+}
+
+func modCommand(cfg *Config, env []string, sub string) (*diag.Sink, error) {
 	sink := &diag.Sink{}
 	wd, err := canonical(cfg.WorkDir)
 	if err != nil {
@@ -87,12 +97,12 @@ func ModTidy(cfg *Config, env []string) (*diag.Sink, error) {
 	if err := os.WriteFile(overlay, data, 0o644); err != nil {
 		return sink, err
 	}
-	cmd := exec.Command("go", "mod", "tidy", "-overlay="+overlay)
+	cmd := exec.Command("go", "mod", sub, "-overlay="+overlay)
 	cmd.Dir = mod.Root
 	cmd.Env = append(append(os.Environ(), "PWD="+mod.Root), env...)
 	cmd.Stdout, cmd.Stderr = cfg.Stdout, cfg.Stderr
 	if err := cmd.Run(); err != nil {
-		return sink, fmt.Errorf("go mod tidy failed: %w", err)
+		return sink, fmt.Errorf("go mod %s failed: %w", sub, err)
 	}
 	return sink, nil
 }
