@@ -51,6 +51,9 @@ type parser struct {
 	// placed holds the start offsets of the //go: directives that precede
 	// a declaration taking them; the others are reported as misplaced.
 	placed map[int]bool
+	// reserved holds val and var once a declaration has used them as names
+	// (val := m[k], a Go habit): later uses read as names, without more errors.
+	reserved map[string]bool
 }
 
 // afterBrackets returns the token after the ']' matching the '[' at index i.
@@ -449,6 +452,11 @@ func (p *parser) parseConst(start source.Span) *ConstDecl {
 	d.Name = p.parseIdent("in const declaration")
 	if p.accept(COLON) {
 		d.Type = p.parseType()
+	} else if !p.at(ASSIGN) && startsSliceElem(p.tok().Kind) && p.file.Position(p.tok().Span.Start).Line == p.file.Position(d.Name.S.End).Line {
+		// Go's const userKey ctxKey = 1: Lyth puts a colon before the type.
+		d.Type = p.parseType()
+		p.errorf(diag.EUnsupportedSyntax, d.Type.Span(), "a const's type follows a colon in Lyth").
+			WithFix(d.Name.S.EndSpan(), ":", "write const %s: %s = ...", d.Name.Name, d.Type.Span().Text())
 	}
 	p.expect(ASSIGN, "in const declaration")
 	p.skipNL()
@@ -820,6 +828,23 @@ func (p *parser) parseTypeParams() []*TypeParam {
 			p.errorf(diag.EUnsupportedSyntax, c.Span(), "a type parameter's constraint follows ':'").
 				WithFix(tp.Name.S.EndSpan().Join(c.Span().At()), ": ", "write %s: %s", tp.Name.Name, c.Span().Text())
 			tp.Constraint = c
+		}
+		if tp.Constraint != nil && p.at(OR) {
+			// Go's [T int | float64]: a type-set constraint, not supported
+			// yet. One error, and the list is read on after the union.
+			from := tp.Constraint.Span()
+			for depth := 0; !p.at(EOF) && !(depth == 0 && (p.at(COMMA) || p.at(RBRACK) || p.at(GTR))); p.next() {
+				switch p.tok().Kind {
+				case LBRACK, LPAREN:
+					depth++
+				case RBRACK, RPAREN:
+					depth--
+				}
+			}
+			union := source.Span{File: from.File, Start: from.Start, End: p.toks[p.pos-1].Span.End}
+			p.errorf(diag.EUnsupportedSyntax, union, "type-set constraints (%s) are not supported yet", union.Text()).
+				WithHint("use a constraint of a Go package, such as cmp.Ordered, or an interface whose methods the code calls")
+			tp.Constraint = &BadType{S: union}
 		}
 		tp.S = p.spanFrom(start)
 		tps = append(tps, tp)
@@ -1196,7 +1221,7 @@ func (p *parser) parseFunDecl(start source.Span, doc string) *FunDecl {
 		if strings.ContainsAny(typ, " ()") {
 			// func (h: (W, R) -> unit).name(): a function type needs a name.
 			p.errorf(diag.EUnsupportedSyntax, open.Join(end), "an extension is declared func Type.Name(...); the receiver is self").
-				WithHint("name the function type first: typealias Handler = %s, then func Handler.Name(...)", typ)
+				WithHint("name the function type first: type Handler = %s, then func Handler.Name(...)", typ)
 		} else if d2 := p.errorf(diag.EUnsupportedSyntax, open.Join(end), "methods are declared func %s.Name(...); the receiver is self", typ); p.at(IDENT) && typ != "" {
 			d2.WithEdit(open.Join(p.tok().Span.At()), typ+".", "write func %s.%s(...) and use self in the body", typ, p.tok().Text)
 		}
@@ -1838,6 +1863,7 @@ func (p *parser) parseEnumDecl(start source.Span, doc string) *EnumDecl {
 			p.syncStmt()
 			continue
 		}
+		d.Docs = append(d.Docs, p.docFor(p.tok().Span.Start))
 		d.Entries = append(d.Entries, p.parseIdent(""))
 		var value Expr
 		if p.accept(ASSIGN) {
@@ -2229,6 +2255,25 @@ func (p *parser) parseStmt() Stmt {
 		p.errorf(diag.EUnsupportedSyntax, label.S, "labels can only be placed on for and while loops")
 		t = p.tok()
 	}
+	if t.Kind == IDENT && t.Text == "try" && p.peek(1).Kind == LBRACE {
+		// Kotlin's try { ... } catch (e: Exception) { ... } finally { ... }:
+		// one error, with the statement skipped rather than read as a call
+		// of try with a trailing lambda.
+		p.errorf(diag.EUnsupportedSyntax, t.Span, "Lyth has no try: handle each call that can fail with catch").
+			WithHint("n := strconv.Atoi(s) catch (e) { ... }, or propagate the error with strconv.Atoi(s)?")
+		p.next()
+		p.skipBraces()
+		for p.at(CATCH) || p.tok().Kind == IDENT && p.tok().Text == "finally" {
+			p.next()
+			if p.at(LPAREN) {
+				p.skipBraces() // (e: Exception)
+			}
+			if p.at(LBRACE) {
+				p.skipBraces()
+			}
+		}
+		return &BadStmt{S: p.spanFrom(t.Span)}
+	}
 	if t.Kind == IN {
 		// Nothing precedes a statement, so in cannot be the membership
 		// operator here: it is a name (ADR 0044), as in in := 3.
@@ -2246,6 +2291,17 @@ func (p *parser) parseStmt() Stmt {
 	}
 	switch t.Kind {
 	case VAL, VAR:
+		if k := p.peek(1).Kind; k == DEFINE || k == ASSIGN || k == COMMA {
+			// val := m[k]: the keyword is meant as a name.
+			p.errorf(diag.EUnsupportedSyntax, t.Span, "%s is reserved in Lyth: choose another name, such as value", t.Text).
+				WithNote("Lyth keeps %s recognized to migrate code of older versions, which declared variables with it", t.Text)
+			if p.reserved == nil {
+				p.reserved = map[string]bool{}
+			}
+			p.reserved[t.Text] = true
+			p.toks[p.pos].Kind = IDENT
+			return p.parseStmt()
+		}
 		return p.parseOldLocalDecl()
 	case CONST:
 		return p.parseConst(t.Span)
@@ -3129,8 +3185,16 @@ func (p *parser) parseUnary() Expr {
 			p.next()
 			p.next()
 			x := p.parseUnary()
+			recv := x.Span().Text() + ".receive()"
+			if _, simple := x.(*Ident); !simple {
+				if _, sel := x.(*SelectorExpr); !sel {
+					if _, call := x.(*CallExpr); !call {
+						recv = "(" + x.Span().Text() + ").receive()"
+					}
+				}
+			}
 			p.errorf(diag.EUnsupportedSyntax, t.Span.Join(minus.Span), "Lyth receives from a channel with a method").
-				WithHint("write %s.receive()", x.Span().Text())
+				WithFix(t.Span.Join(x.Span()), recv, "write %s", recv)
 			return &BadExpr{S: t.Span.Join(x.Span())}
 		}
 	case NOT_NOT:
@@ -3527,6 +3591,10 @@ func (p *parser) parsePrimary() Expr {
 	if t.Kind == ILLEGAL {
 		p.next() // the lexer reported it
 		return &BadExpr{S: t.Span}
+	}
+	if (t.Kind == VAL || t.Kind == VAR) && p.reserved[t.Text] {
+		p.toks[p.pos].Kind = IDENT // reported where it was declared
+		return p.parsePrimary()
 	}
 	d := p.errorf(diag.EUnexpectedToken, t.Span, "expected expression, found %s", describe(t))
 	if t.Kind == DEFINE {

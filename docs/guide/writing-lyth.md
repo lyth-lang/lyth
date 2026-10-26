@@ -236,7 +236,8 @@ func main() throws {
 - `if` and `when` are expressions: `label := if n > 0 { "pos" } else { "neg" }`.
   `when code { 200, 204 -> a; in 500..599 -> b; else -> c }`, and `is T ->` branches over
   interfaces. A `when` over an enum or a
-  sealed interface must cover every case or have `else`.
+  sealed interface must cover every case or have `else`; over a nullable one, every case and
+  `null` (`null -> ...`) make it exhaustive too.
 - `x in xs`, `k in m`, `"@" in email`, `code in 200..299`, and `!in`.
 - Labels: `outer@ for x in xs { ... break@outer }`. `break` inside `when` exits the loop.
 - Lambdas: `{ a, b -> a + b }`, `{ it * 2 }`, and a trailing lambda `xs.Map { it * 2 }`. A loop
@@ -339,7 +340,15 @@ The table lists older Lyth forms and the Go and Kotlin habits the compiler recog
 | `strings.split(s, ",")` | `strings.Split(s, ",")` | yes |
 | `for i := 0; i < n; i++` | `for i in 0..<n` | yes when `n` cannot change in the loop (a range reads it once), else a hint |
 | `go func() { ... }()` | `go { ... }` | yes |
-| `outer: for ...`, `break outer` | `outer@ for ...`, `break@outer` | yes |
+| `ch <- v`, `<-ch` | `ch.send(v)`, `ch.receive()` | yes |
+| `const userKey ctxKey = 1` | `const userKey: ctxKey = 1` | yes |
+| `catch (e: error) { ... }` | `catch (e) { ... }`: it handles every error | yes |
+| `catch (e: PathErr)` where only `*PathErr` has the `Error` method | `catch (e: *PathErr)` | yes |
+| `val`, `var` as names (`val := m[k]`) | another name, such as `value` | no: a name to choose |
+| `try { ... } catch (e: Exception) { ... }` | `f() catch (e) { ... }` on each call that can fail | no |
+| `outer: for ...`, `break outer` (also with the label on its own line) | `outer@ for ...`, `break@outer` | yes |
+| `var ( A = 1; B = 2 )` (a Go var group) | `var A = 1`, `var B = 2`, one per line | yes |
+| `func(string) bool` (a Go function type) | `(string) -> bool` | yes; `func(...) error` is a hint: `(...) -> unit throws`, or `-> error?` |
 | `import "net/http" as h` | `import h "net/http"` | yes |
 | `typealias Handler = (Ctx) -> unit` | `type Handler = (Ctx) -> unit` | yes |
 | `type User struct { ... }`, `type Box[T any] struct` | `struct User { ... }`, `struct Box[T: any]` | yes (the name, keyword, and type parameters) |

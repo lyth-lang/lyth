@@ -78,6 +78,38 @@ func (c *Checker) inferCall(e *syntax.CallExpr, sig *types.Signature, args []*sy
 		}
 		unify(pt, x.typ, bind)
 	}
+	// A generic interface parameter (Getter[T]) learns its type arguments
+	// from the argument's methods, as Go's inference does since Go 1.21.
+	for i, a := range args {
+		if x, pt := ops[i], paramFor(i, a); x != nil && x.mode != ModeInvalid && pt != nil {
+			c.unifyMethods(pt, x.typ, bind)
+		}
+	}
+	// A lambda's annotated parameter types bind type parameters, as a Go
+	// func literal's do: compose({ s: string -> len(s) }, { n: int -> n * 2 }).
+	for i, a := range args {
+		lam, ok := syntax.Unparen(a.Value).(*syntax.LambdaExpr)
+		pt := paramFor(i, a)
+		if !ok || pt == nil {
+			continue
+		}
+		ps, ok := types.Base(pt).(*types.Signature)
+		if !ok || len(ps.Params) != len(lam.Params) {
+			continue
+		}
+		for j, lp := range lam.Params {
+			if lp.Type == nil {
+				continue
+			}
+			save := c.sink
+			c.sink = &diag.Sink{} // checking the lambda reports a bad annotation
+			t := c.resolveType(lp.Type)
+			c.sink = save
+			if t != types.Invalid {
+				unify(ps.Params[j], t, bind)
+			}
+		}
+	}
 	// Core types first, as Go does: slices.Contains(floats, 2) gets E from
 	// []float64 before 2 could make it int.
 	c.inferCore(sig, bind)
@@ -191,6 +223,38 @@ func (c *Checker) inferCall(e *syntax.CallExpr, sig *types.Signature, args []*sy
 		targsLyth[i] = bind[tp.Go]
 	}
 	return res, targsLyth
+}
+
+// unifyMethods unifies the methods of p, a generic interface type with type
+// parameters in its arguments, with the methods of the same names of a, a
+// value that is not an interface: Getter[T] and a type with Get(): int give
+// T = int.
+func (c *Checker) unifyMethods(p, a types.Type, bind bindings) {
+	n, ok := types.Base(p).(*types.Named)
+	if !ok || len(n.Args) == 0 || !hasTypeParams(n) || !types.IsInterface(n) || a == types.Null || types.IsInterface(a) {
+		return
+	}
+	var names []string
+	switch {
+	case n.Decl != nil:
+		for _, m := range n.Decl.Methods {
+			names = append(names, m.Name)
+		}
+	case n.Go != nil:
+		if it, ok := n.Go.Underlying().(*gotypes.Interface); ok {
+			for i := 0; i < it.NumMethods(); i++ {
+				names = append(names, it.Method(i).Name())
+			}
+		}
+	}
+	for _, name := range names {
+		id := &syntax.Ident{Name: name}
+		im, am := c.quietMember(n, name, id), c.quietMember(a, name, id)
+		if im == nil || am == nil || im.kind != SelMethod || am.kind != SelMethod {
+			continue
+		}
+		unify(im.typ, am.typ, bind)
+	}
 }
 
 func signatureParamsOnly(t types.Type) types.Type {

@@ -23,7 +23,7 @@ func fallible(): int throws {
     g()?
     defer {
         go {
-            closer()? // ERROR E0301 "? can only be used in a lambda whose type is fallible"
+            closer()? // ERROR E0301 "? cannot be used in a go block"
         }
     }
     return 1

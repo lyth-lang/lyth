@@ -363,6 +363,11 @@ func missingMethodReason(src, dst types.Type, m *gotypes.Func, wrong bool) strin
 			}
 		}
 	}
+	if !m.Exported() && m.Pkg() != nil {
+		if n, ok := types.Base(src).(*types.Named); !ok || n.Decl == nil || n.Decl.PkgPath != m.Pkg().Path() {
+			return src.String() + " does not implement " + dst.String() + ": its method " + m.Name() + " is unexported, so only types of package " + m.Pkg().Name() + " can implement it"
+		}
+	}
 	return src.String() + " does not implement " + dst.String() + " (missing method " + m.Name() + ")"
 }
 
@@ -603,7 +608,7 @@ func (c *Checker) mutablePath(e syntax.Expr, verb string, code diag.Code) bool {
 		case *types.Pointer:
 			return true
 		case *types.Array:
-			return c.mutablePathFor(x.X, "element", verb)
+			return c.mutablePathFor(x.X, "["+x.Index.Span().Text()+"]", verb)
 		}
 		if types.IsString(t) {
 			c.errorf(code, x.S, "cannot %s a byte of a string: strings are immutable", verb)
@@ -652,7 +657,7 @@ func (c *Checker) mutablePathFor(container syntax.Expr, member, verb string) boo
 			case ReceiverVar:
 				return c.receiverMutable(v, x.S, member, verb)
 			}
-			d := c.errorf(diag.EMutateVal, x.S, "cannot %s %s.%s: %s is an immutable %s", verb, x.Name, member, x.Name, what)
+			d := c.errorf(diag.EMutateVal, x.S, "cannot %s %s: %s is an immutable %s", verb, memberPath(x.Name, member), x.Name, what)
 			if v.Kind == LocalVar || v.Kind == GlobalVar {
 				d.WithRelated(v.Span, "%s declared here", v.name)
 			}
@@ -672,6 +677,14 @@ func (c *Checker) mutablePathFor(container syntax.Expr, member, verb string) boo
 		}
 	}
 	return c.mutablePath(container, verb, diag.EMutateVal)
+}
+
+// memberPath writes a field or element of name: u.Name, a[0].
+func memberPath(name, member string) string {
+	if strings.HasPrefix(member, "[") {
+		return name + member
+	}
+	return name + "." + member
 }
 
 func (c *Checker) receiverMutable(recv *VarSym, span source.Span, member, verb string) bool {

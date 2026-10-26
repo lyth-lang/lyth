@@ -4,6 +4,7 @@ import (
 	"go/token"
 	gotypes "go/types"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -82,6 +83,14 @@ func (c *Checker) selector(e *syntax.SelectorExpr, want types.Type) *operand {
 	sel := &Selection{}
 	t := x.typ
 	if r, ok := t.(*types.Result); ok && e.Safe {
+		if len(r.Success) == 0 {
+			// check()?.Error() on a func check(): error?: the call fails or
+			// gives nothing, so there is nothing to select on.
+			c.errorf(diag.EMultiValue, e.S, "%s returns only an error, which ?. would propagate: x?.%s means (x?).%s, and nothing is left to select .%s on",
+				callName(e.X), name, name, name).
+				WithHint("to use the error as a value, store it first: e := %s, then e?.%s%s", e.X.Span().Short(), name, map[bool]string{true: "()"}[c.callee == syntax.Expr(e)])
+			return invalid(e)
+		}
 		// x?.name on a fallible x means (x?).name.
 		c.requireFallible(e.OpSpan, "?")
 		sel.TryFirst = true
@@ -136,7 +145,10 @@ func (c *Checker) selector(e *syntax.SelectorExpr, want types.Type) *operand {
 		if reported {
 			return invalid(e)
 		}
+		save := c.recvText
+		c.recvText = e.X.Span().Short()
 		m = c.lookupMember(types.Base(t), name, e.Sel) // reports the error
+		c.recvText = save
 	}
 	if m == nil {
 		return invalid(e)
@@ -167,12 +179,36 @@ func (c *Checker) quietMember(t types.Type, name string, id *syntax.Ident) *memb
 	return m
 }
 
+// extLambda writes the lambda that calls the extension of e with its own
+// parameters: { "x".Dup() }, { "x".Rep(it) }, { n, sep -> "x".Rep(n, sep) }.
+func extLambda(e *syntax.SelectorExpr, ext *ExtCall) string {
+	call := e.X.Span().Short() + "." + e.Sel.Name
+	var names []string
+	if ext != nil && ext.Func != nil && ext.Func.Sig != nil {
+		names = ext.Func.Sig.ParamNames
+		if len(names) != len(ext.Func.Sig.Params) {
+			names = nil
+			for i := range ext.Func.Sig.Params {
+				names = append(names, "p"+strconv.Itoa(i+1))
+			}
+		}
+	}
+	switch len(names) {
+	case 0:
+		return "{ " + call + "() }"
+	case 1:
+		return "{ " + call + "(it) }"
+	}
+	args := strings.Join(names, ", ")
+	return "{ " + args + " -> " + call + "(" + args + ") }"
+}
+
 // extensionSelector records a selector naming an extension function. An
 // extension has no value of its own: it must be called.
 func (c *Checker) extensionSelector(e *syntax.SelectorExpr, sel *Selection, ext *ExtCall) *operand {
 	if c.callee != syntax.Expr(e) {
 		c.errorf(diag.EInvalidUse, e.Sel.S, "extension function %s must be called; it is not a method value", e.Sel.Name).
-			WithHint("wrap it in a lambda: { %s.%s(it) }", e.X.Span().Short(), e.Sel.Name)
+			WithHint("wrap it in a lambda: %s", extLambda(e, ext))
 		return invalid(e)
 	}
 	if sel.Safe || sel.TryFirst {
@@ -195,6 +231,12 @@ func (c *Checker) lookupMember(t types.Type, name string, id *syntax.Ident) *mem
 		if pp, ok := base.(*types.Pointer); ok {
 			c.errorf(diag.EInvalidOp, id.S, "cannot select .%s on a pointer to a pointer (%s)", name, pp)
 			return nil
+		}
+	}
+	if u, ok := definedUnder(base).(*types.Pointer); ok {
+		// type UserPtr *User: up.Name is (*up).Name, for fields only, as in Go.
+		if m := c.quietMember(u, name, id); m != nil && m.kind == SelField {
+			return m
 		}
 	}
 	if types.IsErrorType(base) && name == "wrap" {
@@ -435,8 +477,14 @@ func (c *Checker) promotedMember(d *types.TypeDecl, name string, id *syntax.Iden
 		}
 	}
 	if through != nil {
+		recv := c.recvText
+		if recv == "" {
+			recv = "x"
+		}
+		local := strings.ToLower(through.Name[:1]) + through.Name[1:]
 		c.errorf(diag.ENullable, id.S, "%s is promoted through the nullable field %s", name, through.Name).
-			WithHint("check the field first: if x.%s != null { x.%s.%s }", through.Name, through.Name, name)
+			WithNote("smart casts do not apply to fields, so a check of %s.%s does not make it non-null", recv, through.Name).
+			WithHint("copy the field into a local, which a check smart-casts: %s := %s.%s; if %s != null { %s.%s(...) }", local, recv, through.Name, local, local, name)
 		return nil, true
 	}
 	owner, _ := cur.(*types.Named)

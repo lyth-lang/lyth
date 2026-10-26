@@ -578,6 +578,9 @@ func (c *Checker) assignStmt(s *syntax.AssignStmt) {
 		return
 	}
 	t := types.Base(target)
+	if c.unconstrained(t) {
+		return
+	}
 	switch op {
 	case syntax.ADD:
 		if !types.TermsAll(t, func(t types.Type) bool { return types.IsNumeric(t) || types.IsString(t) }) {
@@ -986,10 +989,16 @@ func (c *Checker) when(e *syntax.WhenExpr, want types.Type, needValue bool) (*op
 	// Only a non-null subject can be covered; entries resolve unqualified
 	// either way.
 	var enum, sealed, entries *types.TypeDecl
+	// A nullable subject is covered by every entry or member and null; it
+	// need not be, as a statement (ADR 0035's rule is for non-null ones).
+	var nEnum, nSealed *types.TypeDecl
+	nullCovered := false
 	if subject != nil && subject.mode != ModeInvalid {
 		entries = types.EnumOf(subject.typ)
 		if !types.MayBeNull(subject.typ) {
 			enum, sealed = entries, types.SealedOf(subject.typ)
+		} else {
+			nEnum, nSealed = entries, types.SealedOf(subject.typ)
 		}
 	}
 	covered := map[string]bool{}
@@ -1042,7 +1051,7 @@ func (c *Checker) when(e *syntax.WhenExpr, want types.Type, needValue bool) (*op
 						} else {
 							x = c.value(cond.X, subject.typ)
 						}
-						if entry := c.info.Entries[cond.X]; entry != nil && enum != nil && entry.Decl == enum {
+						if entry := c.info.Entries[cond.X]; entry != nil && (enum != nil && entry.Decl == enum || nEnum != nil && entry.Decl == nEnum) {
 							covered[entry.Name] = true
 						}
 						switch {
@@ -1051,6 +1060,7 @@ func (c *Checker) when(e *syntax.WhenExpr, want types.Type, needValue bool) (*op
 							dup("entry "+entry.Decl.Name+"."+entry.Name, cond.X.Span().Short(), cond.S)
 						case x.mode != ModeInvalid && x.typ == types.Null:
 							dup("null", "null", cond.S)
+							nullCovered = true
 							if v := whenSubjectVar(c, e); v != nil && len(br.Conds) == 1 && types.MayBeNull(v.Type) {
 								// when s { null -> ...; else -> s is not null }
 								nf = narrowing{v: types.Base(v.Type)}
@@ -1087,7 +1097,7 @@ func (c *Checker) when(e *syntax.WhenExpr, want types.Type, needValue bool) (*op
 					if cond.Kind == syntax.WhenIs {
 						dup("is "+t.String(), "is "+t.String(), cond.S)
 					}
-					if cond.Kind == syntax.WhenIs && sealed != nil {
+					if cond.Kind == syntax.WhenIs && (sealed != nil || nSealed != nil) {
 						covered[memberKey(t)] = true
 					}
 					if cond.Kind == syntax.WhenIs && len(br.Conds) == 1 {
@@ -1128,6 +1138,22 @@ func (c *Checker) when(e *syntax.WhenExpr, want types.Type, needValue bool) (*op
 		results = append(results, r)
 		blocks = append(blocks, br.Body)
 	}
+	if (nEnum != nil || nSealed != nil) && nullCovered && !hasElse {
+		all := true
+		if nEnum != nil {
+			for _, en := range nEnum.Entries {
+				all = all && covered[en.Name]
+			}
+		} else {
+			for _, m := range nSealed.Members {
+				all = all && covered[memberKey(m)]
+			}
+		}
+		if all {
+			c.info.Exhaustive[e] = subject.typ
+			hasElse = true // null and every entry or member have a branch
+		}
+	}
 	if (enum != nil || sealed != nil) && !hasElse {
 		var missing []string
 		if enum != nil {
@@ -1139,7 +1165,7 @@ func (c *Checker) when(e *syntax.WhenExpr, want types.Type, needValue bool) (*op
 		} else {
 			for _, m := range sealed.Members {
 				if !covered[memberKey(m)] {
-					missing = append(missing, memberName(m, subject.typ))
+					missing = append(missing, c.qualified(memberName(m, subject.typ), m))
 				}
 			}
 		}
@@ -1151,7 +1177,7 @@ func (c *Checker) when(e *syntax.WhenExpr, want types.Type, needValue bool) (*op
 			if enum != nil {
 				what = ""
 			}
-			c.errorf(diag.EInvalidUse, e.S.At().Join(e.Subject.Span()), "when over %s must cover every %s: missing %s", subject.typ, map[bool]string{true: "entry", false: "member type"}[enum != nil], strings.Join(missing, ", ")).
+			c.errorf(diag.EInvalidUse, e.S.At().Join(e.Subject.Span()), "when over %s must cover every %s: missing %s", c.qualified(subject.typ.String(), subject.typ), map[bool]string{true: "entry", false: "member type"}[enum != nil], strings.Join(missing, ", ")).
 				WithHint("add %s%s -> ... or an else branch", what, missing[0])
 			hasElse = true // reported; avoid a second error for a value use
 		}
@@ -1214,7 +1240,7 @@ func (c *Checker) forStmt(s *syntax.ForStmt) {
 			case *types.Array:
 				info.Kind, keyT, valT = ForArray, types.Int, t.Elem
 			case *types.Pointer:
-				if a, ok := types.Base(t.Elem).(*types.Array); ok {
+				if a, ok := collectionOf(t.Elem).(*types.Array); ok {
 					info.Kind, keyT, valT = ForArray, types.Int, a.Elem
 				} else {
 					c.errorf(diag.EInvalidOp, s.Iter.Span(), "cannot iterate over a value of type %s", x.typ)
@@ -1605,6 +1631,24 @@ func memberKey(t types.Type) string {
 
 // memberName spells a sealed member for a when over subject: a generic
 // member takes the subject's type arguments (Leaf[int] for a Node[int]).
+// qualified prefixes text, the name of the Lyth type t, with its package
+// when that is another package, as code here must write it: *shapes.Tri.
+func (c *Checker) qualified(text string, t types.Type) string {
+	b := types.Base(t)
+	if p, ok := b.(*types.Pointer); ok {
+		b = types.Base(p.Elem)
+	}
+	n, ok := b.(*types.Named)
+	if !ok || n.Decl == nil || n.Decl.PkgPath == "" || n.Decl.PkgPath == c.pkg.Path || n.Decl.PkgName == "" {
+		return text
+	}
+	star := ""
+	if strings.HasPrefix(text, "*") {
+		star, text = "*", text[1:]
+	}
+	return star + n.Decl.PkgName + "." + text
+}
+
 func memberName(m, subject types.Type) string {
 	b, ptr := types.Base(m), ""
 	if p, ok := b.(*types.Pointer); ok {

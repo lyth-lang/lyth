@@ -41,7 +41,7 @@ func (c *Checker) lambda(e *syntax.LambdaExpr, want types.Type) *operand {
 		}
 	}
 	scope := newScope(c.scope, FuncScope)
-	fn := &funcCtx{isLambda: true, name: "lambda", declSpan: e.S}
+	fn := &funcCtx{isLambda: true, name: "lambda", declSpan: e.S, noExpected: want == nil && !unknown}
 	if c.fn != nil {
 		fn.recv, fn.recvDecl = c.fn.recv, c.fn.recvDecl
 	}

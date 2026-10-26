@@ -414,7 +414,11 @@ Calling generic Go functions and using instantiated generic Go types
 (`slices.Contains(xs, x)`, `atomic.Pointer[Config]`). Instantiation and
 constraint satisfaction are delegated to `go/types` (`types.Instantiate` with
 validation). Type arguments are inferred from the arguments (and through a
-defined function type's underlying signature, as Go does), or given explicitly
+defined function type's underlying signature, as Go does): also from the
+annotated parameter types of a lambda argument (`compose({ s: string -> len(s) },
+...)`), and, for a parameter of a generic interface type, from the methods of
+the argument (`describe(g: Getter[T])` called with a type that has
+`Get(): int` gives `T = int`, Go's rule since Go 1.21). They may also be given explicitly
 and in full: `errors.AsType[*NotFound](err)` calls, and
 `pgx.RowToStructByName[User]` is a function value; both lower to `f[T]`. A
 result whose type is a bare type parameter bound to a nil-able type is a

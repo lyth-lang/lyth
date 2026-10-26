@@ -309,6 +309,8 @@ func (c *Checker) ident(e *syntax.Ident) *operand {
 			d.WithFix(e.S, t, "Lyth uses Go's type names: %s", t)
 		} else if h, ok := kotlinBuilders[e.Name]; ok {
 			d.WithHint("%s", h)
+		} else if e.Name == "complex" || e.Name == "real" || e.Name == "imag" {
+			d.WithNote("complex numbers (complex, real, imag, and literals like 2i) are not supported in Lyth yet")
 		} else if s := c.suggest(e.Name); s != "" {
 			d.WithHint("did you mean %s?", s)
 		}
@@ -582,6 +584,26 @@ func (c *Checker) addressOf(e *syntax.UnaryExpr) *operand {
 	return &operand{mode: ModeValue, typ: &types.Pointer{Elem: x.typ}}
 }
 
+// sendMinus returns the unary minus that a Go send ch <- v leaves right after
+// the < of e, on the leftmost operand of e's right side; nil otherwise.
+func sendMinus(e *syntax.BinaryExpr) *syntax.UnaryExpr {
+	if e.Op != syntax.LSS {
+		return nil
+	}
+	y := e.Y
+	for {
+		b, ok := y.(*syntax.BinaryExpr)
+		if !ok {
+			break
+		}
+		y = b.X
+	}
+	if u, ok := y.(*syntax.UnaryExpr); ok && u.Op == syntax.SUB && u.OpSpan.Start == e.OpSpan.End {
+		return u
+	}
+	return nil
+}
+
 func (c *Checker) binary(e *syntax.BinaryExpr, want types.Type) *operand {
 	switch e.Op {
 	case syntax.LAND, syntax.LOR:
@@ -589,12 +611,17 @@ func (c *Checker) binary(e *syntax.BinaryExpr, want types.Type) *operand {
 		return x
 	}
 	x := c.value(e.X, nil)
-	if u, ok := e.Y.(*syntax.UnaryExpr); ok && e.Op == syntax.LSS && u.Op == syntax.SUB && u.OpSpan.Start == e.OpSpan.End && x.mode != ModeInvalid {
-		// Go's send statement, ch <- v, reads as ch < -v.
+	if u := sendMinus(e); u != nil && x.mode != ModeInvalid {
+		// Go's send statement, ch <- v, reads as ch < -v (ch < -a + b for
+		// ch <- a + b: the minus is on the leftmost operand).
 		if _, isChan := types.Base(x.typ).(*types.Chan); isChan {
+			value := string(e.S.File.Content[u.X.Span().Start:e.Y.Span().End])
+			send := e.X.Span().Text() + ".send(" + value + ")"
 			c.errorf(diag.EUnsupportedSyntax, e.OpSpan.Join(u.OpSpan), "Lyth sends on a channel with a method").
-				WithHint("write %s.send(%s)", e.X.Span().Text(), u.X.Span().Text())
-			c.value(u.X, nil)
+				WithFix(e.S, send, "write %s", send)
+			if u == e.Y {
+				c.value(u.X, nil)
+			}
 			return invalid(e)
 		}
 	}
@@ -619,6 +646,9 @@ func (c *Checker) binary(e *syntax.BinaryExpr, want types.Type) *operand {
 		return invalid(e)
 	}
 	t := types.Base(x.typ)
+	if c.unconstrained(t) {
+		return invalid(e)
+	}
 	ordering := e.Op == syntax.LSS || e.Op == syntax.LEQ || e.Op == syntax.GTR || e.Op == syntax.GEQ
 	switch {
 	case ordering:
@@ -947,9 +977,13 @@ func (c *Checker) equality(e *syntax.BinaryExpr, x, y *operand) *operand {
 			}
 			if !types.IsNilable(other.typ) {
 				// Go cannot compare a string or a struct with nil.
-				c.errorf(diag.ETypeMismatch, e.S, "%s has non-nullable type %s, so it is never null",
-					other.expr.Span().Short(), other.typ).
-					WithHint("remove the comparison, or declare the type %s? if the value can be absent", other.typ)
+				d := c.errorf(diag.ETypeMismatch, e.S, "%s has non-nullable type %s, so it is never null",
+					other.expr.Span().Short(), other.typ)
+				if _, isTP := types.Base(other.typ).(*types.TypeParam); isTP {
+					d.WithHint("remove the comparison: values of a type parameter are never null in Lyth (%s? on a type parameter is not supported yet)", other.typ)
+				} else {
+					d.WithHint("remove the comparison, or declare the type %s? if the value can be absent", other.typ)
+				}
 				return invalid(e)
 			}
 			if !types.IsInterface(other.typ) {
@@ -1266,10 +1300,9 @@ func (c *Checker) warnErrorTypeTest(x *operand, t types.Type, span source.Span) 
 	if !ok || types.IsInterface(t) {
 		return
 	}
-	if _, isAny := types.Base(x.typ).(*types.AnyType); isAny {
-		return
-	}
-	if !gotypes.Implements(types.Lower(types.Base(x.typ)), goErr) {
+	// Only a value of type error can hold a wrapped error; a sealed or
+	// other interface that has an Error method is matched by its members.
+	if !types.IsErrorType(x.typ) {
 		return
 	}
 	lt := types.Lower(t)
@@ -1277,9 +1310,33 @@ func (c *Checker) warnErrorTypeTest(x *operand, t types.Type, span source.Span) 
 		return
 	}
 	value := x.expr.Span().Short()
+	name := bindingName(t, value)
 	c.warnf(diag.WErrorTypeTest, span, "a type test sees only the dynamic type of %s, so a wrapped %s does not match", value, t).
-		WithHint("to match through wrapping, handle the call with catch (e: %s) { ... }, or bind it: e, ok := errors.AsType[%s](%s)", t, t, value).
+		WithHint("to match through wrapping, handle the call with catch (%s: %s) { ... }, or bind it: %s, ok := errors.AsType[%s](%s)", name, t, name, t, value).
 		WithHint("to test the dynamic type on purpose, bind the error as any first: v: any = %s", value)
+}
+
+// bindingName names a variable for a value of type t in a hint, as Go code
+// does (nf for *NotFound), and never as taken, the name the hint already uses.
+func bindingName(t types.Type, taken string) string {
+	s := strings.TrimLeft(types.Base(t).String(), "*")
+	if i := strings.IndexByte(s, '['); i >= 0 {
+		s = s[:i] // Box[int] is b
+	}
+	if i := strings.LastIndexByte(s, '.'); i >= 0 {
+		s = s[i+1:] // fs.PathError is pe
+	}
+	var b strings.Builder
+	for _, r := range s {
+		if unicode.IsUpper(r) {
+			b.WriteRune(unicode.ToLower(r))
+		}
+	}
+	name := b.String()
+	if name == "" || name == taken || syntax.IsKeywordName(name) {
+		name = "target"
+	}
+	return name
 }
 
 // smartCast returns the variable e names when a smart cast made it
@@ -1362,7 +1419,16 @@ func (c *Checker) elvis(e *syntax.ElvisExpr, want types.Type) *operand {
 	if want != nil {
 		lwant = types.MakeNullable(want)
 	}
-	x := c.value(e.X, lwant)
+	x := c.expr(e.X, lwant)
+	if r, ok := x.typ.(*types.Result); ok && x.mode == ModeValue && len(r.Success) == 1 {
+		// xs[lo()?:hi()?] reads ?: as the elvis operator, which a call that
+		// can fail is never the left side of.
+		c.errorf(diag.EMultiValue, e.OpSpan, "?: is the elvis operator here, and %s can fail rather than be null", e.X.Span().Short()).
+			WithEdit(e.OpSpan, "? :", "to propagate its error with ? in a slice, write a space before the colon: %s? :", e.X.Span().Short())
+		c.value(e.Y, want)
+		return invalid(e)
+	}
+	x = c.singleValue(x)
 	if x.mode == ModeInvalid {
 		c.value(e.Y, want)
 		return invalid(e)
@@ -1771,7 +1837,7 @@ func (c *Checker) index(e *syntax.IndexExpr) *operand {
 		c.constBound(e.Index, c.indexValue(e.Index), t.Len, false)
 		return &operand{mode: ModeValue, typ: t.Elem}
 	case *types.Pointer:
-		if a, ok := types.Base(t.Elem).(*types.Array); ok {
+		if a, ok := collectionOf(t.Elem).(*types.Array); ok {
 			c.constBound(e.Index, c.indexValue(e.Index), a.Len, false)
 			return &operand{mode: ModeValue, typ: a.Elem}
 		}
@@ -1874,7 +1940,7 @@ func (c *Checker) sliceExpr(e *syntax.SliceExpr) *operand {
 		bounds(t.Len)
 		return &operand{mode: ModeValue, typ: &types.Slice{Elem: t.Elem}}
 	case *types.Pointer:
-		if a, ok := types.Base(t.Elem).(*types.Array); ok {
+		if a, ok := collectionOf(t.Elem).(*types.Array); ok {
 			// p[1:] slices the array p points to, as in Go.
 			bounds(a.Len)
 			return &operand{mode: ModeValue, typ: &types.Slice{Elem: a.Elem}}
@@ -1959,6 +2025,13 @@ func (c *Checker) requireFallible(span source.Span, what string) {
 		return
 	}
 	switch {
+	case fn.name == "go block":
+		c.errorf(code, span, "%s cannot be used in a go block: the goroutine has no caller to return an error to", what).
+			WithHint("handle the error inside the block with catch, or send it on a channel (an errgroup.Group returns it from Wait)")
+	case fn.isLambda && fn.noExpected:
+		c.errorf(code, span, "%s can only be used in a lambda whose type is fallible", what).
+			WithNote("this lambda has no declared type, so it cannot fail").
+			WithHint("declare the variable's function type with throws: f: () -> int throws = { ... }")
 	case fn.isLambda:
 		d := c.errorf(code, span, "%s can only be used in a lambda whose type is fallible", what)
 		if rs := fn.sig.Results; len(rs) > 0 && types.IsErrorType(rs[len(rs)-1]) {
@@ -1976,7 +2049,49 @@ func (c *Checker) requireFallible(span source.Span, what string) {
 		if fn.declSpan.IsValid() {
 			d.WithRelated(fn.declSpan, "%s is not declared throws", fn.name)
 		}
-		d.WithHint("add throws to the declaration of %s, or handle the error with catch", fn.name)
+		if ft := trailingThrows(fn.result); ft != nil {
+			// func run(): []() -> string throws: the throws is the element's.
+			inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(ft.S.Text()), "throws"))
+			whole := fn.result.Types[0].Span()
+			fixed := string(whole.File.Content[whole.Start:ft.S.Start]) + "(" + inner + ")"
+			d.WithNote("throws here belongs to the function type %s", strings.TrimSpace(ft.S.Text())).
+				WithEdit(source.Span{File: whole.File, Start: whole.Start, End: whole.End}, fixed+" throws", "to make %s throw, parenthesize the function type: %s(): %s throws", fn.name, fn.name, fixed)
+		} else {
+			d.WithHint("add throws to the declaration of %s, or handle the error with catch", fn.name)
+		}
+	}
+}
+
+// trailingThrows returns the function type declared throws that ends a
+// result type ([]() -> string throws), whose throws a reader may take for
+// the function's own; nil otherwise.
+func trailingThrows(r *syntax.ResultType) *syntax.FuncType {
+	if r == nil || len(r.Types) != 1 {
+		return nil
+	}
+	t := r.Types[0]
+	for {
+		switch x := t.(type) {
+		case *syntax.SliceType:
+			t = x.Elem
+		case *syntax.ArrayType:
+			t = x.Elem
+		case *syntax.PointerType:
+			t = x.Elem
+		case *syntax.NullableType:
+			t = x.Elem
+		case *syntax.ChanType:
+			t = x.Elem
+		case *syntax.MapType:
+			t = x.Value
+		case *syntax.FuncType:
+			if x.Throws && x.S != r.Types[0].Span() {
+				return x
+			}
+			return nil
+		default:
+			return nil
+		}
 	}
 }
 
@@ -2135,12 +2250,29 @@ func (c *Checker) catchType(e *syntax.CatchExpr) types.Type {
 		c.errorf(diag.EInvalidUse, e.Type.Span(), "catch types are non-null: write %s", types.Base(t))
 		return types.Invalid
 	}
+	if types.IsErrorType(t) && e.Binder != nil {
+		c.errorf(diag.EInvalidUse, e.Type.Span(), "catch (%s: error) handles every error: write catch (%s) { ... }", e.Binder.Name, e.Binder.Name).
+			WithFix(source.Span{File: e.Binder.S.File, Start: e.Binder.S.End, End: e.Type.Span().End}, "", "write catch (%s)", e.Binder.Name)
+		return types.Invalid
+	}
 	if ok, _, _ := c.assignable(t, types.Error); !ok {
-		c.errorf(diag.ETypeMismatch, e.Type.Span(), "%s is not an error type: it does not implement error", t).
-			WithHint("catch a type with an Error(): string method, such as *NotFound")
+		d := c.errorf(diag.ETypeMismatch, e.Type.Span(), "%s is not an error type: it does not implement error", t)
+		if ok, _, _ := c.assignable(&types.Pointer{Elem: t}, types.Error); ok {
+			// struct PtrErr with func *PtrErr.Error(): the pointer is the error.
+			d.WithFix(e.Type.Span(), "*"+e.Type.Span().Text(), "*%s implements error (its Error method has a pointer receiver): write catch (%s: *%s)", t, binderName(e), t)
+		} else {
+			d.WithHint("catch a type with an Error(): string method, such as *NotFound")
+		}
 		return types.Invalid
 	}
 	return t
+}
+
+func binderName(e *syntax.CatchExpr) string {
+	if e.Binder != nil {
+		return e.Binder.Name
+	}
+	return "e"
 }
 
 // fallibleOperand checks the operand of ? or catch. A typed catch operand
@@ -2251,6 +2383,12 @@ func (c *Checker) returnValues(e *syntax.JumpExpr) {
 				return
 			}
 			x = c.singleValue(x)
+			if fn.sig.Throws && c.isErrorValue(x) && !c.assignableTo(x.typ, results[0]) {
+				// return errors.New("...") in an int throws function.
+				d := c.errorf(diag.EReturnMismatch, e.Values[0].Span(), "%s returns %s; a throws function fails with throw, not by returning the error", fn.name, resultString(fn.sig))
+				c.throwHint(d, e, e.Values[0])
+				return
+			}
 			c.assign(x, results[0], "return value")
 			return
 		}
@@ -2307,17 +2445,64 @@ func (c *Checker) returnValues(e *syntax.JumpExpr) {
 		}
 	}
 	if len(e.Values) != len(results) {
-		c.errorf(diag.EReturnMismatch, e.S, "%s returns %s, but %s given", fn.name, plural(len(results), "value"), plural(len(e.Values), "value")).
-			WithNote("%s returns %s", fn.name, resultString(fn.sig))
+		var last *operand
 		for _, v := range e.Values {
-			c.value(v, nil)
+			last = c.value(v, nil)
+		}
+		d := c.errorf(diag.EReturnMismatch, e.S, "%s returns %s, but %s given", fn.name, plural(len(results), "value"), plural(len(e.Values), "value")).
+			WithNote("%s returns %s", fn.name, resultString(fn.sig))
+		if fn.sig.Throws && len(e.Values) == len(results)+1 && c.isErrorValue(last) {
+			// Go's return 0, err in a throws function.
+			c.throwHint(d, e, e.Values[len(e.Values)-1])
 		}
 		return
 	}
 	for i, v := range e.Values {
 		x := c.value(v, results[i])
+		if fn.sig.Throws && len(e.Values) == 1 && c.isErrorValue(x) && !c.assignableTo(x.typ, results[i]) {
+			// return errors.New("...") in an int throws function.
+			d := c.errorf(diag.EReturnMismatch, v.Span(), "%s returns %s; a throws function fails with throw, not by returning the error", fn.name, resultString(fn.sig))
+			c.throwHint(d, e, v)
+			continue
+		}
 		c.assign(x, results[i], "return value")
 	}
+}
+
+func (c *Checker) assignableTo(src, dst types.Type) bool {
+	ok, _, _ := c.assignable(src, dst)
+	return ok
+}
+
+// unconstrained reports a type parameter whose constraint was reported as
+// invalid: what its values allow is unknown, so nothing more is reported.
+func (c *Checker) unconstrained(t types.Type) bool {
+	tp, ok := t.(*types.TypeParam)
+	return ok && c.badConstraint[tp.Go]
+}
+
+// isErrorValue reports whether x is a value of an error type (error, or a
+// type that implements it), checked without diagnostics.
+func (c *Checker) isErrorValue(x *operand) bool {
+	if x == nil || x.mode != ModeValue || x.typ == nil || x.typ == types.Null {
+		return false
+	}
+	if types.IsErrorType(x.typ) {
+		return true
+	}
+	ok, _, _ := c.assignable(x.typ, types.Error)
+	return ok && !types.IsInterface(x.typ) && types.IsStruct(types.Base(x.typ)) || ok && isPointerToStruct(x.typ)
+}
+
+func isPointerToStruct(t types.Type) bool {
+	p, ok := types.Base(t).(*types.Pointer)
+	return ok && types.IsStruct(p.Elem)
+}
+
+// throwHint offers the edit that fails a throws function with err instead of
+// returning it: throw err.
+func (c *Checker) throwHint(d *diag.Diagnostic, e *syntax.JumpExpr, err syntax.Expr) {
+	d.WithEdit(e.S, "throw "+err.Span().Text(), "in a throws function, fail with throw: throw %s", err.Span().Short())
 }
 
 // ---------------------------------------------------------------------------

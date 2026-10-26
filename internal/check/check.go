@@ -33,6 +33,10 @@ type Config struct {
 // Checker holds the state of checking one package.
 type Checker struct {
 	gens int // generations handed out, for smart casts of reassigned locals (flow.go)
+	// badConstraint holds the type parameters whose constraint was
+	// reported as invalid, whose operations go unreported.
+	badConstraint map[*gotypes.TypeParam]bool
+	recvText      string // the receiver of the selector being looked up, for hints
 	// widen is the if or when whose value is a catch handler's value: a
 	// null branch makes it T? instead of failing the expected T, as the
 	// handler's own null would.
@@ -98,6 +102,8 @@ type funcCtx struct {
 	isMain     bool
 	name       string
 	declSpan   source.Span
+	result     *syntax.ResultType // the declared result, for hints; nil for lambdas
+	noExpected bool               // a lambda with no expected type (f := { ... })
 	locals     []*VarSym
 	throwsSpan source.Span
 	noJumps    bool // defer/go blocks
@@ -120,11 +126,12 @@ type funcCtx struct {
 // Check type-checks the files of one Lyth package.
 func Check(conf *Config, pkgPath string, files []*syntax.File) *Package {
 	c := &Checker{
-		conf:      conf,
-		sink:      conf.Sink,
-		info:      newInfo(),
-		fileScope: map[*syntax.File]*Scope{},
-		goNames:   map[string]source.Span{},
+		conf:          conf,
+		sink:          conf.Sink,
+		info:          newInfo(),
+		fileScope:     map[*syntax.File]*Scope{},
+		goNames:       map[string]source.Span{},
+		badConstraint: map[*gotypes.TypeParam]bool{},
 	}
 	c.pkg = &Package{Path: pkgPath, Lyth: true, Files: files, Info: c.info, Imports: map[string]*Package{}, Extensions: map[string]*FuncSym{}}
 	c.pkg.Name = c.packageName(files)

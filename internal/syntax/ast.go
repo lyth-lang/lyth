@@ -165,7 +165,8 @@ type EnumDecl struct {
 	Name    *Ident
 	Backing TypeExpr // nil for a plain enum
 	Entries []*Ident
-	Values  []Expr // the value of each entry, nil where none is written
+	Values  []Expr   // the value of each entry, nil where none is written
+	Docs    []string // the doc comment of each entry, "" where none is written
 	S       source.Span
 }
 

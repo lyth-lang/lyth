@@ -1,0 +1,29 @@
+// Go and Kotlin habits the parser reports once, reading on after them.
+import "strconv"
+
+type ctxKey int
+
+const userKey ctxKey = 1 // ERROR E0008 "a const's type follows a colon in Lyth"
+
+func sum[T: int | float64](xs: []T): T { // ERROR E0008 "type-set constraints (int | float64) are not supported yet"
+    s: T
+    for x in xs {
+        s += x
+    }
+    return s
+}
+
+func lookup(m: map[string]int): int {
+    val := m["a"] // ERROR E0008 "val is reserved in Lyth"
+    return val + 1
+}
+
+func main() {
+    try { // ERROR E0008 "Lyth has no try"
+        n := strconv.Atoi("x")?
+        println(n)
+    } catch (e: Exception) {
+        println(e)
+    }
+    println(lookup(["a": 1]), sum([1, 2]), int(userKey))
+}

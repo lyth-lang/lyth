@@ -93,9 +93,13 @@ function only ever returns `zero, err` or `v, null`.
 
 `e?` requires:
 
-1. `e` is a fallible result (E0302 otherwise: "`?` needs a call that returns an
-   error; `x` has type `T`"). If `e` is nullable instead, the hint points to
-   `?:` and `!!`.
+1. `e` is a fallible result, or a value of type `error` or `error?` (E0302
+   otherwise: "`?` needs a call that returns an error; `x` has type `T`"). If
+   `e` is nullable instead, the hint points to `?:` and `!!`. `err?` on an
+   error value fails the function with `err` when it is not null, as Go's
+   `if err != nil { return ..., err }` does, and has no value itself:
+   `v, err := f(); err?` is `v := f()?` written in two steps, for code that
+   needs `err` first (to log it, say).
 2. The innermost enclosing function or lambda is fallible: `throws`, a raw tuple
    ending in `error`, or a lambda whose expected type is fallible (E0301
    otherwise, with a fix-it to add `throws`).
@@ -216,7 +220,10 @@ must exit (E0307). It lowers to `a, b, err := pair()` and
 
 **Typed handlers.** `catch (e: T)` handles only errors of type `T`, a
 non-null type that implements `error`: usually a pointer to an error struct
-(`*NotFound`) or a Go error type (`*pgconn.PgError`). It matches like
+(`*NotFound`) or a Go error type (`*pgconn.PgError`). `catch (e: error)`, which
+handles every error, is E0216 with the fix to `catch (e)`; a struct whose
+`Error` method has a pointer receiver is caught as its pointer type, which the
+fix for `catch (e: PathErr)` writes. It matches like
 `errors.AsType[T]`, so it sees through wrapping, and binds `e` as a `T`. Clauses
 are tried in order. Errors no clause handles are still errors, so the
 expression stays fallible and ends with `?` to propagate them or with an

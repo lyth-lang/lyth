@@ -1,0 +1,83 @@
+// Diagnostics that say what is wrong and how to write it.
+import "errors"
+import "strconv"
+
+sealed interface AppErr {
+    Error(): string
+}
+
+struct NotFound : AppErr {}
+
+func NotFound.Error(): string = "not found"
+
+struct PtrErr {
+    Path: string
+}
+
+func *PtrErr.Error(): string = "bad ${self.Path}"
+
+interface Container[T] {
+    Get(): T
+    Put(x: T)
+}
+
+struct IntBox : Container[string] { // ERROR E0212 "IntBox does not implement Container[string]"
+    v: int
+}
+
+func IntBox.Get(): int = self.v
+
+func IntBox.Put(x: string) {}
+
+func code(e: AppErr): int = when e {
+    is NotFound -> 404
+}
+
+func check(s: string): error? = if s == "" { errors.New("empty") } else { null }
+
+func parse(s: string): int throws {
+    n, err := strconv.Atoi(s)
+    if err != null {
+        return 0, err // ERROR E0207 "parse returns 1 value, but 2 values given"
+    }
+    if n < 0 {
+        return errors.New("negative") // ERROR E0207 "a throws function fails with throw"
+    }
+    return n
+}
+
+func run(): []() -> string throws {
+    n := strconv.Atoi("12")? // ERROR E0301 "? can only be used in a function that throws"
+    return [{ "n=${n}" }]
+}
+
+func lo(): int throws = 1
+
+func withDefault(a: int, b: int = strconv.Atoi("1")): int = a + b // ERROR E0216 "a default value cannot fail"
+
+func tuple(s: string): (int, error?) { // WARN W0003 "declare it int throws"
+    n, err := strconv.Atoi(s)
+    if err != null {
+        return 0, err
+    }
+    return n, null
+}
+
+func isNil[T](x: T): bool = x == null // ERROR E0201 "values of a type parameter are never null"
+
+func main() throws {
+    println(code(NotFound()))
+    println(check("")?.Error() ?: "ok") // ERROR E0210 "returns only an error"
+    a := strconv.Atoi("x") catch (e: error) { println(e); 1 } // ERROR E0216 "catch (e: error) handles every error"
+    b := strconv.Atoi("x") catch (e: PtrErr) { println(e); 2 } catch { 3 } // ERROR E0201 "write catch (e: *PtrErr)"
+    xs := [1, 2, 3, 4]
+    println(xs[lo()?:lo()?]) // ERROR E0210 "?: is the elvis operator here"
+    go {
+        strconv.Atoi("x")? // ERROR E0301 "? cannot be used in a go block"
+    }
+    f := { strconv.Atoi("z")? } // ERROR E0301 "? can only be used in a lambda whose type is fallible"
+    c: *(string?) = null // ERROR E0201 "expected *(string?)"
+    n := int("7") // ERROR E0214 "cannot convert"
+    tn, _ := tuple("1")
+    println(a, b, f, c, n, withDefault(1), isNil(1), tn)
+}

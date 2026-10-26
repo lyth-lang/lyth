@@ -611,7 +611,17 @@ func (c *Checker) typeCall(e *syntax.CallExpr, t types.Type, args []*syntax.Arg,
 	if !gotypes.ConvertibleTo(types.Lower(src), types.Lower(t)) {
 		d := c.errorf(diag.EConversion, e.S, "cannot convert %s (type %s) to %s", args[0].Value.Span().Short(), x.typ, t)
 		if types.IsString(src) && types.IsNumeric(t) {
-			d.WithHint("parse it: %s.toInt64()? or %s.toFloat64()?", args[0].Value.Span().Short(), args[0].Value.Span().Short())
+			s := args[0].Value.Span().Short()
+			switch b := types.BasicOf(t); {
+			case b != nil && b.Kind == types.IntKind:
+				d.WithHint("parse it: %s.toInt()?", s)
+			case b != nil && b.Kind == types.Int64Kind:
+				d.WithHint("parse it: %s.toInt64()?", s)
+			case b != nil && b.Kind == types.Float64Kind:
+				d.WithHint("parse it: %s.toFloat64()?", s)
+			default:
+				d.WithHint("parse it with strconv, then convert: %s(%s.toInt64()?)", t, s)
+			}
 		}
 		return invalid(e)
 	}
@@ -944,7 +954,7 @@ func (c *Checker) builtinCall(e *syntax.CallExpr, k BuiltinKind, args []*syntax.
 		case *types.Array:
 			return &operand{mode: ModeValue, typ: types.Int, val: constant.MakeInt64(t.Len)}
 		case *types.Pointer:
-			if a, ok := types.Base(t.Elem).(*types.Array); ok {
+			if a, ok := collectionOf(t.Elem).(*types.Array); ok {
 				return &operand{mode: ModeValue, typ: types.Int, val: constant.MakeInt64(a.Len)}
 			}
 		default:

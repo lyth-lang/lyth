@@ -1,0 +1,29 @@
+// Go and Kotlin habits with errors and channels that lyth fix respells.
+import "errors"
+
+const answerKey ctxKey = 42
+
+type ctxKey int
+
+struct PathErr {
+    Path: string
+}
+
+func *PathErr.Error(): string = "bad path ${self.Path}"
+
+func open(p: string): int throws {
+    if p == "" {
+        throw &PathErr(p)
+    }
+    return len(p)
+}
+
+func main() {
+    a := open("") catch (e: error) { println(e); -1 }
+    b := open("") catch (e: PathErr) { println(e.Path); -2 } catch { -3 }
+    results := make(chan int, 1)
+    go func() {
+        results <- a + b
+    }()
+    println(<-results, int(answerKey), errors.New("x"))
+}

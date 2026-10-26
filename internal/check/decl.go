@@ -984,9 +984,11 @@ func (c *Checker) typeParamScope(tps []*syntax.TypeParam, out []*types.TypeParam
 				c.inConstraint = save
 				switch {
 				case t == types.Invalid:
+					c.badConstraint[out[i].Go] = true // reported; operations on it are not
 				case !types.IsInterface(t) || types.IsNullable(t):
 					c.errorf(diag.ETypeMismatch, tp.Constraint.Span(), "the constraint of %s must be an interface, not %s", tp.Name.Name, t).
-						WithHint("constrain it with an interface such as Comparable, cmp.Ordered, or fmt.Stringer")
+						WithHint("constrain it with an interface such as comparable, cmp.Ordered, or fmt.Stringer")
+					c.badConstraint[out[i].Go] = true
 				default:
 					constraint = types.Base(t)
 				}
@@ -1045,23 +1047,39 @@ func (c *Checker) checkDefaults(fs *FuncSym) {
 			c.errorf(diag.EInvalidUse, p.Default.Span(), "a variadic parameter cannot have a default value; leaving it out passes no values")
 			continue
 		}
-		if bad := complexDefault(p.Default); bad != nil {
-			c.errorf(diag.EInvalidUse, bad.Span(), "a default value must be a simple expression, without ?, catch, if, when, ?:, ?., !!, or casts").
-				WithNote("defaults are evaluated at every call site that leaves the parameter out")
-			continue
-		}
-		if id := paramReference(p.Default, params); id != nil {
-			c.errorf(diag.EInvalidUse, id.S, "a default value cannot refer to parameter %s", id.Name).
-				WithNote("defaults are evaluated at the call site, before the call")
-			continue
-		}
 		saveScope, saveFn := c.scope, c.fn
 		c.scope = newScope(c.scopeFor(d.S), FuncScope)
 		c.fn = c.initCtx(d.S)
 		c.fn.name = "default value"
 		c.scope.fn = c.fn
-		x := c.value(p.Default, fs.Sig.Params[i])
-		c.assign(x, fs.Sig.Params[i], "default value of "+p.Name.Name)
+		bad := complexDefault(p.Default)
+		ref := paramReference(p.Default, params)
+		if bad != nil || ref != nil {
+			// Still resolve the names in it, so that its imports count as
+			// used; the error below is the one to read.
+			save := c.sink
+			c.sink = &diag.Sink{}
+			c.expr(p.Default, nil)
+			c.sink = save
+		}
+		switch {
+		case bad != nil:
+			c.errorf(diag.EInvalidUse, bad.Span(), "a default value must be a simple expression, without ?, catch, if, when, ?:, ?., !!, or casts").
+				WithNote("defaults are evaluated at every call site that leaves the parameter out")
+		case ref != nil:
+			c.errorf(diag.EInvalidUse, ref.S, "a default value cannot refer to parameter %s", ref.Name).
+				WithNote("defaults are evaluated at the call site, before the call")
+		default:
+			x := c.expr(p.Default, fs.Sig.Params[i])
+			if _, ok := x.typ.(*types.Result); ok && x.mode == ModeValue {
+				c.errorf(diag.EInvalidUse, p.Default.Span(), "a default value cannot fail: %s returns an error", p.Default.Span().Short()).
+					WithNote("defaults are evaluated at every call site that leaves the parameter out, where nothing handles the error").
+					WithHint("give %s a default that cannot fail, or compute the value in the body of %s", p.Name.Name, fs.name)
+			} else {
+				x = c.singleValue(x)
+				c.assign(x, fs.Sig.Params[i], "default value of "+p.Name.Name)
+			}
+		}
 		c.scope, c.fn = saveScope, saveFn
 		if fs.Pub {
 			syntax.Walk(p.Default, func(n syntax.Node) {
@@ -1759,7 +1777,7 @@ func (c *Checker) funcBody(sym *FuncSym) {
 		parent = sym.tscope
 	}
 	scope := newScope(parent, FuncScope)
-	fn := &funcCtx{sig: sym.Sig, name: sym.name, isMain: sym.IsMain, declSpan: d.Name.S, throwsSpan: d.ThrowsSpan}
+	fn := &funcCtx{sig: sym.Sig, name: sym.name, isMain: sym.IsMain, declSpan: d.Name.S, throwsSpan: d.ThrowsSpan, result: d.Result}
 	fn.fallible, fn.rawTuple = fallibleResults(sym.Sig)
 	scope.fn = fn
 	info := &FuncInfo{Sym: sym}
@@ -1805,6 +1823,9 @@ func (c *Checker) funcBody(sym *FuncSym) {
 		if len(sym.Sig.Results) > 0 && !terminates {
 			c.errorf(diag.EMissingReturn, d.Body.Rbrace, "missing return in %s", sym.name).
 				WithRelated(d.Result.S, "declared to return %s", resultString(sym.Sig))
+		}
+		if fn.rawTuple && terminates {
+			c.preferThrows(sym, d)
 		}
 	} else if d.ExprBody != nil {
 		if sym.infer == inferRunning {
@@ -1900,6 +1921,82 @@ func (c *Checker) exprBody(e syntax.Expr, sym *FuncSym) {
 
 // fallibleResults reports whether a function with sig may use `?`/throw,
 // and whether it does so through a raw tuple ending in Error.
+// preferThrows suggests throws (W0003) for a function declared with a result
+// tuple ending in an error whose every return is a failure (zero values and
+// an error) or a success (values and null): what throws writes, without the
+// tuple. A return that passes on both a value and an error (io.Reader's
+// n, err) keeps the tuple.
+func (c *Checker) preferThrows(sym *FuncSym, d *syntax.FunDecl) {
+	n := len(sym.Sig.Results)
+	ok, fails, succeeds := true, false, false
+	var visit func(nd syntax.Node)
+	visit = func(nd syntax.Node) {
+		switch x := nd.(type) {
+		case *syntax.LambdaExpr:
+			return // its returns are its own
+		case *syntax.GoStmt:
+			if x.Body != nil {
+				return
+			}
+		case *syntax.DeferStmt:
+			if x.Body != nil {
+				return
+			}
+		case *syntax.JumpExpr:
+			if x.Kind != syntax.JumpReturn {
+				break
+			}
+			switch {
+			case len(x.Values) != n:
+				ok = false // return f() passes a call's results on
+			case isNullLit(x.Values[n-1]):
+				succeeds = true
+			default:
+				for _, v := range x.Values[:n-1] {
+					if !zeroLiteral(v) {
+						ok = false
+					}
+				}
+				fails = true
+			}
+		}
+		syntax.Children(nd, visit)
+	}
+	visit(d.Body)
+	if !ok || !fails || !succeeds {
+		return
+	}
+	var success []string
+	for _, t := range sym.Sig.Results[:n-1] {
+		success = append(success, t.String())
+	}
+	result := strings.Join(success, ", ")
+	if n > 2 {
+		result = "(" + result + ")"
+	}
+	c.warnf(diag.WPreferThrows, d.Name.S, "%s returns either values or an error, never both: declare it %s throws", sym.name, result).
+		WithHint("write func %s(...): %s throws, then return the values alone and fail with throw err", sym.name, result)
+}
+
+// zeroLiteral reports whether e is written as a zero value: 0, "", false,
+// or null.
+func zeroLiteral(e syntax.Expr) bool {
+	switch x := syntax.Unparen(e).(type) {
+	case *syntax.NullLit:
+		return true
+	case *syntax.BoolLit:
+		return !x.Value
+	case *syntax.BasicLit:
+		switch x.Kind {
+		case syntax.INT, syntax.FLOAT:
+			return strings.Trim(x.Raw, "0._xXoObB") == ""
+		case syntax.STRING, syntax.RAWSTRING:
+			return x.Value == ""
+		}
+	}
+	return false
+}
+
 func fallibleResults(sig *types.Signature) (fallible, raw bool) {
 	if sig.Throws {
 		return true, false
@@ -2037,38 +2134,83 @@ func conformanceNote(decl *types.TypeDecl, iface types.Type) (note string, casca
 	if !ok || decl.Shadow == nil {
 		return "", false
 	}
+	// The interface's methods with its type arguments: Container[string]
+	// needs Get(): string.
+	type need struct {
+		name, goName string
+		sig          *types.Signature
+	}
+	var needs []need
+	if n, ok := types.Base(iface).(*types.Named); ok && n.Decl != nil {
+		bind := declBindings(n)
+		for _, im := range n.Decl.Methods {
+			sig := im.Sig
+			if bind != nil {
+				sig = substSig(sig, bind)
+			}
+			needs = append(needs, need{im.Name, im.GoName, sig})
+		}
+	} else {
+		for i := 0; i < gi.NumMethods(); i++ {
+			m := gi.Method(i)
+			// A Go method returning a trailing error is a throws method in Lyth.
+			want := types.LiftSignature(m.Signature())
+			if k := len(want.Results); k > 0 && types.IsErrorType(want.Results[k-1]) {
+				want.Results, want.Throws = want.Results[:k-1], true
+			}
+			needs = append(needs, need{m.Name(), m.Name(), want})
+		}
+	}
+	// An unexported method of another package's interface cannot be
+	// implemented here at all (language.md §3.4).
+	ipkg, iname := "", ""
+	if n, ok := types.Base(iface).(*types.Named); ok {
+		switch {
+		case n.Decl != nil:
+			ipkg, iname = n.Decl.PkgPath, n.Decl.PkgName
+		case n.Go != nil && n.Go.Obj().Pkg() != nil:
+			ipkg, iname = n.Go.Obj().Pkg().Path(), n.Go.Obj().Pkg().Name()
+		}
+	}
+	for _, nd := range needs {
+		if ipkg != "" && ipkg != decl.PkgPath && !Exported(nd.name) {
+			return fmt.Sprintf("%s is unexported: only types of package %s can implement %s", nd.name, iname, iface), false
+		}
+	}
+	// A missing method first: it is the clearer finding.
+	for _, nd := range needs {
+		found := false
+		for _, dm := range decl.Methods {
+			switch {
+			case dm.GoName == nd.goName:
+				found = true
+			case strings.EqualFold(dm.Name, nd.name):
+				return fmt.Sprintf("method %s must be named %s to implement %s", dm.Name, nd.name, iface), false
+			}
+		}
+		if !found {
+			return fmt.Sprintf("missing method %s: %s", nd.name, nd.sig), false
+		}
+	}
 	m, _ := gotypes.MissingMethod(gotypes.NewPointer(decl.Shadow), gi, true)
 	if m == nil {
 		return "", false
 	}
-	name := m.Name()
-	var want *types.Signature
-	if n, ok := types.Base(iface).(*types.Named); ok && n.Decl != nil {
-		for _, im := range n.Decl.Methods {
-			if im.GoName == m.Name() {
-				name, want = im.Name, im.Sig
+	for _, nd := range needs {
+		if nd.goName != m.Name() {
+			continue
+		}
+		for _, dm := range decl.Methods {
+			if dm.GoName != m.Name() {
+				continue
 			}
+			if slices.Contains(dm.Sig.Params, types.Invalid) || slices.Contains(dm.Sig.Results, types.Invalid) {
+				return "", true
+			}
+			return fmt.Sprintf("method %s has type %s, but %s needs %s", dm.Name, dm.Sig, iface, nd.sig), false
 		}
 	}
-	if want == nil {
-		// A Go method returning a trailing error is a throws method in Lyth.
-		want = types.LiftSignature(m.Signature())
-		if k := len(want.Results); k > 0 && types.IsErrorType(want.Results[k-1]) {
-			want.Results, want.Throws = want.Results[:k-1], true
-		}
-	}
-	for _, dm := range decl.Methods {
-		switch {
-		case !strings.EqualFold(dm.Name, name):
-		case slices.Contains(dm.Sig.Params, types.Invalid) || slices.Contains(dm.Sig.Results, types.Invalid):
-			return "", true
-		case dm.GoName == m.Name():
-			return fmt.Sprintf("method %s has type %s, but %s needs %s", dm.Name, dm.Sig, iface, want), false
-		default:
-			return fmt.Sprintf("method %s must be named %s to implement %s", dm.Name, name, iface), false
-		}
-	}
-	return fmt.Sprintf("missing method %s: %s", name, want), false
+	return "", false
 }
 
 // checkValueCycles reports structs that contain themselves by value,

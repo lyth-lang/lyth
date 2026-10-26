@@ -422,10 +422,15 @@ func (*Platform) isType()  {}
 func (*TypeParam) isType() {}
 func (*GoType) isType()    {}
 
-func (p *Pointer) String() string { return "*" + p.Elem.String() }
-func (s *Slice) String() string   { return "[]" + s.Elem.String() }
-func (a *Array) String() string   { return "[" + strconv.FormatInt(a.Len, 10) + "]" + a.Elem.String() }
-func (m *Map) String() string     { return "map[" + m.Key.String() + "]" + m.Elem.String() }
+func (p *Pointer) String() string {
+	if _, ok := p.Elem.(*Nullable); ok {
+		return "*(" + p.Elem.String() + ")" // *User? is a nullable *User
+	}
+	return "*" + p.Elem.String()
+}
+func (s *Slice) String() string { return "[]" + s.Elem.String() }
+func (a *Array) String() string { return "[" + strconv.FormatInt(a.Len, 10) + "]" + a.Elem.String() }
+func (m *Map) String() string   { return "map[" + m.Key.String() + "]" + m.Elem.String() }
 func (c *Chan) String() string {
 	switch c.Dir {
 	case SendOnly:
