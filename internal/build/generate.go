@@ -47,7 +47,7 @@ func Generate(cfg *Config, patterns []string, opts GenerateOptions) error {
 	if err != nil {
 		return err
 	}
-	pkgs, err := selectPackages(all, wd, patterns)
+	pkgs, err := selectPackages(all, wd, mod, patterns)
 	if err != nil {
 		return err
 	}
@@ -79,7 +79,7 @@ func plural(n int, word string) string {
 }
 
 // selectPackages picks the packages that patterns name (all when none).
-func selectPackages(all []*pkgDir, wd string, patterns []string) ([]*pkgDir, error) {
+func selectPackages(all []*pkgDir, wd string, mod *Module, patterns []string) ([]*pkgDir, error) {
 	if len(patterns) == 0 {
 		patterns = []string{"."}
 	}
@@ -87,13 +87,7 @@ func selectPackages(all []*pkgDir, wd string, patterns []string) ([]*pkgDir, err
 	seen := map[*pkgDir]bool{}
 	for _, pat := range patterns {
 		recursive := pat == "./..." || pat == "..." || strings.HasSuffix(pat, "/...")
-		dir := strings.TrimSuffix(strings.TrimSuffix(pat, "..."), "/")
-		if dir == "" || dir == "." {
-			dir = wd
-		} else if !filepath.IsAbs(dir) {
-			dir = filepath.Join(wd, dir)
-		}
-		dir = filepath.Clean(dir)
+		dir := patternDir(strings.TrimSuffix(strings.TrimSuffix(pat, "..."), "/"), wd, mod)
 		found := false
 		for _, p := range all {
 			if p.Dir == dir || recursive && strings.HasPrefix(p.Dir, dir+string(filepath.Separator)) {

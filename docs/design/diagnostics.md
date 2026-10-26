@@ -49,7 +49,9 @@ users.lyth:12:27: error[E0201]: type mismatch in argument id of repo.find
 - Columns are 1-based Unicode code points. Carets span the whole primary range.
   Tabs are expanded consistently in the snippet and the caret line.
 - `-diagnostics=json` emits one JSON object per diagnostic with byte offsets,
-  line/column pairs, and all fields above, for editors and tests.
+  line/column pairs, and all fields above, for editors and tests. A
+  diagnostic mapped from the Go toolchain also has a `cause` object with the
+  Go `message`, its `position`, and the `mapping` kind.
 - `-v` adds `Cause` blocks: the Go message, the generated file and position, and
   the mapping kind (exact, line-level, or unmapped).
 

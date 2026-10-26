@@ -278,13 +278,7 @@ func (s *Session) setup(t Target) error {
 	selected := map[string]bool{}
 	for _, pat := range t.Patterns {
 		recursive := pat == "./..." || pat == "..." || strings.HasSuffix(pat, "/...")
-		dir := strings.TrimSuffix(strings.TrimSuffix(pat, "..."), "/")
-		if dir == "" || dir == "." {
-			dir = wd
-		} else if !filepath.IsAbs(dir) {
-			dir = filepath.Join(wd, dir)
-		}
-		dir = filepath.Clean(dir)
+		dir := patternDir(strings.TrimSuffix(strings.TrimSuffix(pat, "..."), "/"), wd, mod)
 		found := false
 		for _, p := range all {
 			if p.Dir == dir || recursive && strings.HasPrefix(p.Dir, dir+string(filepath.Separator)) {
@@ -358,6 +352,23 @@ func (s *Session) editorFiles(mod *Module, dir string, p *pkgDir) *pkgDir {
 		}
 	}
 	return p
+}
+
+// patternDir returns the directory a package pattern (without /...) names:
+// a directory relative to wd or absolute, or, as for the go command, an
+// import path of the module (example.com/app/cmd/api).
+func patternDir(pat, wd string, mod *Module) string {
+	switch {
+	case pat == "" || pat == ".":
+		return wd
+	case filepath.IsAbs(pat):
+		return filepath.Clean(pat)
+	case pat == mod.Path:
+		return mod.Root
+	case strings.HasPrefix(pat, mod.Path+"/") && !strings.HasPrefix(pat, "."):
+		return filepath.Join(mod.Root, filepath.FromSlash(strings.TrimPrefix(pat, mod.Path+"/")))
+	}
+	return filepath.Join(wd, pat)
 }
 
 func (s *Session) makeAvailable(all []*pkgDir) {
@@ -549,14 +560,25 @@ func baseNames(paths []string) []string {
 // order sorts packages so that dependencies come first.
 func (s *Session) order() bool {
 	state := map[*Package]int{}
-	var sorted []*Package
+	var sorted, stack []*Package
 	ok := true
 	var visit func(p *Package, via *syntax.ImportDecl)
 	visit = func(p *Package, via *syntax.ImportDecl) {
 		switch state[p] {
 		case 1:
 			if via != nil {
-				s.Sink.Errorf(diag.EImport, via.PathSpan, "import cycle: %s imports itself through %q", p.Dir.ImportPath, via.Path)
+				// a imports b, b imports a: the packages on the cycle, from p.
+				i := slices.Index(stack, p)
+				var steps []string
+				for j := i; j >= 0 && j < len(stack); j++ {
+					next := p
+					if j+1 < len(stack) {
+						next = stack[j+1]
+					}
+					steps = append(steps, stack[j].Dir.ImportPath+" imports "+next.Dir.ImportPath)
+				}
+				s.Sink.Errorf(diag.EImport, via.PathSpan, "import cycle: %s", strings.Join(steps, ", ")).
+					WithHint("move what the packages share into a package of its own, or merge them")
 			}
 			ok = false
 			return
@@ -564,6 +586,8 @@ func (s *Session) order() bool {
 			return
 		}
 		state[p] = 1
+		stack = append(stack, p)
+		defer func() { stack = stack[:len(stack)-1] }()
 		for _, f := range p.Syntax {
 			for _, imp := range f.Imports {
 				if dep := s.byPath[imp.Path]; dep != nil {
@@ -657,7 +681,7 @@ func (s *Session) check() {
 			}
 			return &check.Package{Path: path, Name: gp.Types.Name(), Go: gp.Types}, ""
 		}
-		conf := &check.Config{Sink: s.Sink, Import: imp, DirName: filepath.Base(p.Dir.Dir)}
+		conf := &check.Config{Sink: s.Sink, Import: imp, DirName: filepath.Base(p.Dir.Dir), NoModule: s.Mod.Synthetic}
 		if s.Mod.Synthetic {
 			conf.DirName = "main"
 		}

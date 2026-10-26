@@ -60,9 +60,9 @@ type Edit struct {
 
 // GoCause records the original Go toolchain message behind a mapped diagnostic.
 type GoCause struct {
-	Message  string // original message from go/types or the go command
-	Position string // generated file:line:col, if known
-	Mapping  string // "exact", "line", or "approximate"
+	Message  string `json:"message"`            // original message from go/types or the go command
+	Position string `json:"position,omitempty"` // generated file:line:col, if known
+	Mapping  string `json:"mapping,omitempty"`  // "exact", "line", or "approximate"
 }
 
 // Diagnostic is one problem report.

@@ -25,6 +25,9 @@ type Config struct {
 	Sink    *diag.Sink
 	Import  Importer
 	DirName string // directory base name, for the implicit package name
+	// NoModule is set for a file built outside any module (lyth run
+	// file.lyth), which can import only the standard library.
+	NoModule bool
 }
 
 // Checker holds the state of checking one package.
@@ -488,7 +491,12 @@ func (c *Checker) resolveImports(f *syntax.File) {
 		pkg, errMsg := c.conf.Import(imp.Path)
 		if pkg == nil {
 			d := c.errorf(diag.EImport, imp.PathSpan, "cannot import %q", imp.Path)
-			if errMsg != "" {
+			switch {
+			case c.conf.NoModule && strings.Contains(imp.Path, "."):
+				// go get needs a go.mod; this file has none.
+				d.WithNote("a file outside a module can import only Go's standard library and lyth/coll")
+				d.WithHint("make the directory a module, then add the dependency: lyth init, then go get %s", imp.Path)
+			case errMsg != "":
 				d.WithNote("%s", errMsg)
 				if strings.Contains(errMsg, "no required module provides package") || strings.Contains(errMsg, "go get") {
 					d.WithHint("add the module with: go get %s", imp.Path)

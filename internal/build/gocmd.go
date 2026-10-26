@@ -190,6 +190,16 @@ func (s *Session) resolvePos(file string, line, col int) (source.Span, string) {
 		}
 		return source.Span{File: m.Src}, "approximate"
 	}
+	// A hand-written Go file (a _test.go beside .lyth files): its own
+	// position is exact.
+	if !strings.HasSuffix(abs, ".lyth.go") && !strings.HasSuffix(abs, ".lyth_test.go") {
+		for _, c := range candidates {
+			if data, err := os.ReadFile(c); err == nil {
+				f := source.NewFile(c, displayName(c, s.cfg.WorkDir), data)
+				return lineSpan(f, line, col), "exact"
+			}
+		}
+	}
 	return source.Span{}, "none"
 }
 
