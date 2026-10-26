@@ -318,8 +318,12 @@ func cmdBuild(args []string, stdout, stderr io.Writer) int {
 	var c common
 	c.register(fs)
 	out := fs.String("o", "", "output file or directory")
+	race := fs.Bool("race", false, "enable data race detection")
 	if err := fs.Parse(pos); err != nil {
 		return 2
+	}
+	if *race {
+		extra = append([]string{"-race"}, extra...)
 	}
 	c.parseDiag(fs)
 	s, ok := compile(&c, fs.Args(), stdout, stderr)
@@ -337,7 +341,11 @@ func cmdBuild(args []string, stdout, stderr io.Writer) int {
 	output := *out
 	if output != "" && !filepath.IsAbs(output) {
 		wd, _ := os.Getwd()
+		dir := strings.HasSuffix(output, "/") || strings.HasSuffix(output, string(filepath.Separator))
 		output = filepath.Join(wd, output)
+		if dir {
+			output += string(filepath.Separator) // -o bin/ writes bin/<name>, as go build does
+		}
 	}
 	if output == "" && len(s.MainPackages()) == 1 && len(pkgs) == 1 {
 		wd, _ := os.Getwd()
@@ -364,8 +372,17 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	var c common
 	c.register(fs)
+	race := fs.Bool("race", false, "enable data race detection")
+	ldflags := fs.String("ldflags", "", "flags for the Go linker (go build -ldflags)")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	var goFlags []string
+	if *race {
+		goFlags = append(goFlags, "-race")
+	}
+	if *ldflags != "" {
+		goFlags = append(goFlags, "-ldflags="+*ldflags)
 	}
 	c.parseDiag(fs)
 	rest := fs.Args()
@@ -410,7 +427,7 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 	if s.Mod.Synthetic {
 		pkg = "."
 	}
-	code, err := s.GoRun(pkg, progArgs, nil)
+	code, err := s.GoRun(pkg, progArgs, goFlags)
 	if report(s, &c, stderr) {
 		return 1
 	}
@@ -463,11 +480,19 @@ func cmdGen(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 	case *toStdout:
+		// lyth gen -stdout x.lyth prints x.lyth.go; a package, all its files.
+		only := ""
+		if t := target(fs.Args()); t.File != "" {
+			only = genName(filepath.Base(t.File))
+		}
 		for _, p := range s.Packages {
 			if p.Dir.Std {
 				continue // the standard library is the toolchain's, not the module's code
 			}
 			for _, g := range p.Generated {
+				if only != "" && g.Name != only {
+					continue
+				}
 				fmt.Fprintf(stdout, "// ---- %s/%s\n%s", p.Dir.Rel, g.Name, g.Code)
 			}
 		}
@@ -686,4 +711,13 @@ func cmdLSP(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// genName is the name of the Go file generated from a .lyth file: x.lyth.go,
+// and x.lyth_test.go for x_test.lyth.
+func genName(lyth string) string {
+	if base, ok := strings.CutSuffix(lyth, "_test.lyth"); ok {
+		return base + ".lyth_test.go"
+	}
+	return lyth + ".go"
 }

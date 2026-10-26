@@ -28,13 +28,13 @@ go install ./cmd/lyth
 | Command | What it does |
 |---|---|
 | `lyth run file.lyth [-- args]` | Builds and runs a single file. Outside a module, Lyth creates a throwaway one in your user cache; inside a module it currently builds the file's whole package. |
-| `lyth run ./cmd/api [-- args]` | Builds and runs a main package of the current module. |
-| `lyth build [-o out] [packages] [-- go build flags]` | Compiles packages with `go build`. With no packages, every directory containing `.lyth` files. |
+| `lyth run ./cmd/api [-- args]` | Builds and runs a main package of the current module. `-race` and `-ldflags` go to the Go build; arguments after the package go to the program. |
+| `lyth build [-o out] [-race] [packages] [-- go build flags]` | Compiles packages with `go build`. With no packages, every directory containing `.lyth` files. `-o dir/` writes the binary into `dir`. |
 | `lyth check [packages]` | Parses and type-checks, test files included, without running the Go compiler on the result. The fastest feedback loop. |
 | `lyth test [packages] [go test flags]` | Compiles packages with their `_test.lyth` files and runs `go test` ([testing](testing.md)). |
 | `lyth vet [packages]` | Runs `go vet` on the generated code and maps findings to `.lyth` positions. |
 | `lyth cover -func=c.out` | Prints the coverage of each function in a profile written by `lyth test -coverprofile` ([testing](testing.md#coverage)). Other modes, such as `-html=c.out`, run `go tool cover`. |
-| `lyth gen [-stdout \| -in-tree] [packages]` | Writes the generated Go: to stdout, or next to the sources as `*.lyth.go` files. |
+| `lyth gen [-stdout \| -in-tree] [packages \| file.lyth]` | Writes the generated Go: to stdout, or next to the sources as `*.lyth.go` files. `-stdout file.lyth` prints that file's Go only. |
 | `lyth fix [packages]` | Rewrites older Lyth syntax, and Go and Kotlin spellings of Lyth constructs, in the packages' files, test files included, then reports the errors left ([below](#lyth-fix)). |
 | `lyth fmt [-l] [-d] [paths]` | Formats `.lyth` files in place in Lyth's canonical layout ([below](#lyth-fmt)), the current directory and those below it by default; `-l` lists the files that differ and `-d` prints the changes, without writing; `-stdin` formats standard input. |
 | `lyth generate [-run re] [-skip re] [-n] [-v] [-x] [packages]` | Runs the `//go:generate` lines of `.lyth` files, test files included, as `go generate` does for `.go` files (which is all it reads): in the package directory, with `$GOFILE`, `$GOLINE`, `$GOPACKAGE`, `$GOOS`, `$GOARCH`, and `$DOLLAR`, quoted arguments, and `-command` aliases. Run `go generate` for the directives in `.go` files. |
