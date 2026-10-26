@@ -202,6 +202,8 @@ type TypeDecl struct {
 	Embeds     []Type    // embedded interfaces
 	Span       source.Span
 	Shadow     *gotypes.Named // the shadow go/types object for Go-level questions
+	// Local marks a struct declared in a function body.
+	Local bool
 
 	Entries []*EnumEntry // enum entries, in declaration order
 	// Backing is the type of a string-backed enum (ADR 0035), nil for a

@@ -578,8 +578,21 @@ func (l *fileLowerer) structDecl(d *syntax.StructDecl) {
 	if ts == nil || ts.Decl == nil {
 		return
 	}
+	spec := &ast.TypeSpec{Name: ast.NewIdent(ts.Decl.GoName), Type: l.structType(ts.Decl, d)}
+	if len(ts.Decl.TypeParams) > 0 {
+		spec.TypeParams = l.typeParamList(ts.Decl.TypeParams)
+	}
+	l.mark(spec.Name, d.Name.S)
+	gd := &ast.GenDecl{Doc: docGroup(d.Doc), Tok: token.TYPE, TokPos: l.pos(d.S), Specs: []ast.Spec{spec}}
+	l.mark(gd, d.S)
+	l.decls = append(l.decls, gd)
+	l.conformance(d, ts)
+}
+
+// structType lowers the fields of a struct declaration.
+func (l *fileLowerer) structType(decl *types.TypeDecl, d *syntax.StructDecl) *ast.StructType {
 	st := &ast.StructType{Fields: &ast.FieldList{Opening: l.pos(d.S), Closing: l.endPos(d.S)}}
-	for i, f := range ts.Decl.Fields {
+	for i, f := range decl.Fields {
 		fld := &ast.Field{Names: []*ast.Ident{ast.NewIdent(f.GoName)}, Type: l.typeExpr(f.Type)}
 		if f.Tag != "" {
 			fld.Tag = tagLit(f.Tag)
@@ -596,15 +609,7 @@ func (l *fileLowerer) structDecl(d *syntax.StructDecl) {
 		}
 		st.Fields.List = append(st.Fields.List, fld)
 	}
-	spec := &ast.TypeSpec{Name: ast.NewIdent(ts.Decl.GoName), Type: st}
-	if len(ts.Decl.TypeParams) > 0 {
-		spec.TypeParams = l.typeParamList(ts.Decl.TypeParams)
-	}
-	l.mark(spec.Name, d.Name.S)
-	gd := &ast.GenDecl{Doc: docGroup(d.Doc), Tok: token.TYPE, TokPos: l.pos(d.S), Specs: []ast.Spec{spec}}
-	l.mark(gd, d.S)
-	l.decls = append(l.decls, gd)
-	l.conformance(d, ts)
+	return st
 }
 
 // conformance lowers `struct T : I` to Go's compile-time assertion

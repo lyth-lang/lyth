@@ -258,6 +258,7 @@ func (*EnumDecl) declNode()      {}
 func (*PropDecl) declNode()      {}
 func (*ConstDecl) declNode()     {}
 func (*ConstDecl) stmtNode()     {}
+func (*StructDecl) stmtNode()    {} // a struct declared in a function body
 func (*BadDecl) declNode()       {}
 func (*TypeAliasDecl) declNode() {}
 func (*TypeDefDecl) declNode()   {}

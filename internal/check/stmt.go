@@ -111,6 +111,8 @@ func (c *Checker) stmt(s syntax.Stmt) bool {
 		return c.localDecl(s)
 	case *syntax.ConstDecl:
 		c.localConst(s)
+	case *syntax.StructDecl:
+		c.localStruct(s)
 	case *syntax.AssignStmt:
 		c.assignStmt(s)
 	case *syntax.IncDecStmt:

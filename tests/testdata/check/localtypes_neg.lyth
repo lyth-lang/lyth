@@ -1,0 +1,31 @@
+// Structs declared in functions and structs that contain themselves.
+interface Shape {
+    Area(): float64
+}
+
+struct Loop { next: Loop } // ERROR E0216 "invalid recursive type Loop: it contains itself by value (Loop.next -> Loop)"
+
+struct A { b: B } // ERROR E0216 "(A.b -> B.a -> A)"
+struct B { a: [2]A }
+
+struct Fine {
+    next: *Fine?
+    kids: []Fine
+    byName: map[string]Fine
+    later: Fine?
+}
+
+func main() {
+    struct pair[T] { a: T } // ERROR E0601 "a struct declared in a function cannot have type parameters"
+    struct sq : Shape { s: float64 } // ERROR E0216 "a struct declared in a function cannot declare interfaces"
+    struct self2 { me: self2 } // ERROR E0216 "invalid recursive type self2"
+    struct node { next: *node? }
+    x := 1
+    struct x { n: int } // ERROR E0102 "x is already declared in this scope"
+    n := &node(next = &node(next = null))
+    println(n.next?.next == null, x, sq(s = 1).s, self2())
+    if true {
+        struct scoped { n: int }
+    }
+    println(scoped(n = 1)) // ERROR E0101 "undefined: scoped"
+}

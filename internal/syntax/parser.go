@@ -2031,6 +2031,12 @@ func (p *parser) parseStmt() Stmt {
 		return p.parseOldLocalDecl()
 	case CONST:
 		return p.parseConst(t.Span)
+	case STRUCT:
+		if p.peek(1).Kind == IDENT {
+			// A struct declared in a function, as Go's local types: table
+			// tests and request bodies.
+			return p.parseStructDecl(t.Span, p.docFor(t.Span.Start))
+		}
 	case IDENT:
 		if p.peek(1).Kind == COLON {
 			return p.parseTypedLocalDecl()

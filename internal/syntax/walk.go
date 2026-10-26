@@ -37,6 +37,8 @@ func Children(n Node, f func(Node)) {
 		if x.Value != nil {
 			visit(x.Value)
 		}
+	case *StructDecl:
+		visit(x.Name)
 	case *LocalDecl:
 		for _, id := range x.Names {
 			visit(id)

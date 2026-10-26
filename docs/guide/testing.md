@@ -70,12 +70,11 @@ func grade(score: int): string = when {
     else -> "F"
 }
 
-struct gradeCase {
-    Score: int
-    Want: string
-}
-
 func TestGrade(t: *testing.T) {
+    struct gradeCase {
+        Score: int
+        Want: string
+    }
     cases := [gradeCase(95, "A"), gradeCase(80, "B"), gradeCase(50, "C"), gradeCase(10, "F")]
     for c in cases {
         t.Run("score ${c.Score}") { st ->
@@ -87,7 +86,9 @@ func TestGrade(t: *testing.T) {
 }
 ```
 
-Subtests are `t.Run` with a trailing lambda. Loop variables are fresh per
+The case type is declared in the test, as Go's local `type gradeCase struct`;
+Lyth has no anonymous struct types, so `[]struct{ ... }{...}` is written this
+way. Subtests are `t.Run` with a trailing lambda. Loop variables are fresh per
 iteration (Go 1.22 semantics), so closures capture the right case.
 
 ## HTTP handlers

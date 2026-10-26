@@ -139,7 +139,9 @@ func main() throws {
   `name := strings.TrimSpace(name)`.
 - Visibility is Go's: a capitalized name is exported. Write Go-style names yourself: `UserID`,
   `NewServer`, `ID`.
-- Structs: `struct User { ... }` with one `Name: Type` field per line. Exported fields get
+- Structs: `struct User { ... }` with one `Name: Type` field per line. A struct may also be
+  declared inside a function, for table tests and request bodies (`struct tc { in: string; want: int }`);
+  it has no methods. Exported fields get
   lower-camel `json` tags automatically (`UserID` → `userID`, `IDs` → `ids`, `HTTPServer` →
   `httpServer`), and a null `T?` field is left out of the JSON. A name like `ETag` warns
   (W0008): give it a tag such as `json:"etag"`. `json:",string"` keeps the automatic name.
@@ -234,6 +236,8 @@ func main() throws {
 - Tests are Go tests in `_test.lyth` files of the same package (no `package x_test`):
   `func TestParse(t: *testing.T) { ... }`, and a test may be `throws`. `lyth test ./...` runs
   them, with `go test` flags such as `-v` and `-run`.
+- A table test declares its case struct in the test function:
+  `struct tc { in: string; want: int }`, then `for c in [tc(in = "1", want = 1)] { ... }`.
 - `go vet` runs with the tests and requires a constant format string: write
   `t.Errorf("got %d, want %d", got, want)`, or `t.Error("got ${got}, want ${want}")` with a
   template, never a template inside `t.Errorf`.
@@ -287,10 +291,10 @@ What Go programmers write by habit, and the Lyth for it:
 
 ## Not supported yet
 
-`when` over errors, `defer f()?`, external test packages
-(`package x_test`), packages mixing Lyth and non-test Go files, `T?` on type parameters, and
-named arguments and default values on generic functions. The compiler reports each of these
-with a way around it.
+`when` over errors, `defer f()?`, external test packages (`package x_test`), packages mixing
+Lyth and non-test Go files, anonymous struct types (declare a struct, also inside a function),
+`T?` on type parameters, and named arguments and default values on generic functions. The
+compiler reports each of these with a way around it.
 
 ## Changes between versions
 

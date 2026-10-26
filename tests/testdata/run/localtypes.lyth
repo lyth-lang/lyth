@@ -1,0 +1,77 @@
+// Structs declared in function bodies: Go's local types, for table tests
+// and request bodies. They are in scope to the end of the block.
+import "encoding/json"
+import "fmt"
+import "sort"
+
+struct tc { x: int } // the local tc below hides this one in table
+
+func parse(s: string): int = len(s)
+
+func table() {
+    struct tc {
+        in: string
+        want: int
+    }
+    cases := [tc(in = "a", want = 1), tc(in = "bb", want = 2), tc(in = "", want = 1)]
+    for c in cases {
+        fmt.Println("${c.in}:", parse(c.in) == c.want)
+    }
+    byWant: map[int][]tc = [:]
+    for c in cases {
+        byWant[c.want] = append(byWant[c.want], c)
+    }
+    fmt.Println(len(byWant[1]), cases[0] == tc("a", 1))
+}
+
+func decode() throws {
+    struct Point { X: int; Y: int }
+    struct Request {
+        Name: string
+        At: Point?
+        Next: *Request?
+    }
+    req: Request
+    json.Unmarshal([]byte(`{"name":"ada","at":{"x":1,"y":2},"next":{"name":"bob"}}`), &req)?
+    fmt.Println(req.Name, req.At?.X, req.Next?.Name)
+    fmt.Println(string(json.Marshal(req)?))
+}
+
+func sortLocal() {
+    struct entry { k: string; v: int }
+    es := [entry("b", 2), entry("a", 1)]
+    sort.Slice(es) { i, j -> es[i].k < es[j].k }
+    fmt.Println(es)
+    tenfold := { e: entry -> e.v * 10 }
+    fmt.Println(tenfold(es[0]))
+}
+
+func boxed[T](v: T) {
+    struct box { v: T }
+    fmt.Println(box(v = v))
+}
+
+func main() throws {
+    table()
+    decode()?
+    sortLocal()
+    boxed("g")
+    fmt.Println(tc(x = 1))
+    if true {
+        struct inner { n: int }
+        fmt.Println(inner(n = 2).n)
+    }
+}
+
+// Output:
+// a: true
+// bb: true
+// : false
+// 2 true
+// ada 1 bob
+// {"name":"ada","at":{"x":1,"y":2},"next":{"name":"bob"}}
+// [{a 1} {b 2}]
+// 10
+// {g}
+// {1}
+// 2

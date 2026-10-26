@@ -662,8 +662,27 @@ func main() {
 
 ```ebnf
 Block      = "{" { Statement } "}" .
-Statement  = ShortVarDecl | TypedVarDecl | Assignment | IncDec | Return | Throw
-           | Break | Continue | Defer | Go | For | While | Select | Expression .
+Statement  = ShortVarDecl | TypedVarDecl | ConstDecl | StructDecl | Assignment | IncDec
+           | Return | Throw | Break | Continue | Defer | Go | For | While | Select | Expression .
+```
+
+A struct declared in a function body (`StructDecl`, §3.3) is a Go local type:
+it is in scope from its declaration to the end of the block, may refer to
+itself through pointers, optionals, slices, and maps, and is constructed and
+used like any struct. It has no methods, since methods are declared at package
+level, and no type parameters or declared interfaces (E0601, E0216). Table
+tests declare their case type this way:
+
+```kotlin
+func check(parse: (string) -> int) {
+    struct tc {
+        in: string
+        want: int
+    }
+    for c in [tc(in = "1", want = 1), tc(in = "22", want = 22)] {
+        println(c.in, parse(c.in) == c.want)
+    }
+}
 ```
 
 ### 4.1 Local declarations

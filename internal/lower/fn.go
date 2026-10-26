@@ -538,6 +538,8 @@ func (fl *fnLower) stmt(s syntax.Stmt) {
 		fl.localDecl(s)
 	case *syntax.ConstDecl:
 		fl.localConst(s)
+	case *syntax.StructDecl:
+		fl.localStruct(s)
 	case *syntax.AssignStmt:
 		fl.assignStmt(s)
 	case *syntax.IncDecStmt:
@@ -1689,6 +1691,18 @@ func (fl *fnLower) localConst(d *syntax.ConstDecl) {
 		spec.Type = fl.l.typeExpr(k.Type)
 	}
 	fl.emit(&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.CONST, TokPos: fl.l.pos(d.S), Specs: []ast.Spec{spec}}}, d.S)
+}
+
+// localStruct lowers a struct declared in a function body to Go's local
+// type declaration.
+func (fl *fnLower) localStruct(d *syntax.StructDecl) {
+	ts, ok := fl.info.Defs[d.Name].(*check.TypeSym)
+	if !ok || ts.Decl == nil {
+		return
+	}
+	spec := &ast.TypeSpec{Name: ast.NewIdent(ts.Decl.GoName), Type: fl.l.structType(ts.Decl, d)}
+	fl.l.mark(spec.Name, d.Name.S)
+	fl.emit(&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.TYPE, TokPos: fl.l.pos(d.S), Specs: []ast.Spec{spec}}}, d.S)
 }
 
 // stableField reports whether e is a chain of field selections on a variable

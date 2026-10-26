@@ -108,6 +108,13 @@ func (c *Checker) resolveTypeDecls() {
 		}
 	}
 	c.checkEmbedCycles()
+	var decls []*types.TypeDecl
+	for _, ts := range c.pkg.Types {
+		if ts.Decl != nil {
+			decls = append(decls, ts.Decl)
+		}
+	}
+	c.checkValueCycles(decls)
 	var ifaces []*gotypes.Interface
 	for _, ts := range c.pkg.Types {
 		decl := ts.Decl
@@ -425,6 +432,52 @@ func (c *Checker) resolveStruct(decl *types.TypeDecl, d *syntax.StructDecl) {
 		decl.Fields = append(decl.Fields, f)
 	}
 	c.warnDuplicateKeys(decl)
+}
+
+// localStruct declares a struct in a function body, as Go's local type
+// declarations: it is in scope from its declaration to the end of the
+// block, and has no methods (methods are declared at package level) and no
+// type parameters.
+func (c *Checker) localStruct(d *syntax.StructDecl) {
+	if len(d.TypeParams) > 0 {
+		c.errorf(diag.EUnsupported, d.TypeParams[0].S, "a struct declared in a function cannot have type parameters").
+			WithHint("declare it at package level")
+		sym := &TypeSym{name: d.Name.Name, Type: types.Invalid, Span: d.Name.S, Pkg: c.pkg, syn: d}
+		c.info.Defs[d.Name] = sym
+		if c.scope.LookupLocal(d.Name.Name) == nil {
+			c.scope.Insert(sym)
+		}
+		return
+	}
+	if len(d.Implements) > 0 {
+		c.errorf(diag.EInvalidUse, d.Implements[0].Span(), "a struct declared in a function cannot declare interfaces: it has no methods").
+			WithHint("declare it at package level, with its methods")
+	}
+	name := d.Name.Name
+	decl := &types.TypeDecl{Name: name, Kind: types.StructDecl, PkgPath: c.pkg.Path, PkgName: c.pkg.Name, Span: d.Name.S, Local: true}
+	decl.GoName = GoName(name)
+	// The shadow type is not in the shadow package's scope: local types of
+	// different functions may share a name.
+	decl.Shadow = gotypes.NewNamed(gotypes.NewTypeName(token.NoPos, c.shadow, decl.GoName, nil), nil, nil)
+	sym := &TypeSym{name: name, Type: &types.Named{Decl: decl}, Decl: decl, Span: d.Name.S, Pkg: c.pkg, syn: d, GoName: decl.GoName}
+	c.info.Defs[d.Name] = sym
+	if name != "_" {
+		if old := c.scope.LookupLocal(name); old != nil {
+			c.errorf(diag.EDuplicate, d.Name.S, "%s is already declared in this scope", name).
+				WithRelated(old.DeclSpan(), "previous declaration")
+		} else {
+			c.scope.Insert(sym) // before the fields: next: *Node? refers to it
+		}
+	}
+	c.resolveStruct(decl, d)
+	c.checkValueCycles([]*types.TypeDecl{decl})
+	fields := make([]*gotypes.Var, len(decl.Fields))
+	tags := make([]string, len(decl.Fields))
+	for i, f := range decl.Fields {
+		fields[i] = gotypes.NewField(token.NoPos, c.shadow, f.GoName, types.Lower(f.Type), f.Embedded)
+		tags[i] = f.Tag
+	}
+	decl.Shadow.SetUnderlying(gotypes.NewStruct(fields, tags))
 }
 
 // warnDuplicateKeys reports two fields of a struct with the same json key
@@ -1938,6 +1991,79 @@ func conformanceNote(decl *types.TypeDecl, iface types.Type) (note string, casca
 		}
 	}
 	return fmt.Sprintf("missing method %s: %s", name, want), false
+}
+
+// checkValueCycles reports structs that contain themselves by value,
+// directly or through other structs and arrays (Go: invalid recursive
+// type): no value could hold one. A pointer, slice, map, channel, function,
+// interface, or optional field breaks the cycle.
+func (c *Checker) checkValueCycles(decls []*types.TypeDecl) {
+	state := map[*types.TypeDecl]int{} // 1 visiting, 2 done
+	type step struct {
+		decl  *types.TypeDecl
+		field string
+	}
+	var path []step
+	var visit func(d *types.TypeDecl)
+	var inType func(t types.Type)
+	inType = func(t types.Type) {
+		switch t := t.(type) {
+		case *types.Platform:
+			inType(t.Elem)
+		case *types.Array:
+			inType(t.Elem)
+		case *types.Named:
+			if t.Decl == nil {
+				return
+			}
+			switch t.Decl.Kind {
+			case types.StructDecl:
+				if len(t.Args) == 0 {
+					visit(t.Decl)
+				}
+			case types.DefinedDecl:
+				if len(t.Args) == 0 && t.Decl.Underlying != nil {
+					inType(t.Decl.Underlying)
+				}
+			}
+		}
+	}
+	visit = func(d *types.TypeDecl) {
+		switch state[d] {
+		case 1:
+			start := len(path) - 1
+			for start > 0 && path[start].decl != d {
+				start--
+			}
+			var b strings.Builder
+			for _, s := range path[start:] {
+				fmt.Fprintf(&b, "%s.%s -> ", s.decl.Name, s.field)
+			}
+			b.WriteString(d.Name)
+			last := path[len(path)-1]
+			c.errorf(diag.EInvalidUse, d.Span, "invalid recursive type %s: it contains itself by value (%s)", d.Name, b.String()).
+				WithHint("make %s.%s a pointer or optional, or a slice", last.decl.Name, last.field)
+			state[d] = 2
+			return
+		case 2:
+			return
+		}
+		state[d] = 1
+		for _, f := range d.Fields {
+			path = append(path, step{d, f.Name})
+			inType(f.Type)
+			path = path[:len(path)-1]
+			if state[d] == 2 {
+				break // reported
+			}
+		}
+		state[d] = 2
+	}
+	for _, d := range decls {
+		if d.Kind == types.StructDecl && len(d.TypeParams) == 0 {
+			visit(d)
+		}
+	}
 }
 
 // checkEmbedCycles reports interfaces of this package that embed
