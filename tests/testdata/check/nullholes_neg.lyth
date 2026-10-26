@@ -3,6 +3,11 @@ struct User {
     Name: string
 }
 
+struct Job {
+    ID: int
+    U: *User
+}
+
 interface Finder {
     Find(id: int): *User
 }
@@ -74,6 +79,10 @@ func main() {
     copy(dst, src) // ERROR E0201 "cannot copy []*User? into []*User"
     clear(dst) // ERROR E0405 "clear would set every element of []*User to its zero value"
     users := [3]*User{&User(Name = "x")} // ERROR E0405 "[3]*User needs all 3 elements"
+    jobs: map[string]Job = [:]
+    j: Job? = null
+    ok := false
+    j, ok = jobs["x"] // ERROR E0405 "Job has no zero value, so j, ok = "
     println(label(&Red())) // ERROR E0201 "*Red is not a member of sealed Kind; Red is"
-    println(f, s, m, users)
+    println(f, s, m, users, j, ok)
 }

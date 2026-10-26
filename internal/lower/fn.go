@@ -549,7 +549,7 @@ func (fl *fnLower) stmt(s syntax.Stmt) {
 	case *syntax.AssignStmt:
 		fl.assignStmt(s)
 	case *syntax.IncDecStmt:
-		x := fl.expr(s.X)
+		x := fl.lvalue(s.X)
 		tok := token.INC
 		if !s.Inc {
 			tok = token.DEC
@@ -608,6 +608,16 @@ func (fl *fnLower) localDecl(s *syntax.LocalDecl) {
 		src := fl.stash(s.Value, fl.exprRaw(s.Value))
 		name := fl.declareLocal(v)
 		fl.nilIfaceInto(s.Value, src, name)
+		fl.useIfUnused(v, name, s.S)
+		return
+	}
+	if conv == check.ConvNone && fl.zerolessRead(value) {
+		// j := m[k]: var j *Job; if x, ok := m[k]; ok { j = &x }
+		read, _ := fl.commaOkRead(value)
+		name := fl.declareLocal(v)
+		spec := &ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(name)}, Type: fl.l.typeExpr(v.Type)}
+		fl.emit(&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, TokPos: fl.l.pos(s.S), Specs: []ast.Spec{spec}}}, s.S)
+		fl.boxInto(name, read, s.S)
 		fl.useIfUnused(v, name, s.S)
 		return
 	}
@@ -705,6 +715,13 @@ func (fl *fnLower) destructure(s *syntax.LocalDecl, vars []*check.VarSym) {
 	var rhs []ast.Expr
 	if tup, ok := value.(*syntax.TupleExpr); ok {
 		rhs = fl.exprList(tup.Elems, nil) // a, b := x, y
+	} else if len(vars) == 2 {
+		read, elem := fl.commaOkRead(s.Value)
+		if elem != nil && vars[0] != nil {
+			fl.boxedCommaOk(s, vars, read, elem)
+			return
+		}
+		rhs = []ast.Expr{read}
 	} else {
 		rhs = []ast.Expr{fl.expr(s.Value)}
 	}
@@ -725,6 +742,37 @@ func (fl *fnLower) destructure(s *syntax.LocalDecl, vars []*check.VarSym) {
 	for i, v := range vars {
 		if v != nil {
 			fl.useIfUnused(v, lhs[i].(*ast.Ident).Name, s.S)
+		}
+	}
+}
+
+// boxedCommaOk lowers v, ok := m[k] or v, ok := ch.receive() whose value
+// type has no zero value: v is a T?, null when ok is false.
+//
+//	x, ok := m[k]
+//	var v *Job
+//	if ok {
+//		v = &x
+//	}
+func (fl *fnLower) boxedCommaOk(s *syntax.LocalDecl, vars []*check.VarSym, read ast.Expr, elem types.Type) {
+	x := fl.temp("x")
+	okName := fl.temp("ok")
+	if vars[1] != nil {
+		okName = fl.declareLocal(vars[1])
+	}
+	fl.emit(&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(x), ast.NewIdent(okName)}, Tok: token.DEFINE, TokPos: fl.l.pos(s.S), Rhs: []ast.Expr{read}}, s.S)
+	_, known := fl.locals[vars[0]]
+	name := fl.declareLocal(vars[0])
+	if known {
+		fl.emitSynth(&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(name)}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent("nil")}}, s.S)
+	} else {
+		spec := &ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(name)}, Type: fl.l.typeExpr(types.MakeNullable(elem))}
+		fl.emitSynth(&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{spec}}}, s.S)
+	}
+	fl.emitSynth(&ast.IfStmt{Cond: ast.NewIdent(okName), Body: &ast.BlockStmt{List: []ast.Stmt{boxAssign(name, x)}}}, s.S)
+	for i, v := range vars {
+		if v != nil {
+			fl.useIfUnused(v, []string{name, okName}[i], s.S)
 		}
 	}
 }
@@ -1272,15 +1320,17 @@ func (fl *fnLower) exhaustivePanic(e *syntax.WhenExpr) ast.Stmt {
 func (fl *fnLower) selectStmt(s *syntax.SelectStmt) {
 	sel := &ast.SelectStmt{Select: fl.l.pos(s.S), Body: &ast.BlockStmt{Lbrace: fl.l.pos(s.S), Rbrace: fl.l.endPos(s.S)}}
 	comms := make([]ast.Stmt, len(s.Cases))
+	boxes := make([][]ast.Stmt, len(s.Cases))
 	for i, sc := range s.Cases {
 		if !sc.Else {
-			comms[i] = fl.commStmt(sc)
+			comms[i], boxes[i] = fl.commStmt(sc)
 		}
 	}
 	fl.breakable(&breakCtx{}, func() {
 		for i, sc := range s.Cases {
 			cc := &ast.CommClause{Case: fl.l.pos(sc.S), Comm: comms[i], Colon: fl.l.pos(sc.S)}
 			sub, stmts := fl.sub()
+			*stmts = append(*stmts, boxes[i]...)
 			for j, v := range fl.info.SelectVars[sc] {
 				if v != nil {
 					sub.useIfUnused(v, fl.locals[v], sc.Names[j].S)
@@ -1300,19 +1350,37 @@ func (fl *fnLower) selectStmt(s *syntax.SelectStmt) {
 }
 
 // commStmt lowers the channel operation of a select branch to a Go
-// communication clause: ch <- v, <-ch, v := <-ch, or v, ok := <-ch.
-func (fl *fnLower) commStmt(sc *syntax.SelectCase) ast.Stmt {
+// communication clause: ch <- v, <-ch, v := <-ch, or v, ok := <-ch. A
+// received value whose type has no zero value is boxed by the statements it
+// returns for the start of the branch: null when the channel is closed.
+func (fl *fnLower) commStmt(sc *syntax.SelectCase) (ast.Stmt, []ast.Stmt) {
 	call := syntax.Unparen(sc.Op).(*syntax.CallExpr)
 	ci := fl.info.Calls[call]
 	sel := syntax.Unparen(call.Fun).(*syntax.SelectorExpr)
 	ch := fl.expr(sel.X)
 	if ci.Prelude == check.PreludeSend {
-		return fl.sendStmt(call, ch, ci)
+		return fl.sendStmt(call, ch, ci), nil
 	}
 	recv := &ast.UnaryExpr{Op: token.ARROW, X: ch}
+	vars := fl.info.SelectVars[sc]
+	if len(vars) > 0 && vars[0] != nil {
+		if c, ok := check.CollectionOf(fl.info.TypeOf(sel.X)).(*types.Chan); ok && check.Zeroless(c.Elem) {
+			x, okName := fl.temp("x"), fl.temp("ok")
+			if len(vars) > 1 && vars[1] != nil {
+				okName = fl.declareLocal(vars[1])
+			}
+			name := fl.declareLocal(vars[0])
+			spec := &ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(name)}, Type: fl.l.typeExpr(types.MakeNullable(c.Elem))}
+			box := []ast.Stmt{
+				&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{spec}}},
+				&ast.IfStmt{Cond: ast.NewIdent(okName), Body: &ast.BlockStmt{List: []ast.Stmt{boxAssign(name, x)}}},
+			}
+			return &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(x), ast.NewIdent(okName)}, Tok: token.DEFINE, Rhs: []ast.Expr{recv}}, box
+		}
+	}
 	var lhs []ast.Expr
 	allBlank := true
-	for _, v := range fl.info.SelectVars[sc] {
+	for _, v := range vars {
 		name := "_"
 		if v != nil {
 			name = fl.declareLocal(v)
@@ -1321,9 +1389,9 @@ func (fl *fnLower) commStmt(sc *syntax.SelectCase) ast.Stmt {
 		lhs = append(lhs, ast.NewIdent(name))
 	}
 	if allBlank {
-		return &ast.ExprStmt{X: recv}
+		return &ast.ExprStmt{X: recv}, nil
 	}
-	return &ast.AssignStmt{Lhs: lhs, Tok: token.DEFINE, Rhs: []ast.Expr{recv}}
+	return &ast.AssignStmt{Lhs: lhs, Tok: token.DEFINE, Rhs: []ast.Expr{recv}}, nil
 }
 
 // ---------------------------------------------------------------------------

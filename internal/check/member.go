@@ -313,13 +313,20 @@ func (c *Checker) chanMember(t types.Type, ch *types.Chan, name string, id *synt
 }
 
 // ReceiveType is the type of ch.receive(). A closed channel yields the zero
-// value, so an element type without one (a non-null pointer, interface,
-// function, or channel) becomes nullable, as for map lookups.
+// value, so an element type without one (a non-null pointer, interface, or
+// function, or a struct holding one) becomes nullable, as for map lookups.
 func ReceiveType(ch *types.Chan) types.Type {
-	if !types.Zeroable(ch.Elem) && types.IsNilable(ch.Elem) {
+	if !types.Zeroable(ch.Elem) {
 		return types.MakeNullable(ch.Elem)
 	}
 	return ch.Elem
+}
+
+// Zeroless reports whether t has no zero value and is no pointer, interface,
+// function, or channel: Go hands out its zero value for a missing map key or
+// a closed channel, which Lyth reads as null, so the read is boxed.
+func Zeroless(t types.Type) bool {
+	return !types.Zeroable(t) && !types.IsNilable(t)
 }
 
 func preludeMember(b *types.Basic, name string) *member {

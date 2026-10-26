@@ -652,6 +652,11 @@ func (c *Checker) tupleAssign(s *syntax.AssignStmt, lhs *syntax.TupleExpr) {
 		if t := c.commaOk(s.Rhs, x); t != nil {
 			c.info.Types[s.Rhs] = TypeAndValue{Mode: ModeValue, Type: t}
 			x = &operand{mode: ModeValue, typ: t, expr: s.Rhs}
+			if vt := t.(*types.Tuple).Elems[0]; targets[0] != nil && types.IsNullable(vt) && Zeroless(types.Base(vt)) {
+				c.errorf(diag.ENoZeroValue, s.S, "%s has no zero value, so %s = %s cannot assign it", types.Base(vt), lhs.Span().Short(), s.Rhs.Span().Short()).
+					WithHint("assign %s = %s, which is null when there is no value, or declare new variables with :=", lhs.Elems[0].Span().Short(), s.Rhs.Span().Short())
+				return
+			}
 		}
 	}
 	var elems []types.Type

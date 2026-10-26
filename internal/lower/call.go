@@ -428,7 +428,11 @@ func (fl *fnLower) prelude(e *syntax.CallExpr, ci *check.CallInfo) ast.Expr {
 	case check.PreludeToBool:
 		return &ast.CallExpr{Fun: sel(strconvPkg(), "ParseBool"), Args: []ast.Expr{recv}}
 	case check.PreludeReceive:
-		return &ast.UnaryExpr{Op: token.ARROW, X: recv}
+		read := &ast.UnaryExpr{Op: token.ARROW, X: recv}
+		if ch, ok := check.CollectionOf(fl.info.TypeOf(s.X)).(*types.Chan); ok && check.Zeroless(ch.Elem) {
+			return fl.boxRead(read, ch.Elem, e.S)
+		}
+		return read
 	case check.PreludeClose:
 		return &ast.CallExpr{Fun: ast.NewIdent("close"), Args: []ast.Expr{recv}}
 	case check.PreludeSend:
@@ -473,10 +477,22 @@ func (fl *fnLower) safeChanOp(e *syntax.CallExpr, s *syntax.SelectorExpr, ci *ch
 	spec := &ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(name)}, Type: fl.l.typeExpr(t)}
 	fl.emitSynth(&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{spec}}}, e.S)
 	var val ast.Expr = &ast.UnaryExpr{Op: token.ARROW, X: cloneIdentExpr(ch)}
-	if types.IsNullable(t) && !types.IsNilable(types.Base(t)) {
+	var body []ast.Stmt
+	switch {
+	case check.Zeroless(types.Base(t)):
+		// A closed channel of a type without zero value gives null.
+		x, ok := fl.temp("x"), fl.temp("ok")
+		body = append(*stmts, &ast.IfStmt{
+			Init: &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(x), ast.NewIdent(ok)}, Tok: token.DEFINE, Rhs: []ast.Expr{val}},
+			Cond: ast.NewIdent(ok),
+			Body: &ast.BlockStmt{List: []ast.Stmt{boxAssign(name, x)}},
+		})
+	case types.IsNullable(t) && !types.IsNilable(types.Base(t)):
 		val = &ast.CallExpr{Fun: ast.NewIdent("new"), Args: []ast.Expr{val}} // int? holds the received int
+		fallthrough
+	default:
+		body = append(*stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(name)}, Tok: token.ASSIGN, Rhs: []ast.Expr{val}})
 	}
-	body := append(*stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(name)}, Tok: token.ASSIGN, Rhs: []ast.Expr{val}})
 	fl.emitSynth(&ast.IfStmt{Cond: nilCmp(ch, token.NEQ), Body: &ast.BlockStmt{List: body}}, e.S)
 	return ast.NewIdent(name)
 }

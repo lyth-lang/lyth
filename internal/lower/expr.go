@@ -174,6 +174,13 @@ func (fl *fnLower) lvalue(e syntax.Expr) ast.Expr {
 		fl.l.mark(x, e.Span())
 		return x
 	}
+	if ix, ok := syntax.Unparen(e).(*syntax.IndexExpr); ok && fl.info.IndexInsts[ix] == nil {
+		// m[k] = v: the element itself, never a boxed read.
+		xs := fl.exprList([]syntax.Expr{ix.X, ix.Index}, nil)
+		x := &ast.IndexExpr{X: xs[0], Index: xs[1]}
+		fl.l.mark(x, e.Span())
+		return x
+	}
 	x := fl.expr0(e)
 	fl.l.mark(x, e.Span())
 	return x
@@ -366,7 +373,11 @@ func (fl *fnLower) expr0(e syntax.Expr) ast.Expr {
 			return fl.expr(inst)
 		}
 		xs := fl.exprList([]syntax.Expr{e.X, e.Index}, nil)
-		return &ast.IndexExpr{X: xs[0], Index: xs[1]}
+		ix := &ast.IndexExpr{X: xs[0], Index: xs[1]}
+		if m, ok := check.CollectionOf(fl.info.TypeOf(e.X)).(*types.Map); ok && check.Zeroless(m.Elem) {
+			return fl.boxRead(ix, m.Elem, e.S)
+		}
+		return ix
 	case *syntax.SliceExpr:
 		ops := []syntax.Expr{e.X}
 		if e.Lo != nil {
@@ -1559,4 +1570,79 @@ func (fl *fnLower) foldableConst(e syntax.Expr, t types.Type) bool {
 func asExpr(n syntax.Node) syntax.Expr {
 	e, _ := n.(syntax.Expr)
 	return e
+}
+
+// boxRead reads a map element or channel element whose type has no zero
+// value (check.Zeroless) as a T? that is null when the key is missing or the
+// channel is closed, where Go would hand out the zero value:
+//
+//	var v *Job
+//	if x, ok := m[k]; ok {
+//		v = &x
+//	}
+func (fl *fnLower) boxRead(read ast.Expr, elem types.Type, span source.Span) ast.Expr {
+	name := fl.temp("v")
+	spec := &ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(name)}, Type: fl.l.typeExpr(types.MakeNullable(elem))}
+	fl.emitSynth(&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{spec}}}, span)
+	fl.boxInto(name, read, span)
+	return ast.NewIdent(name)
+}
+
+// boxInto assigns &x to name when read finds a value.
+func (fl *fnLower) boxInto(name string, read ast.Expr, span source.Span) {
+	x, ok := fl.temp("x"), fl.temp("ok")
+	fl.emitSynth(&ast.IfStmt{
+		Init: &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(x), ast.NewIdent(ok)}, Tok: token.DEFINE, Rhs: []ast.Expr{read}},
+		Cond: ast.NewIdent(ok),
+		Body: &ast.BlockStmt{List: []ast.Stmt{boxAssign(name, x)}},
+	}, span)
+}
+
+// zerolessRead reports whether e is a map index or receive whose element
+// type has no zero value, which reads as a boxed T? (boxRead).
+func (fl *fnLower) zerolessRead(e syntax.Expr) bool {
+	switch x := syntax.Unparen(e).(type) {
+	case *syntax.IndexExpr:
+		m, ok := check.CollectionOf(fl.info.TypeOf(x.X)).(*types.Map)
+		return ok && fl.info.IndexInsts[x] == nil && check.Zeroless(m.Elem)
+	case *syntax.CallExpr:
+		if ci := fl.info.Calls[x]; ci != nil && ci.Kind == check.CallPrelude && ci.Prelude == check.PreludeReceive && !ci.Safe {
+			s := syntax.Unparen(x.Fun).(*syntax.SelectorExpr)
+			ch, ok := check.CollectionOf(fl.info.TypeOf(s.X)).(*types.Chan)
+			return ok && check.Zeroless(ch.Elem)
+		}
+	}
+	return false
+}
+
+// boxAssign is name = &x.
+func boxAssign(name, x string) ast.Stmt {
+	return &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(name)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.UnaryExpr{Op: token.AND, X: ast.NewIdent(x)}}}
+}
+
+// commaOkRead lowers the m[k] or ch.receive() of v, ok := ... to its Go
+// read, and returns the element type when it has no zero value, so that the
+// caller boxes the value; any other expression is lowered as it is.
+func (fl *fnLower) commaOkRead(e syntax.Expr) (ast.Expr, types.Type) {
+	switch x := syntax.Unparen(e).(type) {
+	case *syntax.IndexExpr:
+		if m, ok := check.CollectionOf(fl.info.TypeOf(x.X)).(*types.Map); ok && fl.info.IndexInsts[x] == nil {
+			xs := fl.exprList([]syntax.Expr{x.X, x.Index}, nil)
+			read := &ast.IndexExpr{X: xs[0], Index: xs[1]}
+			if check.Zeroless(m.Elem) {
+				return read, m.Elem
+			}
+			return read, nil
+		}
+	case *syntax.CallExpr:
+		if ci := fl.info.Calls[x]; ci != nil && ci.Kind == check.CallPrelude && ci.Prelude == check.PreludeReceive && !ci.Safe {
+			s := syntax.Unparen(x.Fun).(*syntax.SelectorExpr)
+			read := &ast.UnaryExpr{Op: token.ARROW, X: fl.expr(s.X)}
+			if ch, ok := check.CollectionOf(fl.info.TypeOf(s.X)).(*types.Chan); ok && check.Zeroless(ch.Elem) {
+				return read, ch.Elem
+			}
+			return read, nil
+		}
+	}
+	return fl.expr(e), nil
 }

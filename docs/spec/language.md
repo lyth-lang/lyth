@@ -1000,9 +1000,12 @@ with `ok` false, sending on a closed channel panics, and a nil channel blocks
 forever. `for v in ch` receives until the channel is closed.
 
 - `ch.receive()` has the element type `T`, or `T?` when `T` has no zero value
-  (a non-null pointer, interface, function, or channel), because a closed
-  channel yields nil: `job := jobs.receive() ?: break`. The comma-ok form
-  gives the same type and a `bool`.
+  (a non-null pointer, interface, function, or channel, or a struct holding
+  one; types.md §6), because a closed channel yields Go's zero value:
+  `job := jobs.receive() ?: break`. The comma-ok form gives the same type and
+  a `bool`, and so does a binding in a `select` branch. For a struct or enum
+  without a zero value, the received value is boxed: null once the channel is
+  closed.
 - `ch.send(v)` has no value; it is a statement.
 - `go` and `defer` take a function call, which a send or receive is not
   (E0216): write `go { ch.send(v) }`. `defer ch.close()` is a call and works.

@@ -189,6 +189,9 @@ func main() throws {
 - Numbers never convert implicitly: `float64(n)`, `int64(x)`.
 - Literals take their type from context: `xs: []int = []`, `m: map[string]int = [:]`,
   `["a": 1]`. Go's typed literals work too: `[]int64{1, 2}`, `map[string]any{"ok": true}`.
+- `m[k]` and `ch.receive()` give the zero value when nothing is there, as in Go; when the value
+  type has none (a struct with a non-null pointer field, a `*User`), they give a `T?` that is
+  null then: `job := jobs.receive() ?: break`.
 
 ## Errors
 

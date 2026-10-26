@@ -1,0 +1,77 @@
+// Map values and channel elements whose type has no zero value read as T?:
+// null for a missing key or a closed channel.
+struct Conn {
+    Addr: string
+}
+
+struct Job {
+    ID: int
+    C: *Conn
+}
+
+enum Plan: string {
+    Free = "free"
+    Pro = "pro"
+}
+
+func drain(ch: chan Job): int {
+    n := 0
+    while true {
+        select {
+            j := ch.receive() -> {
+                job := j ?: return n
+                n += job.ID
+            }
+        }
+    }
+}
+
+func main() {
+    m: map[string]Job = ["a": Job(ID = 1, C = &Conn(Addr = "x"))]
+    j := m["a"]
+    println(j?.ID, j?.C?.Addr)
+    println(m["zz"]?.ID)
+    v, ok := m["a"]
+    println(v?.ID, ok)
+    w, found := m["b"]
+    println(w == null, found)
+    _, has := m["a"]
+    println(has)
+    m["b"] = Job(ID = 7, C = &Conn(Addr = "z"))
+    println(m["b"]?.ID ?: -1)
+
+    ch := make(chan Job, 1)
+    ch.send(Job(ID = 2, C = &Conn(Addr = "y")))
+    close(ch)
+    println(ch.receive()?.ID, ch.receive() == null)
+
+    plans := make(chan Plan, 1)
+    plans.send(Plan.Pro)
+    close(plans)
+    p, open := plans.receive()
+    println(p, open, plans.receive())
+    byName: map[string]Plan = [:]
+    println(byName["x"] ?: Plan.Free)
+
+    jobs := make(chan Job, 2)
+    jobs.send(Job(ID = 3, C = &Conn(Addr = "q")))
+    jobs.send(Job(ID = 4, C = &Conn(Addr = "q")))
+    close(jobs)
+    println(drain(jobs))
+
+    none: (chan Job)? = null
+    println(none?.receive() == null)
+}
+
+// Output:
+// 1 x
+// null
+// 1 true
+// true false
+// true
+// 7
+// 2 true
+// pro true null
+// free
+// 7
+// true
