@@ -135,6 +135,14 @@ A Lyth package compiles to a normal Go package:
   package **from its `.lyth` sources**, so no metadata format is needed. Published
   Lyth modules therefore ship both the `.lyth` sources and the generated `.go`
   files (see compiler.md §6.1): Go users consume the `.go`, Lyth users the `.lyth`.
+- A Go package of the module may import Lyth packages and be imported by Lyth
+  code (a *bridge*, `internal/build/bridge.go`). The build orders the Lyth
+  packages the bridge reaches before its Lyth importers, lowers and validates
+  them first, and type-checks the bridge's Go sources with `go/types` against
+  the validated packages, so the importer's generated Go type-checks against
+  the same objects. In Lyth, the Go view of a Lyth type (`domain.Status` in a
+  field of the bridge's struct) is lifted back to its Lyth declaration
+  (`types.Lifter`), keeping its nullability, members, and exhaustiveness.
 
 ## 7. Platform specifics, cgo, and the toolchain
 
@@ -202,4 +210,6 @@ Each row names the test that demonstrates it.
 | Channels from Go APIs (`ctx.Done().receive()`, `time.After(d).receive()`) | ✅ | `run/channels` |
 | Go iterator functions (`for k in maps.Keys(m)`, `iter.Seq2`) | ✅ | `run/iterators` |
 | Indexing, `len`, `for`, and `in` on Go named collection types (`h["Accept"]`, `len(q)`); Go aliases keep their names (`json.RawMessage`) | ✅ | `run/named_collections` |
+| Go packages of the module between Lyth packages (Lyth → Go → Lyth), Lyth types through them | ✅ | `TestGoPackagesBetweenLythPackages` |
+| `//go:embed` of strings, bytes, and `embed.FS` | ✅ | `run/embed`, `check/directives_neg` |
 | Mixed Go and Lyth non-test files in one package | ⬜ | E0601 |

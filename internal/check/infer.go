@@ -172,7 +172,7 @@ func (c *Checker) inferCore(sig *types.Signature, bind bindings) {
 			if core == nil {
 				continue
 			}
-			lc := types.Lift(core)
+			lc := c.lift(core)
 			if b, ok := bind[tp.Go]; ok {
 				before := len(bind)
 				unify(lc, underlyingOf(b), bind)

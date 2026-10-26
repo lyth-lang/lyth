@@ -65,6 +65,8 @@ type Package struct {
 	// kept to print them again for coverage runs (cover.go).
 	Lowered []*lower.File
 	GoTypes *gotypes.Package // types of the generated Go (validation)
+
+	generated, validated bool
 }
 
 // Session holds the state of one compilation.
@@ -98,6 +100,13 @@ type Session struct {
 	// available holds every Lyth package discovered in the module, by import
 	// path; packages are added to the session when targeted or imported.
 	available map[string]*pkgDir
+	// bridges are the Go packages of the module that import Lyth packages
+	// (bridge.go), by import path; nil marks a plain Go package.
+	bridges map[string]*bridge
+	// goTypes indexes the loaded Go packages and their dependencies by
+	// path, for validation; goTypesN is len(goPkgs) when it was built.
+	goTypes  map[string]*gotypes.Package
+	goTypesN int
 }
 
 // Timing is the duration of one compilation phase.
@@ -336,6 +345,8 @@ func (s *Session) parse() {
 				}
 				if dep, ok := s.available[imp.Path]; ok && s.byPath[imp.Path] == nil {
 					s.addPkg(dep)
+				} else if !ok {
+					s.bridgeFor(imp.Path) // a Go package of the module that may reach Lyth code
 				}
 			}
 		}
@@ -401,6 +412,14 @@ func (s *Session) order() bool {
 				if dep := s.byPath[imp.Path]; dep != nil {
 					visit(dep, imp)
 				}
+				if b := s.bridges[imp.Path]; b != nil {
+					// The Go package needs the Go of the Lyth packages it imports.
+					for _, lp := range b.lyth {
+						if dep := s.byPath[lp.ImportPath]; dep != nil {
+							visit(dep, imp)
+						}
+					}
+				}
 			}
 		}
 		state[p] = 2
@@ -421,10 +440,15 @@ func (s *Session) loadGo() error {
 	for _, p := range s.Packages {
 		for _, f := range p.Syntax {
 			for _, imp := range f.Imports {
-				if s.byPath[imp.Path] == nil && imp.Path != "" {
+				if s.byPath[imp.Path] == nil && s.bridges[imp.Path] == nil && imp.Path != "" {
 					need[imp.Path] = true
 				}
 			}
+		}
+	}
+	for _, imp := range s.bridgeImports() {
+		if s.byPath[imp] == nil {
+			need[imp] = true
 		}
 	}
 	var paths []string
@@ -450,7 +474,17 @@ func (s *Session) check() {
 		if len(p.Syntax) == 0 {
 			continue
 		}
+		for _, f := range p.Syntax {
+			for _, imp := range f.Imports {
+				if b := s.bridges[imp.Path]; b != nil {
+					s.ensureBridge(b)
+				}
+			}
+		}
 		imp := func(path string) (*check.Package, string) {
+			if b := s.bridges[path]; b != nil && b.types == nil {
+				return nil, strings.Join(b.errors, "; ")
+			}
 			if dep := s.byPath[path]; dep != nil {
 				if dep.Checked == nil {
 					return nil, "package " + path + " failed to compile"
@@ -474,33 +508,43 @@ func (s *Session) check() {
 	}
 }
 
-func (s *Session) generate() error {
-	opts := emit.Options{
+func (s *Session) emitOptions() emit.Options {
+	return emit.Options{
 		LineDirectives: !s.cfg.NoLineDirectives,
 		AbsPaths:       !s.cfg.InTree,
 		DenseLines:     !s.cfg.InTree && !s.cfg.SparseLineDirectives,
 	}
+}
+
+func (s *Session) generate() error {
+	opts := s.emitOptions()
 	for _, p := range s.Packages {
-		if p.Checked == nil {
-			continue
-		}
-		var lowered []*lower.File
-		err := protect(s.Sink, p, func() { lowered = lower.Package(p.Checked) })
-		if err != nil {
-			continue
-		}
-		for _, lf := range lowered {
-			res, err := emit.Emit(lf, opts)
-			if err != nil {
-				s.Sink.Errorf(diag.EInternal, source.Span{File: lf.Src}, "internal compiler error while generating Go code: %v", err).
-					WithNote("please report this with the source file")
-				continue
-			}
-			p.Generated = append(p.Generated, res)
-			p.Lowered = append(p.Lowered, lf)
-		}
+		s.generatePkg(p, opts)
 	}
 	return nil
+}
+
+// generatePkg lowers and emits a checked package, once.
+func (s *Session) generatePkg(p *Package, opts emit.Options) {
+	if p.Checked == nil || p.generated {
+		return
+	}
+	p.generated = true
+	var lowered []*lower.File
+	err := protect(s.Sink, p, func() { lowered = lower.Package(p.Checked) })
+	if err != nil {
+		return
+	}
+	for _, lf := range lowered {
+		res, err := emit.Emit(lf, opts)
+		if err != nil {
+			s.Sink.Errorf(diag.EInternal, source.Span{File: lf.Src}, "internal compiler error while generating Go code: %v", err).
+				WithNote("please report this with the source file")
+			continue
+		}
+		p.Generated = append(p.Generated, res)
+		p.Lowered = append(p.Lowered, lf)
+	}
 }
 
 // protect converts a panic in a compiler stage into an internal-error

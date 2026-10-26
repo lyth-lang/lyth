@@ -444,7 +444,7 @@ func (c *Checker) promotedMember(d *types.TypeDecl, name string, id *syntax.Iden
 			f := owner.Decl.Fields[last]
 			return &member{kind: SelField, goName: f.GoName, typ: lyth(f.Type), obj: f}, true
 		}
-		return &member{kind: SelField, goName: o.Name(), typ: types.Lift(o.Type()), obj: o}, true
+		return &member{kind: SelField, goName: o.Name(), typ: c.lift(o.Type()), obj: o}, true
 	case *gotypes.Func:
 		if owner != nil && owner.Decl != nil {
 			for _, lm := range owner.Decl.Methods {
@@ -461,7 +461,7 @@ func (c *Checker) promotedMember(d *types.TypeDecl, name string, id *syntax.Iden
 		if recv := sig.Recv(); recv != nil && !indirect {
 			_, ptr = recv.Type().(*gotypes.Pointer)
 		}
-		return &member{kind: SelMethod, goName: o.Name(), typ: types.LiftSignature(sig), ptrRecv: ptr, obj: o}, true
+		return &member{kind: SelMethod, goName: o.Name(), typ: c.liftSig(sig), ptrRecv: ptr, obj: o}, true
 	}
 	return nil, false
 }
@@ -494,7 +494,7 @@ func (c *Checker) lookupMemberQuiet(t types.Type, name string) *member {
 	}
 	obj, _, _ := gotypes.LookupFieldOrMethod(types.Lower(t), true, nil, name)
 	if fn, ok := obj.(*gotypes.Func); ok && fn.Exported() {
-		return &member{kind: SelMethod, goName: name, typ: types.LiftSignature(fn.Type().(*gotypes.Signature)), obj: fn}
+		return &member{kind: SelMethod, goName: name, typ: c.liftSig(fn.Type().(*gotypes.Signature)), obj: fn}
 	}
 	return nil
 }
@@ -520,7 +520,7 @@ func (c *Checker) goMember(t, base types.Type, name string, id *syntax.Ident) *m
 	}
 	switch o := obj.(type) {
 	case *gotypes.Var:
-		return &member{kind: SelField, goName: name, typ: types.Lift(o.Type()), obj: o}
+		return &member{kind: SelField, goName: name, typ: c.lift(o.Type()), obj: o}
 	case *gotypes.Func:
 		sig := o.Type().(*gotypes.Signature)
 		ptr := false
@@ -530,7 +530,7 @@ func (c *Checker) goMember(t, base types.Type, name string, id *syntax.Ident) *m
 			}
 		}
 		_ = indirect
-		return &member{kind: SelMethod, goName: name, typ: types.LiftSignature(sig), ptrRecv: ptr, obj: o}
+		return &member{kind: SelMethod, goName: name, typ: c.liftSig(sig), ptrRecv: ptr, obj: o}
 	}
 	return nil
 }
@@ -655,15 +655,15 @@ func (c *Checker) pkgMember(e *syntax.SelectorExpr, pkg *Package) *operand {
 	c.info.Selections[e] = sel
 	switch o := obj.(type) {
 	case *gotypes.Func:
-		sig := types.LiftSignature(o.Type().(*gotypes.Signature))
+		sig := c.liftSig(o.Type().(*gotypes.Signature))
 		sel.Type = sig
 		return &operand{mode: ModeValue, typ: sig, sym: g}
 	case *gotypes.Var:
-		t := types.Lift(o.Type())
+		t := c.lift(o.Type())
 		sel.Type = t
 		return &operand{mode: ModeValue, typ: t, sym: g}
 	case *gotypes.Const:
-		t := types.Lift(o.Type())
+		t := c.lift(o.Type())
 		sel.Type = t
 		return &operand{mode: ModeValue, typ: t, val: o.Val(), sym: g}
 	case *gotypes.TypeName:

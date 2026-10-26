@@ -635,14 +635,14 @@ func (c *Checker) construct(e *syntax.CallExpr, t types.Type, args []*syntax.Arg
 			st := b.Go.Underlying().(*gotypes.Struct)
 			for i := 0; i < st.NumFields(); i++ {
 				f := st.Field(i)
-				fields = append(fields, fieldInfo{f.Name(), f.Name(), types.Lift(f.Type()), !f.Exported(), true})
+				fields = append(fields, fieldInfo{f.Name(), f.Name(), c.lift(f.Type()), !f.Exported(), true})
 			}
 		}
 	case *types.GoType:
 		st := b.T.Underlying().(*gotypes.Struct)
 		for i := 0; i < st.NumFields(); i++ {
 			f := st.Field(i)
-			fields = append(fields, fieldInfo{f.Name(), f.Name(), types.Lift(f.Type()), !f.Exported(), true})
+			fields = append(fields, fieldInfo{f.Name(), f.Name(), c.lift(f.Type()), !f.Exported(), true})
 		}
 	}
 	ok := true

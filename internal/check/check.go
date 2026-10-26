@@ -29,6 +29,9 @@ type Config struct {
 
 // Checker holds the state of checking one package.
 type Checker struct {
+	// lythDecls caches, by package path, the declarations of other Lyth
+	// packages by Go name (nil for Go packages), for lythDecl.
+	lythDecls map[string]map[string]*types.TypeDecl
 	// inConstraint is set while resolving a type parameter's constraint,
 	// where constraint-only interfaces (Comparable, cmp.Ordered) may appear.
 	inConstraint bool
@@ -148,6 +151,43 @@ func Check(conf *Config, pkgPath string, files []*syntax.File) *Package {
 	c.checkBodies()
 	c.reportUnusedImports()
 	return c.pkg
+}
+
+// lift converts a Go type to a Lyth type. A Go package of the module may
+// use the types of a Lyth package (a bridge, build/bridge.go); in Go seen
+// from Lyth, those are the Lyth declarations again.
+func (c *Checker) lift(t gotypes.Type) types.Type {
+	return types.Lifter{Decl: c.lythDecl}.Lift(t)
+}
+
+func (c *Checker) liftSig(s *gotypes.Signature) *types.Signature {
+	return types.Lifter{Decl: c.lythDecl}.LiftSignature(s)
+}
+
+// lythDecl returns the Lyth declaration a Go named type of another Lyth
+// package stands for, or nil.
+func (c *Checker) lythDecl(n *gotypes.Named) *types.TypeDecl {
+	obj := n.Origin().Obj()
+	pkg := obj.Pkg()
+	if pkg == nil || pkg == c.shadow || c.conf.Import == nil {
+		return nil
+	}
+	decls, ok := c.lythDecls[pkg.Path()]
+	if !ok {
+		if lp, _ := c.conf.Import(pkg.Path()); lp != nil && lp.Lyth {
+			decls = map[string]*types.TypeDecl{}
+			for _, ts := range lp.Types {
+				if ts.Decl != nil {
+					decls[ts.Decl.GoName] = ts.Decl
+				}
+			}
+		}
+		if c.lythDecls == nil {
+			c.lythDecls = map[string]map[string]*types.TypeDecl{}
+		}
+		c.lythDecls[pkg.Path()] = decls
+	}
+	return decls[obj.Name()]
 }
 
 // errorf reports an error, except inside code the parser recovered from,

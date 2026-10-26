@@ -426,7 +426,7 @@ func (c *Checker) qualifiedType(pkg *Package, te *syntax.NamedType) types.Type {
 		c.errorf(diag.ETypeArgs, te.S, "%s.%s does not take type arguments", pkg.Name, name)
 	}
 	// A type written in Lyth source is non-null by default.
-	return types.Base(types.Lift(t))
+	return types.Base(c.lift(t))
 }
 
 // lythNames rewrites the qualifiers go/types puts on names, which are package

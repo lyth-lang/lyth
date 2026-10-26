@@ -1414,3 +1414,95 @@ func *ptrOnly.Get(k: int): int = k
 		t.Errorf("a Go package path reached the diagnostics:\n%s", msgs)
 	}
 }
+
+// TestGoPackagesBetweenLythPackages builds a module where Lyth code imports
+// Go packages of the same module that import Lyth packages (as generated
+// sqlc code or a package not yet converted does), directly and through
+// another Go package. The Lyth types keep their declarations through the
+// Go packages: enums are exhaustive in when, optionals stay optional, and
+// values flow back into Lyth functions.
+func TestGoPackagesBetweenLythPackages(t *testing.T) {
+	files := map[string]string{
+		"domain/domain.lyth": `enum Status { Pending, Paid }
+
+struct Money {
+    Cents: int64
+    Note: string?
+}
+
+func Money.Label(): string = "${self.Cents}c"
+
+func NewMoney(c: int64): Money = Money(Cents = c, Note = "new")
+
+struct Page[T] {
+    Items: []T
+}
+`,
+		"gen/gen.go": `package gen
+
+import (
+	"fmt"
+
+	"brg/domain"
+)
+
+type Order struct {
+	Status domain.Status
+	Total  domain.Money
+	Prev   *domain.Money
+}
+
+func New(c int64) Order {
+	return Order{Status: domain.StatusPaid, Total: domain.NewMoney(c)}
+}
+
+func Describe(m domain.Money) string { return fmt.Sprintf("%d/%s", m.Cents, m.Label()) }
+
+func Pages() domain.Page[Order] { return domain.Page[Order]{Items: []Order{New(1), New(2)}} }
+`,
+		"report/report.go": `package report
+
+import "brg/gen"
+
+func Total(os []gen.Order) int64 {
+	var n int64
+	for _, o := range os {
+		n += o.Total.Cents
+	}
+	return n
+}
+`,
+		"main.lyth": `import "fmt"
+import "brg/domain"
+import "brg/gen"
+import "brg/report"
+
+func cents(m: domain.Money): int64 = m.Cents
+
+func main() {
+    o := gen.New(5)
+    label := when o.Status {
+        Pending -> "pending"
+        Paid -> "paid"
+    }
+    fmt.Println(label, o.Status == domain.Status.Paid, cents(o.Total), o.Total.Label())
+    fmt.Println(o.Total.Note ?: "none", o.Prev?.Cents ?: -1)
+    m: domain.Money = o.Total
+    fmt.Println(gen.Describe(m), gen.Describe(domain.Money(Cents = 7)))
+    page := gen.Pages()
+    fmt.Println(len(page.Items), report.Total(page.Items))
+}
+`,
+	}
+	root := writeModule(t, "brg", files)
+	s := compileModule(t, root, false)
+	bin := filepath.Join(root, "app.bin")
+	if ok, err := s.GoBuild(bin, []string{"brg"}, nil); err != nil || !ok {
+		t.Fatalf("build failed: %v\n%s", err, render(s.Sink.All()))
+	}
+	out, err := exec.Command(bin).Output()
+	want := "paid true 5 5c\nnew -1\n5/5c 7/7c\n2 3"
+	if err != nil || strings.TrimSpace(string(out)) != want {
+		t.Fatalf("output %q, want %q, err %v", out, want, err)
+	}
+}

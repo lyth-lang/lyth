@@ -21,14 +21,28 @@ func GoError() gotypes.Type { return goError }
 
 // Lift converts a Go type to the Lyth type describing it. Nil-able positions
 // become platform types (unknown nullability); nothing is simplified.
-func Lift(t gotypes.Type) Type {
+func Lift(t gotypes.Type) Type { return Lifter{}.Lift(t) }
+
+// LiftSignature converts a Go signature (receiver ignored).
+func LiftSignature(s *gotypes.Signature) *Signature { return Lifter{}.LiftSignature(s) }
+
+// A Lifter converts Go types to Lyth types. Decl, when set, maps a Go named
+// type that is the Go view of a Lyth declaration (a Go package of the module
+// that uses a Lyth package's types) back to that declaration, so the Lyth
+// type keeps its identity, nullability, and members.
+type Lifter struct {
+	Decl func(*gotypes.Named) *TypeDecl
+}
+
+// Lift converts a Go type to the Lyth type describing it.
+func (l Lifter) Lift(t gotypes.Type) Type {
 	switch t := t.(type) {
 	case nil:
 		return Invalid
 	case *gotypes.Basic:
 		return liftBasic(t)
 	case *gotypes.Alias:
-		lt := Lift(gotypes.Unalias(t))
+		lt := l.Lift(gotypes.Unalias(t))
 		if t.TypeArgs() != nil || t.Obj().Pkg() == nil {
 			return lt
 		}
@@ -45,9 +59,14 @@ func Lift(t gotypes.Type) Type {
 		return lt
 	case *gotypes.Named:
 		n := &Named{Go: t}
+		if l.Decl != nil {
+			if d := l.Decl(t); d != nil {
+				n = &Named{Decl: d}
+			}
+		}
 		if args := t.TypeArgs(); args != nil {
 			for i := 0; i < args.Len(); i++ {
-				n.Args = append(n.Args, Lift(args.At(i)))
+				n.Args = append(n.Args, l.Lift(args.At(i)))
 			}
 		}
 		if _, ok := t.Underlying().(*gotypes.Interface); ok {
@@ -55,13 +74,13 @@ func Lift(t gotypes.Type) Type {
 		}
 		return n
 	case *gotypes.Pointer:
-		return &Platform{Elem: &Pointer{Elem: Lift(t.Elem())}}
+		return &Platform{Elem: &Pointer{Elem: l.Lift(t.Elem())}}
 	case *gotypes.Slice:
-		return &Slice{Elem: Lift(t.Elem())}
+		return &Slice{Elem: l.Lift(t.Elem())}
 	case *gotypes.Array:
-		return &Array{Len: t.Len(), Elem: Lift(t.Elem())}
+		return &Array{Len: t.Len(), Elem: l.Lift(t.Elem())}
 	case *gotypes.Map:
-		return &Map{Key: Lift(t.Key()), Elem: Lift(t.Elem())}
+		return &Map{Key: l.Lift(t.Key()), Elem: l.Lift(t.Elem())}
 	case *gotypes.Chan:
 		dir := SendRecv
 		switch t.Dir() {
@@ -70,9 +89,9 @@ func Lift(t gotypes.Type) Type {
 		case gotypes.RecvOnly:
 			dir = RecvOnly
 		}
-		return &Platform{Elem: &Chan{Dir: dir, Elem: Lift(t.Elem())}}
+		return &Platform{Elem: &Chan{Dir: dir, Elem: l.Lift(t.Elem())}}
 	case *gotypes.Signature:
-		return &Platform{Elem: LiftSignature(t)}
+		return &Platform{Elem: l.LiftSignature(t)}
 	case *gotypes.Interface:
 		if t.Empty() {
 			return &Platform{Elem: Any}
@@ -83,7 +102,7 @@ func Lift(t gotypes.Type) Type {
 	case *gotypes.Tuple:
 		tup := &Tuple{}
 		for i := 0; i < t.Len(); i++ {
-			tup.Elems = append(tup.Elems, Lift(t.At(i).Type()))
+			tup.Elems = append(tup.Elems, l.Lift(t.At(i).Type()))
 		}
 		return tup
 	}
@@ -91,15 +110,15 @@ func Lift(t gotypes.Type) Type {
 }
 
 // LiftSignature converts a Go signature (receiver ignored).
-func LiftSignature(s *gotypes.Signature) *Signature {
+func (l Lifter) LiftSignature(s *gotypes.Signature) *Signature {
 	sig := &Signature{Variadic: s.Variadic(), GoSig: s}
 	for i := 0; i < s.Params().Len(); i++ {
 		v := s.Params().At(i)
-		sig.Params = append(sig.Params, Lift(v.Type()))
+		sig.Params = append(sig.Params, l.Lift(v.Type()))
 		sig.ParamNames = append(sig.ParamNames, v.Name())
 	}
 	for i := 0; i < s.Results().Len(); i++ {
-		sig.Results = append(sig.Results, Lift(s.Results().At(i).Type()))
+		sig.Results = append(sig.Results, l.Lift(s.Results().At(i).Type()))
 	}
 	if tps := s.TypeParams(); tps != nil {
 		for i := 0; i < tps.Len(); i++ {
