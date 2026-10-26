@@ -108,7 +108,8 @@ the `:=` or `var` form that replaces it), and so is `typealias` (E0008, with
 the edit to `type`, §3.6). `pub` and `private` are reserved for
 the same reason: Lyth has no visibility keywords (§3.1). `fun` and `this` are
 not keywords; a declaration beginning with `fun` is E0008 with the edit
-`func`, and `this` is E0008 with the hint `self`.
+`func`, and `this` is an ordinary name: only where it is undeclared inside a
+method is it E0008 with the edit `self`.
 
 ### 1.6 Operators and punctuation
 
@@ -136,7 +137,9 @@ raw_string = "`" { any char except "`" } "`" .
 
 - Digits may be separated by `_` (`1_000_000`). A number starts with a digit
   (no `.5`).
-- Escapes: `\n \r \t \\ \" \' \$ \0 \uXXXX \U00XXXXXX \xHH`.
+- Escapes: `\n \r \t \a \b \f \v \\ \" \' \$ \0 \uXXXX \U00XXXXXX \xHH`.
+  As in Go, `\xHH` is one byte in a string (`"\xff"` is the byte 0xff) and the
+  code point U+00HH in a rune (`'\xff'` is 255).
 - **String templates.** `${expr}` inside a `"..."` literal interpolates. There is
   exactly one template syntax. Any other `$` is text: `"$1"`, `"US$ 5"`, and
   `$name` itself, so MongoDB's `"$set"`, JSON Schema's `"$ref"`, and

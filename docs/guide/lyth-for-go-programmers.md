@@ -593,6 +593,11 @@ meaning Go would get wrong ([ADR 0031](../adr/0031-go-spelling.md)):
 | read-only parameters and loop variables; a value receiver's fields cannot be assigned | assignable | an assignment to a parameter or a copy is almost always a mistake |
 | shadowing warns (W0006) | allowed silently | catches the shadowed `err` |
 | named and default arguments | positional only | optional settings without an options struct |
+| `x as T`, `v := x as? T`, `x is T` | `x.(T)`, `v, ok := x.(T)` | the same words as other type tests; `is` smart-casts, so the branch needs no second name |
+| `(string) -> bool`, `(string) -> unit throws` | `func(string) bool`, `func(string) error` | a function type reads like the lambdas that fill it |
+| `outer@ for ...`, `break@outer` | `outer:` above the loop | the label is part of the loop it names |
+| one `var` or `const` per line; `enum` | `var ( ... )`, `const ( ... iota )` | an enum gives names on the wire and exhaustive `when`; Lyth has no `iota` |
+| unnamed results; `defer f.Close()?` | named results | the one use Go needs them for, a deferred error, is `?` in `defer` |
 
 A few of these make Lyth slightly *longer* than Go: `name: Type` costs a
 character per parameter, `send(...) catch {}` is longer than an ignored
