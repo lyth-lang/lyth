@@ -85,7 +85,7 @@ func main() {}
 	if !strings.Contains(string(got), "N: int") || !strings.Contains(string(got), "func (c *Counter) Inc()") {
 		t.Errorf("unexpected result:\n%s", got)
 	}
-	if !s.Sink.HasErrors() || !strings.Contains(render(s.Sink.All()), "methods are declared func *Counter.Name") {
+	if !s.Sink.HasErrors() || !strings.Contains(render(s.Sink.All()), "methods are declared func *Counter.Inc") {
 		t.Errorf("the receiver error should remain:\n%s", render(s.Sink.All()))
 	}
 }

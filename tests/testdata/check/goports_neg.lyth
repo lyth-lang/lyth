@@ -1,0 +1,51 @@
+// Checker diagnostics that porting Go packages called for.
+struct Node {
+    next: *Node?
+}
+
+struct Item {
+    value: string
+}
+
+type PriorityQueue []*Item
+
+func *Node?.Len(): int { // ERROR E0601 "a receiver cannot be nullable"
+    return 0
+}
+
+// A pointer method may run on a nil receiver from Go: no warning.
+func *Node.Size(): int {
+    if self == null {
+        return 0
+    }
+    return 1
+}
+
+func pop(old: []*Item): []*Item {
+    n := len(old)
+    clear(old[n - 1:]) // ERROR E0405 "keep old[:n - 1] instead, or declare the elements nullable (*Item?)"
+    return old[:n - 1]
+}
+
+func count(record: []string): int {
+    n := 0
+    for field in record {
+        field = field[1:] // ERROR E0501 "copy it into a local at the top of the loop body"
+        n += len(field)
+    }
+    return n
+}
+
+func main() {
+    pq := make(PriorityQueue, 3) // ERROR E0405 "cannot make a non-empty PriorityQueue"
+    q := &PriorityQueue([]) // a conversion of a literal is a composite literal in Go
+    newPair := { n: int ->
+        a := n * 2
+        b := "x"
+        return a, b // ERROR E0216 "f: (...) -> (int, string) = { ... }"
+    }
+    x, y := newPair(3)
+    println(len(pq), len(*q), x, y, (&Node()).Size())
+}
+
+// Warnings: none

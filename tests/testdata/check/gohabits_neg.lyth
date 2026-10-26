@@ -4,7 +4,7 @@ struct T {
     val: int // ERROR E0003 "val is a reserved word and cannot name a field"
 }
 
-func (t *T) Inc() { // ERROR E0008 "methods are declared func *T.Name(...); the receiver is self"
+func (t *T) Inc() { // ERROR E0008 "methods are declared func *T.Inc(...); the receiver is self"
     t.N++
 }
 
@@ -31,7 +31,7 @@ func main() {
     for k := 0; k < n; k++ { // ERROR E0008 "Lyth has no three-part for loop"
         n = 0
     }
-    for j := 0; j < n; j += 2 { // ERROR E0003 "for another step, use while"
+    for j := 0; j < n; j += 2 { // ERROR E0008 "Lyth has no three-part for loop"
         println(j)
     }
 }

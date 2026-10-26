@@ -21,7 +21,7 @@ struct Point {
     X: int
 }
 
-func (p *Point) Move() {} // ERROR E0008 "methods are declared func *Point.Name(...); the receiver is self"
+func (p *Point) Move() {} // ERROR E0008 "methods are declared func *Point.Move(...); the receiver is self"
 
 func Point.show(): string = "${this.X}" // ERROR E0008 "the receiver is called self"
 

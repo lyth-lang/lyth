@@ -1,0 +1,67 @@
+// Go code pasted from real packages (flag, encoding/csv, text/tabwriter):
+// one diagnostic each, with the edit in the user's own names, no cascade.
+import "fmt"
+import "errors"
+
+var ( // ERROR E0008 "Lyth has no var groups"
+    ErrQuote = errors.New("quote")
+    ErrCount = errors.New("count")
+)
+
+type ErrorHandling int
+
+const ( // ERROR E0008 "write const ContinueOnError = value"
+    ContinueOnError ErrorHandling = iota
+    ExitOnError
+)
+
+type Value interface { // ERROR E0008 "an interface is declared interface Value"
+    String(): string
+}
+
+type funcValue func(string) error // ERROR E0008 "Lyth writes a function type as (A) -> R"
+
+func split(n: int): (q: int, r: int) { // ERROR E0008 "Lyth has no named results"
+    return n / 2, n % 2
+}
+
+func newBoolValue(val bool, p *bool) { // ERROR E0008 "val is reserved in Lyth" // ERROR E0003 "Lyth writes parameters as name: Type: val: bool" // ERROR E0003 "Lyth writes parameters as name: Type: p: *bool"
+    *p = val
+}
+
+func isNum(err: error): bool {
+    _, ok := err.(*errors.Error) // ERROR E0008 "Lyth asserts a type with as"
+    return ok
+}
+
+func describe(v: any): string {
+    switch x := v.(type) { // ERROR E0008 "write when x := v { is int"
+    case int:
+        return fmt.Sprint(x)
+    }
+    if _, ok := v.(fmt.Stringer); ok { // ERROR E0008 "write if v is fmt.Stringer"
+        return "stringer"
+    }
+    return "other"
+}
+
+func main() {
+    n := 0
+parseField: // ERROR E0008 "labels are written parseField@ before the loop"
+    while true {
+        n++
+        if n > 3 {
+            break@parseField
+        }
+    }
+    for i := 0; ; i++ { // ERROR E0008 "while true { ...; i++ }"
+        if i > 2 {
+            break
+        }
+    }
+    sorted := func(a, b string) int { // ERROR E0008 "write { a, b -> ... }"
+        return 0
+    }
+    q, r := split(7)
+    println(n, ErrQuote, ErrCount, q, r, sorted)
+}

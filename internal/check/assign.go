@@ -709,7 +709,8 @@ func (c *Checker) immutableBinding(id *syntax.Ident, v *VarSym, verb string, cod
 			WithHint("to replace it for the rest of the block with a value derived from it, declare it again: %s := f(%s)", id.Name, id.Name).
 			WithHint("or copy it into a local: %sNew := %s", id.Name, id.Name)
 	case LoopVar:
-		c.errorf(diag.EReassignVal, id.S, "cannot %s loop variable %s", verb, id.Name)
+		c.errorf(diag.EReassignVal, id.S, "cannot %s loop variable %s: loop variables are read-only", verb, id.Name).
+			WithHint("copy it into a local at the top of the loop body and change that: rest := %s", id.Name)
 	case CatchVar:
 		c.errorf(diag.EReassignVal, id.S, "cannot %s %s", verb, id.Name)
 	default:

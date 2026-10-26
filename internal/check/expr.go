@@ -2400,9 +2400,25 @@ func (c *Checker) returnValues(e *syntax.JumpExpr) {
 			x := c.value(e.Values[0], nil)
 			fn.inferred = append(fn.inferred, c.defaultValueType(x, "return value"))
 		default:
-			c.errorf(diag.EInvalidUse, e.S, "lambdas cannot return multiple values")
+			var ts []string
+			for _, v := range e.Values {
+				x := c.value(v, nil) // the values are used, and their types named
+				if x.mode == ModeInvalid {
+					ts = nil
+					break
+				}
+				ts = append(ts, c.defaultValueType(x, "return value").String())
+			}
+			d := c.errorf(diag.EInvalidUse, e.S, "a lambda returns several values only when its type says so")
+			if ts != nil {
+				d.WithHint("declare the variable's type: f: (...) -> (%s) = { ... }", strings.Join(ts, ", "))
+			}
+			fn.inferred = append(fn.inferred, types.Invalid) // calls of it report nothing more
 		}
 		return
+	}
+	if fn.sig == nil {
+		return // a declaration too damaged to have a signature
 	}
 	results := fn.sig.Results
 	if len(e.Values) == 1 && fn.fallible && !fn.rawTuple {

@@ -286,6 +286,12 @@ What Go programmers write by habit, and the Lyth for it:
 | `ctx, cancel := context.WithTimeout(ctx, d)` | the same: `:=` may replace a parameter with a value derived from it |
 | `r = r.WithContext(ctx)` (assigning a parameter) | `r := r.WithContext(ctx)` |
 | `strings.FieldsFunc(s, func(r rune) bool { ... })` | `strings.FieldsFunc(s) { r -> ... }` |
+| `func(string) bool`, `func(string) error` (types) | `(string) -> bool`, `(string) -> unit throws` |
+| `x.(T)`, `v, ok := x.(T)`, `_, ok := x.(T)` | `x as T`, `v := x as? T`, `ok := x is T` |
+| `switch x := v.(type) { case int: ... }` | `when x := v { is int -> ... }` |
+| `var ( ... )`, `const ( ... )` | one `var` or `const` per line; no `iota`: write the values, or declare an enum |
+| `func f() (n int, err error)` (named results) | `func f(): int throws`, with `n` a local |
+| a label on its own line above a loop | `outer@ for ...` |
 
 ## Coming from Kotlin
 

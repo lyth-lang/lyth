@@ -316,7 +316,7 @@ func TestSyntaxErrors(t *testing.T) {
 		{"func main() {\n  if x > 1 println(x)\n}", diag.EUnsupportedSyntax, 2},
 		{"func main() {\n  x := (1 + \n}", diag.EUnexpectedToken, 3},
 		{"func main() {\n  for i := 0; i < 3; i++ { }\n}", diag.EUnsupportedSyntax, 2},
-		{"func main() {\n  for i := 0; i < 3; i += 2 { }\n}", diag.EUnexpectedToken, 2},
+		{"func main() {\n  for i := 0; i < 3; i += 2 { }\n}", diag.EUnsupportedSyntax, 2},
 		{"func main() {\n  for (x in xs) { }\n}", diag.EUnsupportedSyntax, 2},
 		{"func f[T cmp.Ordered]() {}", diag.EUnsupportedSyntax, 1},
 		{"func (s *Server) Run() {}", diag.EUnsupportedSyntax, 1},

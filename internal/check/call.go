@@ -1066,8 +1066,9 @@ func (c *Checker) builtinCall(e *syntax.CallExpr, k BuiltinKind, args []*syntax.
 			}
 			n := c.value(args[1].Value, types.Int)
 			if !types.Zeroable(tt.Elem) && !(n.val != nil && constSign(n.val) == 0) {
-				c.errorf(diag.ENoZeroValue, e.S, "cannot make a non-empty %s: %s has no zero value", tt, tt.Elem).
-					WithHint("use make([]%s, 0, n) and append, or a nullable element type", tt.Elem)
+				written := args[0].Value.Span().Text() // PriorityQueue, not []*Item
+				c.errorf(diag.ENoZeroValue, e.S, "cannot make a non-empty %s: %s has no zero value", written, tt.Elem).
+					WithHint("use make(%s, 0, n) and append, or a nullable element type", written)
 			}
 			c.intArgs(args[1:])
 			if len(args) == 3 {
@@ -1151,8 +1152,19 @@ func (c *Checker) builtinCall(e *syntax.CallExpr, k BuiltinKind, args []*syntax.
 		}
 		x := c.value(args[0].Value, nil)
 		if s, ok := collectionOf(x.typ).(*types.Slice); ok && !types.Zeroable(s.Elem) {
-			c.errorf(diag.ENoZeroValue, args[0].Value.Span(), "clear would set every element of %s to its zero value, and %s", x.typ, types.NoZeroReason(s.Elem)).
-				WithHint("shorten the slice instead: %s = %s[:0]", args[0].Value.Span().Short(), args[0].Value.Span().Short())
+			d := c.errorf(diag.ENoZeroValue, args[0].Value.Span(), "clear would set every element of %s to its zero value, and %s", x.typ, types.NoZeroReason(s.Elem))
+			switch a := syntax.Unparen(args[0].Value).(type) {
+			case *syntax.Ident:
+				d.WithHint("shorten the slice instead: %s = %s[:0]", a.Name, a.Name)
+			case *syntax.SliceExpr:
+				if id, ok := syntax.Unparen(a.X).(*syntax.Ident); ok && a.Lo != nil && a.Hi == nil {
+					d.WithHint("keep %s[:%s] instead, or declare the elements nullable (%s?) to clear them", id.Name, a.Lo.Span().Text(), s.Elem)
+					break
+				}
+				d.WithHint("declare the elements nullable (%s?) so that they can be cleared", s.Elem)
+			default:
+				d.WithHint("declare the elements nullable (%s?) so that they can be cleared", s.Elem)
+			}
 		}
 		return &operand{mode: ModeNoValue, typ: types.Unit}
 	case BuiltinClose:

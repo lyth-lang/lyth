@@ -52,6 +52,7 @@ func (c *Checker) lambda(e *syntax.LambdaExpr, want types.Type) *operand {
 	// A result that is still an unbound type parameter of a generic call
 	// (R in map(xs) { ... }) comes from the body; the call unifies it.
 	inferResult := false
+	badResult := false // a return of several values, reported
 	if exp != nil {
 		for _, r := range exp.Results {
 			inferResult = inferResult || c.foreignTypeParams(r)
@@ -223,6 +224,10 @@ func (c *Checker) lambda(e *syntax.LambdaExpr, want types.Type) *operand {
 			c.stmtList(stmts)
 		}
 		for _, rt := range fn.inferred {
+			if rt == types.Invalid {
+				badResult = true // return a, b, reported
+				continue
+			}
 			if resultT == nil || isNothing(resultT) {
 				resultT = rt
 			} else if !types.Identical(resultT, rt) && rt != types.Unit && !isNothing(rt) {
@@ -238,6 +243,9 @@ func (c *Checker) lambda(e *syntax.LambdaExpr, want types.Type) *operand {
 	c.scope, c.fn = saveScope, saveFn
 	info.Sig = sig
 	c.info.Lambdas[e] = info
+	if badResult {
+		return invalid(e)
+	}
 	if exp != nil && !inferResult {
 		// The lambda has exactly the expected function type (including a Go
 		// callback type returning error).

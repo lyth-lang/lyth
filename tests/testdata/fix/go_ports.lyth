@@ -1,0 +1,36 @@
+// Go spellings from real packages (flag, encoding/csv) that lyth fix rewrites.
+import "errors"
+
+var (
+    // ErrQuote reports a bad quote.
+    ErrQuote = errors.New("quote")
+    ErrCount = errors.New("count")
+)
+
+type Value interface {
+    String(): string
+}
+
+struct Set {
+    name: string
+    mode: int
+}
+
+type Visit = func(string) bool
+
+func main() {
+    s := &Set{
+        name: "x",
+        mode: 1,
+    }
+    keep: Visit = { it != "" }
+    n := 0
+outer:
+    for i in 0..<3 {
+        n += i
+        if n > 1 {
+            break@outer
+        }
+    }
+    println(s.name, s.mode, keep("a"), n, ErrQuote, ErrCount)
+}
