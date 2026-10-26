@@ -128,6 +128,10 @@ type pkgDir struct {
 	GoTestFiles []string
 }
 
+// TestOnly reports whether the package has only test files (e2e tests):
+// only lyth test compiles it, as go test does a directory of _test.go files.
+func (p *pkgDir) TestOnly() bool { return len(p.Files) == 0 && len(p.TestFiles) > 0 }
+
 // discover finds all directories under the module root containing .lyth
 // files, honoring the go command's rules for ignored directories.
 func discover(mod *Module) ([]*pkgDir, error) {
@@ -189,7 +193,7 @@ func scanDir(mod *Module, dir string) (*pkgDir, error) {
 			p.GoFiles = append(p.GoFiles, path)
 		}
 	}
-	if len(p.Files) == 0 {
+	if len(p.Files) == 0 && len(p.TestFiles) == 0 {
 		return nil, nil
 	}
 	sort.Strings(p.Files)

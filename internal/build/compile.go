@@ -276,10 +276,18 @@ func (s *Session) setup(t Target) error {
 		}
 	}
 	s.makeAvailable(all)
+	var testOnly []string
 	for _, p := range all {
 		if len(t.Patterns) == 0 || selected[p.Dir] {
+			if p.TestOnly() && !s.cfg.Tests {
+				testOnly = append(testOnly, p.Rel)
+				continue // only lyth test compiles a directory of tests
+			}
 			s.Targets = append(s.Targets, s.addPkg(p))
 		}
+	}
+	if len(s.Targets) == 0 && len(testOnly) > 0 {
+		return fmt.Errorf("%s has only test files; run them with lyth test ./%s", testOnly[0], testOnly[0])
 	}
 	return nil
 }
@@ -287,7 +295,9 @@ func (s *Session) setup(t Target) error {
 func (s *Session) makeAvailable(all []*pkgDir) {
 	s.available = map[string]*pkgDir{}
 	for _, p := range all {
-		s.available[p.ImportPath] = p
+		if !p.TestOnly() { // a package of tests cannot be imported
+			s.available[p.ImportPath] = p
+		}
 	}
 }
 

@@ -1635,3 +1635,31 @@ func TestBuildConstraints(t *testing.T) {
 		}
 	}
 }
+
+// TestTestOnlyPackages runs a directory that holds only _test.lyth files
+// (end-to-end tests of other packages), as go test runs one of _test.go
+// files, and leaves it out of builds.
+func TestTestOnlyPackages(t *testing.T) {
+	root := writeModule(t, "e2e", map[string]string{
+		"calc/calc.lyth": calcLyth,
+		"e2e/e2e_test.lyth": `import "testing"
+import "e2e/calc"
+
+func TestAcross(t: *testing.T) {
+    if calc.Add(1, 1) != 2 {
+        t.Fatal("Add")
+    }
+}
+`,
+	})
+	code, out := testModule(t, root, "-v")
+	if code != 0 || !strings.Contains(out, "--- PASS: TestAcross") {
+		t.Fatalf("go test (exit %d):\n%s", code, out)
+	}
+	s := compileModule(t, root, false)
+	for _, p := range s.Targets {
+		if strings.HasSuffix(p.Dir.ImportPath, "/e2e") {
+			t.Errorf("a build compiles the test-only package %s", p.Dir.ImportPath)
+		}
+	}
+}
