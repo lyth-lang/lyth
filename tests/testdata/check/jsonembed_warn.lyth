@@ -1,0 +1,24 @@
+// Embedded structs whose fields share a json key.
+struct User {
+    ID: int
+    Name: string
+}
+
+struct Order {
+    ID: int
+}
+
+struct Row {
+    User
+    Order // WARN W0008 "User.ID and Order.ID have the same json key"
+}
+
+struct Fixed {
+    User
+    Order
+    ID: int
+}
+
+func main() {
+    println(Row(), Fixed())
+}

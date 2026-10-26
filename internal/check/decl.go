@@ -502,6 +502,77 @@ func (c *Checker) warnDuplicateKeys(decl *types.TypeDecl) {
 		}
 		keys[key] = f
 	}
+	// Keys promoted from two embedded structs collide unless a field of the
+	// struct itself has the key.
+	promoted := map[string]string{} // key -> embedded field.name
+	for _, f := range decl.Fields {
+		if !f.Embedded {
+			continue
+		}
+		if value, ok := reflect.StructTag(f.Tag).Lookup("json"); ok && value != "" {
+			continue // a named embedded field is not flattened
+		}
+		for _, k := range embeddedKeys(f.Type) {
+			if keys[k[0]] != nil {
+				continue
+			}
+			if old, ok := promoted[k[0]]; ok && !strings.HasPrefix(old, f.Name+".") {
+				c.warnf(diag.WJSONKey, f.Span, "%s and %s.%s have the same json key %q, so encoding/json leaves both out", old, f.Name, k[1], k[0]).
+					WithHint("give one of them another key with a tag, or declare a field %s in %s", k[1], decl.Name)
+				continue
+			}
+			promoted[k[0]] = f.Name + "." + k[1]
+		}
+	}
+}
+
+// embeddedKeys returns the json keys, with their field names, that an
+// embedded struct of type t adds to the struct embedding it.
+func embeddedKeys(t types.Type) [][2]string {
+	b := types.Base(t)
+	if p, ok := b.(*types.Pointer); ok {
+		b = types.Base(p.Elem)
+	}
+	n, ok := b.(*types.Named)
+	if !ok {
+		return nil
+	}
+	var out [][2]string
+	add := func(name, tag string) {
+		value, ok := reflect.StructTag(tag).Lookup("json")
+		if value == "-" {
+			return
+		}
+		key, _, _ := strings.Cut(value, ",")
+		if !ok || key == "" {
+			key = name
+		}
+		out = append(out, [2]string{key, name})
+	}
+	if n.Decl != nil {
+		if n.Decl.Kind != types.StructDecl {
+			return nil
+		}
+		for _, f := range n.Decl.Fields {
+			if !f.Private && !f.Embedded {
+				add(f.GoName, f.Tag)
+			}
+		}
+		return out
+	}
+	if n.Go == nil {
+		return nil
+	}
+	st, ok := n.Go.Underlying().(*gotypes.Struct)
+	if !ok {
+		return nil
+	}
+	for i := 0; i < st.NumFields(); i++ {
+		if f := st.Field(i); f.Exported() && !f.Embedded() {
+			add(f.Name(), st.Tag(i))
+		}
+	}
+	return out
 }
 
 // embeddable reports whether t may be embedded in a struct, as Go allows: a
