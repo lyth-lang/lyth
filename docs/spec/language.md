@@ -28,6 +28,23 @@ interface method is its doc comment and is copied to the generated Go declaratio
 so `go doc` works on Lyth packages. A comment after code on the same line is not a
 doc comment.
 
+**Directives.** A line comment `//go:name args` at the start of a line is a Go
+directive. `//go:build` lines before the package clause and imports are build
+constraints (§1.1). `//go:generate` lines are run by `lyth generate`. The other
+directives apply to the declaration directly below them (doc comment lines may
+come between) and are copied to the generated Go declaration:
+
+- `//go:embed patterns` above a package-level `var` that has a type and no
+  initializer, of type `string`, `[]byte`, or `embed.FS` (§3.5), as in Go's
+  `embed` package: the build fills the variable with the files of the package
+  directory that the patterns match. The generated file imports `embed`.
+- `//go:noinline`, `//go:nosplit`, `//go:norace`, and `//go:nocheckptr` above a
+  function or method.
+
+Any other directive, a directive above another kind of declaration, and one
+that no declaration follows are errors (E0008, E0216, E0601): Go would ignore
+them, and an ignored `//go:embed` leaves its variable empty.
+
 ### 1.3 Newlines and statement termination
 
 Lyth is newline-sensitive. The lexer emits a `NEWLINE` token at each
@@ -465,12 +482,15 @@ interfaces it implements (§3.3). An interface may be generic,
 ### 3.5 Variables and constants
 
 ```ebnf
-VarDecl   = "var" identifier [ ":" Type ] "=" Expression NEWLINE .
+VarDecl   = "var" identifier ( ":" Type [ "=" Expression ] | "=" Expression ) NEWLINE .
 ConstDecl = "const" identifier [ ":" Type ] "=" Expression NEWLINE .
 ```
 
 A top-level `var` declares a Go package-level variable, with Go's dependency-
-ordered initialization. It is mutable: any code in the package (and, when it
+ordered initialization. `var x: T` without an initializer has the zero value
+of `T`, which must have one (E0405, types.md §6): `var mu: sync.Mutex`,
+`var cache: map[string]int`. A `//go:embed` directive above such a variable
+fills it with files instead (§1.2). It is mutable: any code in the package (and, when it
 is exported, any importing package) may assign it, so it never smart-casts
 ([types.md §5.3](types.md#53-using-nullable-values)). A top-level `val` is
 E0008 with the edit `var`. `const` declares a Go constant: the initializer must

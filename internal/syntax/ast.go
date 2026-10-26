@@ -1,6 +1,10 @@
 package syntax
 
-import "github.com/lyth-lang/lyth/internal/source"
+import (
+	"strings"
+
+	"github.com/lyth-lang/lyth/internal/source"
+)
 
 // Node is any syntax tree node. Every node knows its source span.
 type Node interface {
@@ -57,9 +61,32 @@ type ImportDecl struct {
 	S        source.Span
 }
 
+// Directive is a //go: comment line directly above a declaration
+// (//go:embed, //go:noinline), copied to the generated Go declaration.
+type Directive struct {
+	Text string // the whole comment, //go:embed *.sql
+	S    source.Span
+}
+
+// Name returns the directive's name: embed for //go:embed *.sql.
+func (d Directive) Name() string {
+	name := strings.TrimPrefix(d.Text, "//go:")
+	if i := strings.IndexAny(name, " \t"); i >= 0 {
+		name = name[:i]
+	}
+	return name
+}
+
+// Args returns what follows the directive's name.
+func (d Directive) Args() string {
+	rest := strings.TrimPrefix(d.Text, "//go:"+d.Name())
+	return strings.TrimSpace(rest)
+}
+
 // FunDecl is a function or method declaration.
 type FunDecl struct {
 	Doc        string
+	Directives []Directive
 	TypeParams []*TypeParam
 	Recv       *Receiver // nil for plain functions
 	Name       *Ident
@@ -164,14 +191,15 @@ type MethodSpec struct {
 	S          source.Span
 }
 
-// PropDecl is a top-level `val`/`var`.
+// PropDecl is a top-level `var`.
 type PropDecl struct {
-	Doc     string
-	Mutable bool
-	Name    *Ident
-	Type    TypeExpr // may be nil
-	Value   Expr
-	S       source.Span
+	Doc        string
+	Directives []Directive
+	Mutable    bool
+	Name       *Ident
+	Type       TypeExpr // may be nil
+	Value      Expr     // nil for `var x: T`, the zero value
+	S          source.Span
 }
 
 // ConstDecl is a `const`, at package level or in a function body.

@@ -14,6 +14,7 @@ import (
 	"go/token"
 	gotypes "go/types"
 	"path"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -428,6 +429,37 @@ func (l *fileLowerer) zeroValue(t types.Type) ast.Expr {
 
 // ---------------------------------------------------------------------------
 // Declarations
+
+// docWithDirectives returns a declaration's doc comment followed by its
+// //go: directives, where gofmt puts them: after a // line when there is
+// doc text.
+func docWithDirectives(doc string, dirs []syntax.Directive) *ast.CommentGroup {
+	g := docGroup(doc)
+	if len(dirs) == 0 {
+		return g
+	}
+	if g == nil {
+		g = &ast.CommentGroup{}
+	} else {
+		g.List = append(g.List, &ast.Comment{Text: "//"})
+	}
+	for _, d := range dirs {
+		g.List = append(g.List, &ast.Comment{Text: d.Text})
+	}
+	return g
+}
+
+// useEmbed makes the generated file import embed, which Go requires of a
+// file with //go:embed directives.
+func (l *fileLowerer) useEmbed() {
+	if _, ok := l.imports["embed"]; ok {
+		l.usedImports["embed"] = true
+		return
+	}
+	if !slices.Contains(l.blank, "embed") {
+		l.blank = append(l.blank, "embed")
+	}
+}
 
 func docGroup(doc string) *ast.CommentGroup {
 	if doc == "" {
@@ -983,7 +1015,7 @@ func (l *fileLowerer) funDecl(d *syntax.FunDecl) {
 	if extParam != nil {
 		ft.Params.List = append([]*ast.Field{extParam}, ft.Params.List...)
 	}
-	fd := &ast.FuncDecl{Doc: docGroup(d.Doc), Recv: recv, Name: ast.NewIdent(name), Type: ft}
+	fd := &ast.FuncDecl{Doc: docWithDirectives(d.Doc, d.Directives), Recv: recv, Name: ast.NewIdent(name), Type: ft}
 	l.mark(fd.Name, d.Name.S)
 	l.mark(fd, d.S)
 	body := fl.funcBody(d, fi)
@@ -1154,7 +1186,12 @@ func (l *fileLowerer) propDecl(d *syntax.PropDecl) {
 	} else {
 		spec.Type = l.typeExpr(v.Type)
 	}
-	gd := &ast.GenDecl{Doc: docGroup(d.Doc), Tok: token.VAR, TokPos: l.pos(d.S), Specs: []ast.Spec{spec}}
+	for _, dir := range d.Directives {
+		if dir.Name() == "embed" {
+			l.useEmbed()
+		}
+	}
+	gd := &ast.GenDecl{Doc: docWithDirectives(d.Doc, d.Directives), Tok: token.VAR, TokPos: l.pos(d.S), Specs: []ast.Spec{spec}}
 	l.mark(gd, d.S)
 	l.decls = append(l.decls, gd)
 }

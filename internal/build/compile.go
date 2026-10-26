@@ -142,6 +142,9 @@ func Compile(cfg *Config, target Target) (*Session, error) {
 		}
 	}
 	t = s.phase("parse", t)
+	if s.Mod.Synthetic {
+		s.embedOutsideModule()
+	}
 	if !s.order() {
 		return s, nil
 	}
@@ -341,6 +344,28 @@ func (s *Session) parse() {
 				"package %s mixes Go and Lyth files, which is not supported yet", p.Dir.ImportPath).
 				WithNote("Go files: %s", strings.Join(baseNames(p.Dir.GoFiles), ", ")).
 				WithHint("move the Go code into its own package and import it from Lyth")
+		}
+	}
+}
+
+// embedOutsideModule reports //go:embed in a file built outside a module:
+// the program is built in a directory of the user cache, where the
+// patterns would not find the files beside the source.
+func (s *Session) embedOutsideModule() {
+	for _, p := range s.Packages {
+		for _, f := range p.Syntax {
+			for _, d := range f.Decls {
+				pd, ok := d.(*syntax.PropDecl)
+				if !ok {
+					continue
+				}
+				for _, dir := range pd.Directives {
+					if dir.Name() == "embed" {
+						s.Sink.Errorf(diag.EUnsupported, dir.S, "//go:embed needs a module: this file is not in one").
+							WithHint("create a module in its directory with lyth init, then lyth run .")
+					}
+				}
+			}
 		}
 	}
 }

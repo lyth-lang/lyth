@@ -1,0 +1,64 @@
+// //go: directives: //go:embed on package-level variables, compiler
+// directives on functions, and nothing silently ignored. A line holding
+// only an expectation expects it on the next line, the directive.
+import "embed"
+import "sync"
+
+//go:embed a.txt
+var withValue = "x" // ERROR E0216 "a //go:embed variable has no initializer"
+
+//go:embed a.txt
+var wrongType: int // ERROR E0201 "a //go:embed variable has type string, []byte, or embed.FS, not int"
+
+// ERROR E0216 "//go:embed needs a file pattern"
+//go:embed
+var noPattern: string
+
+// ERROR E0216 "//go:noinline does not apply to a variable"
+//go:noinline
+var notAFunc: string
+
+// ERROR E0216 "//go:embed applies to a package-level var, not to a function"
+//go:embed a.txt
+func f() {}
+
+// ERROR E0601 "//go:linkname is not supported in Lyth"
+//go:linkname g runtime.g
+func g() {}
+
+// ERROR E0216 "//go:noinline takes no arguments"
+//go:noinline now
+func h() {}
+
+// ERROR E0008 "//go:embed must be directly above the declaration it applies to"
+//go:embed a.txt
+const c = 1
+
+var mu: sync.Mutex
+var fs: embed.FS
+var noValue // ERROR E0003 "a package-level var needs a type or an initializer"
+var noZero: *int // ERROR E0405 "noZero of type *int needs an initializer: *int has no zero value"
+
+struct Plan2 {
+    Name: string
+    Next: *Plan2
+}
+
+var plan: Plan2 // ERROR E0405 "its field Next has type *Plan2, a non-null pointer"
+
+enum Tier: string { Free = "free", Pro = "pro" }
+
+struct Account {
+    Tier: Tier
+}
+
+func main() {
+    // ERROR E0008 "//go:embed must be directly above the declaration it applies to"
+    //go:embed a.txt
+    x := ""
+    a: Account // ERROR E0405 "its field Tier has type Tier, a string-backed enum without a"
+    println(x, f, h, a.Tier)
+}
+
+// ERROR E0008 "a //go:build line must come before the package clause"
+//go:build linux

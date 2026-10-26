@@ -183,7 +183,7 @@ func (c *Checker) localDecl(s *syntax.LocalDecl) bool {
 	switch {
 	case s.Value == nil:
 		if want != nil && want != types.Invalid && !types.Zeroable(want) {
-			c.errorf(diag.ENoZeroValue, s.S, "%s of type %s needs an initializer: %s has no zero value", name.Name, want, want).
+			c.errorf(diag.ENoZeroValue, s.S, "%s of type %s needs an initializer: %s", name.Name, want, types.NoZeroReason(want)).
 				WithHint("initialize it, or declare it nullable: %s: %s = null", name.Name, types.MakeNullable(want))
 		}
 		t = want

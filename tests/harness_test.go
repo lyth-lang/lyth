@@ -58,9 +58,20 @@ func newModule(t *testing.T, files []string, modPath string) (string, map[string
 		if err := os.WriteFile(filepath.Join(dir, filepath.Base(f)), data, 0o644); err != nil {
 			t.Fatal(err)
 		}
+		// Files a program reads or embeds sit in testdata/run/<name>.files.
+		if extra := strings.TrimSuffix(f, ".lyth") + ".files"; isDir(extra) {
+			if err := os.CopyFS(dir, os.DirFS(extra)); err != nil {
+				t.Fatal(err)
+			}
+		}
 		dirs[f] = dir
 	}
 	return root, dirs
+}
+
+func isDir(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && fi.IsDir()
 }
 
 func render(diags []*diag.Diagnostic) string {
@@ -286,8 +297,15 @@ func TestCheck(t *testing.T) {
 			src, _ := os.ReadFile(f)
 			var want []*expectedDiag
 			for i, line := range strings.Split(string(src), "\n") {
+				// A line holding only expectations applies to the next line:
+				// the way to expect a diagnostic on a comment (a //go:
+				// directive).
+				at := i + 1
+				if strings.HasPrefix(strings.TrimSpace(line), "// ERROR") || strings.HasPrefix(strings.TrimSpace(line), "// WARN") {
+					at++
+				}
 				for _, m := range errorRE.FindAllStringSubmatch(line, -1) {
-					want = append(want, &expectedDiag{line: i + 1, code: m[2], msg: m[3], warn: m[1] == "WARN"})
+					want = append(want, &expectedDiag{line: at, code: m[2], msg: m[3], warn: m[1] == "WARN"})
 				}
 			}
 			path := filepath.Join(dirs[f], filepath.Base(f))

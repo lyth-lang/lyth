@@ -244,7 +244,9 @@ func Emit(f *lower.File, opts Options) (*Result, error) {
 		case *ast.GenDecl:
 			doc = d.Doc
 		}
-		if doc != nil && tf.Line(doc.End())+1 == tf.Line(d.Pos()) {
+		// A doc comment that ends in directives (//go:embed) has its "//"
+		// line already, or needs none when it holds only directives.
+		if doc != nil && tf.Line(doc.End())+1 == tf.Line(d.Pos()) && !isDirective(doc.List[len(doc.List)-1].Text) {
 			docBefore[tf.Line(d.Pos())] = true
 		}
 	}
@@ -615,4 +617,29 @@ func hoisted(s ast.Stmt) bool {
 		}
 	}
 	return false
+}
+
+// isDirective reports whether a comment is a directive in gofmt's sense
+// (//go:embed, //line): gofmt keeps directives at the end of a doc comment.
+func isDirective(c string) bool {
+	c, ok := strings.CutPrefix(c, "//")
+	if !ok {
+		return false
+	}
+	if strings.HasPrefix(c, "line ") || strings.HasPrefix(c, "extern ") || strings.HasPrefix(c, "export ") {
+		return true
+	}
+	colon := strings.Index(c, ":")
+	if colon <= 0 || colon+1 >= len(c) {
+		return false
+	}
+	for i := 0; i <= colon+1; i++ {
+		if i == colon {
+			continue
+		}
+		if b := c[i]; !('a' <= b && b <= 'z' || '0' <= b && b <= '9') {
+			return false
+		}
+	}
+	return true
 }

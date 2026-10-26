@@ -1425,12 +1425,99 @@ func (c *Checker) globalType(v *VarSym) types.Type {
 		}
 	} else if want != nil {
 		v.Type = want
+		if want != types.Invalid && !types.Zeroable(want) && !hasEmbed(d) {
+			c.errorf(diag.ENoZeroValue, d.S, "%s of type %s needs an initializer: %s", v.name, want, types.NoZeroReason(want)).
+				WithHint("initialize it, or declare it nullable: var %s: %s = null", v.name, types.MakeNullable(want))
+		}
 	} else {
 		v.Type = types.Invalid
 	}
+	c.varDirectives(v)
 	c.scope, c.fn = saveScope, saveFn
 	v.state = 2
 	return v.Type
+}
+
+func hasEmbed(d *syntax.PropDecl) bool {
+	for _, dir := range d.Directives {
+		if dir.Name() == "embed" {
+			return true
+		}
+	}
+	return false
+}
+
+// varDirectives checks the directives of a package-level var: //go:embed
+// fills a string, []byte, or embed.FS variable with files of the package
+// directory when the program is built, as in Go.
+func (c *Checker) varDirectives(v *VarSym) {
+	d := v.Decl
+	for _, dir := range d.Directives {
+		if dir.Name() != "embed" {
+			c.errorf(diag.EInvalidUse, dir.S, "//go:%s does not apply to a variable", dir.Name()).
+				WithHint("the directive a package-level var takes is //go:embed")
+			continue
+		}
+		if dir.Args() == "" {
+			c.errorf(diag.EInvalidUse, dir.S, "//go:embed needs a file pattern: //go:embed config.json")
+		}
+	}
+	if !hasEmbed(d) {
+		return
+	}
+	if d.Value != nil {
+		typ := "string"
+		if d.Type != nil {
+			typ = d.Type.Span().Text()
+		}
+		c.errorf(diag.EInvalidUse, d.Value.Span(), "a //go:embed variable has no initializer: the build fills it with the files").
+			WithEdit(source.Span{File: d.S.File, Start: d.Name.S.End, End: d.Value.Span().End}, ": "+typ, "write var %s: %s", v.name, typ)
+		return
+	}
+	if v.Type != types.Invalid && !isEmbedType(v.Type) {
+		c.errorf(diag.ETypeMismatch, d.Type.Span(), "a //go:embed variable has type string, []byte, or embed.FS, not %s", v.Type)
+	}
+	// The generated file imports embed; a Lyth import of it is used.
+	for _, sym := range c.scopeFor(d.S).Symbols() {
+		if p, ok := sym.(*PkgSym); ok && p.Pkg != nil && p.Pkg.Path == "embed" {
+			p.Used = true
+		}
+	}
+}
+
+func isEmbedType(t types.Type) bool {
+	g := types.Lower(t)
+	if b, ok := g.(*gotypes.Basic); ok && b.Kind() == gotypes.String {
+		return true
+	}
+	if s, ok := g.(*gotypes.Slice); ok {
+		b, ok := s.Elem().(*gotypes.Basic)
+		return ok && b.Kind() == gotypes.Byte
+	}
+	if n, ok := gotypes.Unalias(g).(*gotypes.Named); ok {
+		obj := n.Obj()
+		return obj.Pkg() != nil && obj.Pkg().Path() == "embed" && obj.Name() == "FS"
+	}
+	return false
+}
+
+// funcDirectives checks the directives of a function. Those that tell the
+// Go compiler how to compile it are copied to the generated declaration.
+func (c *Checker) funcDirectives(d *syntax.FunDecl) {
+	for _, dir := range d.Directives {
+		switch name := dir.Name(); name {
+		case "noinline", "nosplit", "norace", "nocheckptr":
+			if dir.Args() != "" {
+				c.errorf(diag.EInvalidUse, dir.S, "//go:%s takes no arguments", name)
+			}
+		case "embed":
+			c.errorf(diag.EInvalidUse, dir.S, "//go:embed applies to a package-level var, not to a function").
+				WithHint("declare the variable: var content: string")
+		default:
+			c.errorf(diag.EUnsupported, dir.S, "//go:%s is not supported in Lyth", name).
+				WithHint("the directives a function takes are //go:noinline, //go:nosplit, //go:norace, and //go:nocheckptr")
+		}
+	}
 }
 
 // localConst declares a constant in a function body. Its value is checked

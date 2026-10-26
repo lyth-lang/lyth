@@ -309,6 +309,7 @@ func (c *Checker) collect(files []*syntax.File) {
 		for _, d := range f.Decls {
 			switch d := d.(type) {
 			case *syntax.FunDecl:
+				c.funcDirectives(d)
 				if d.Recv != nil {
 					continue // methods are attached in resolveFuncDecls
 				}

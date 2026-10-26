@@ -127,7 +127,12 @@ func main() throws {
 - Locals: `x := 1` declares a mutable variable, `x = 2` assigns, `x: int64 = 0` or `x: int64`
   (the zero value) when the type matters. `a, b := f()` and `a, b = b, a + b` work as in Go.
   There is no `val` or `var` inside functions.
-- Package level: `var Default = "x"`, `const Max = 10`. `const` also works inside a function.
+- Package level: `var Default = "x"`, `var mu: sync.Mutex` (the zero value), `const Max = 10`.
+  `const` also works inside a function. `func init() { ... }` runs before `main`, as in Go; a
+  package may have several.
+- Files of the package directory are embedded as in Go: `//go:embed schema.sql` on the line
+  before `var schema: string` (or `[]byte`, or `embed.FS` for several files), with no
+  initializer. `//go:noinline` and the other compiler directives go on the line before a `func`.
 - Parameters, loop variables, `catch` bindings, and `self` are read-only. `:=` may replace a
   parameter with a value of its type derived from it, as Go code does:
   `ctx, cancel := context.WithTimeout(ctx, d)`, `g, ctx := errgroup.WithContext(ctx)`,
@@ -252,6 +257,9 @@ What Go programmers write by habit, and the Lyth for it:
 | `if err != nil { return err }` | `f()?` |
 | `[T cmp.Ordered]` | `[T: cmp.Ordered]` |
 | `var x = 1` in a function | `x := 1` |
+| `var mu sync.Mutex` (package level) | `var mu: sync.Mutex` |
+| `type tc struct { ... }` in a function | `struct tc { ... }` in the function |
+| `[]struct{ in string }{...}` | declare `struct tc { in: string }`, then `[tc(in = "a")]` |
 | `switch` | `when` |
 | `if v := f(); v > 0 { }` | `v := f()`, then `if v > 0 { }` |
 | `ctx, cancel := context.WithTimeout(ctx, d)` | the same: `:=` may replace a parameter with a value derived from it |

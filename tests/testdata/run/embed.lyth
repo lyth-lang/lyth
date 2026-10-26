@@ -1,0 +1,46 @@
+// //go:embed fills package-level variables with files of the package
+// directory; other directives are copied to the generated Go.
+import "embed"
+import "fmt"
+import "io/fs"
+import "strings"
+
+// greeting is the text of greeting.txt.
+//go:embed greeting.txt
+var greeting: string
+
+//go:embed greeting.txt
+var raw: []byte
+
+//go:embed static
+var static: embed.FS
+
+// counter has its zero value: a var with a type needs no initializer.
+var counter: int
+
+var names: []string
+
+//go:noinline
+func add(a: int, b: int): int = a + b
+
+func main() throws {
+    fmt.Print(greeting)
+    fmt.Println(len(raw), strings.HasPrefix(string(raw), "Hello"))
+    fs.WalkDir(static, ".") { path, d, err ->
+        err?
+        if !d.IsDir() {
+            data := static.ReadFile(path)?
+            fmt.Println(path, len(data))
+        }
+    }?
+    counter += add(1, 2)
+    names = append(names, "x")
+    fmt.Println(counter, names)
+}
+
+// Output:
+// Hello from an embedded file.
+// 29 true
+// static/a.txt 2
+// static/b.txt 3
+// 3 [x]

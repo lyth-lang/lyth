@@ -48,6 +48,9 @@ type parser struct {
 	// recoveredTPs holds type parameters written func k<T>(...), reported
 	// and kept for the function being parsed.
 	recoveredTPs []*TypeParam
+	// placed holds the start offsets of the //go: directives that precede
+	// a declaration taking them; the others are reported as misplaced.
+	placed map[int]bool
 }
 
 // afterBrackets returns the token after the ']' matching the '[' at index i.
@@ -231,7 +234,13 @@ func (p *parser) spanFrom(start source.Span) source.Span {
 // Rejected syntax the parser understands (E0005, E0008, ...) is not damage.
 func (p *parser) markDamaged(start, n, inner int) {
 	if len(p.damaged) == inner && p.syntaxErrorSince(n) {
-		p.damaged = append(p.damaged, p.toks[start].Span.Join(p.toks[p.pos-1].Span))
+		end := p.pos - 1
+		// The newlines that end the statement are not part of it: the next
+		// statement starts where the last one ends.
+		for end > start && (p.toks[end].Kind == NEWLINE || p.toks[end].Kind == SEMI) {
+			end--
+		}
+		p.damaged = append(p.damaged, p.toks[start].Span.Join(p.toks[end].Span))
 	}
 }
 
@@ -346,7 +355,82 @@ func (p *parser) parseFile() *File {
 		p.markDamaged(start, n, inner)
 	}
 	f.Damaged = p.damaged
+	p.misplacedDirectives(f)
 	return f
+}
+
+// isGoDirective reports whether a comment is a //go: directive on a line of
+// its own (Go reads directives only at the start of a line).
+func (p *parser) isGoDirective(c Comment) bool {
+	if !strings.HasPrefix(c.Text, "//go:") || len(c.Text) == len("//go:") {
+		return false
+	}
+	pos := p.file.Position(c.Span.Start)
+	return strings.TrimSpace(string(p.file.Content[p.file.LineStart(pos.Line):c.Span.Start])) == ""
+}
+
+// directivesFor returns the //go: directives among the comment lines
+// directly above the declaration at offset off, and marks them placed.
+// //go:build and //go:generate apply to the file, not to a declaration.
+func (p *parser) directivesFor(off int) []Directive {
+	declLine := p.file.Position(off).Line
+	var out []Directive
+	expect := declLine - 1
+	for i := len(p.comments) - 1; i >= 0; i-- {
+		c := p.comments[i]
+		if c.Span.Start >= off {
+			continue
+		}
+		pos := p.file.Position(c.Span.Start)
+		if pos.Line != expect || !strings.HasPrefix(c.Text, "//") {
+			if pos.Line < expect {
+				break
+			}
+			continue
+		}
+		expect--
+		if !p.isGoDirective(c) || strings.HasPrefix(c.Text, "//go:build") || strings.HasPrefix(c.Text, "//go:generate") {
+			continue
+		}
+		out = append([]Directive{{Text: strings.TrimRight(c.Text, " \t\r"), S: c.Span}}, out...)
+	}
+	return out
+}
+
+// placeDirectives marks directives as belonging to a declaration.
+func (p *parser) placeDirectives(ds []Directive) {
+	if p.placed == nil {
+		p.placed = map[int]bool{}
+	}
+	for _, d := range ds {
+		p.placed[d.S.Start] = true
+	}
+}
+
+// misplacedDirectives reports the //go: directives that no declaration
+// takes: Go would ignore them, and a silently ignored //go:embed leaves
+// its variable empty.
+func (p *parser) misplacedDirectives(f *File) {
+	for _, c := range p.comments {
+		if !p.isGoDirective(c) || p.placed[c.Span.Start] || strings.HasPrefix(c.Text, "//go:generate") {
+			continue
+		}
+		d := Directive{Text: c.Text, S: c.Span}
+		if d.Name() == "build" {
+			if c.Text != f.BuildConstraint {
+				p.sink.Errorf(diag.EUnsupportedSyntax, c.Span, "a //go:build line must come before the package clause and the imports").
+					WithHint("move it to the top of the file, followed by a blank line")
+			}
+			continue
+		}
+		dg := p.sink.Errorf(diag.EUnsupportedSyntax, c.Span, "//go:%s must be directly above the declaration it applies to", d.Name())
+		switch d.Name() {
+		case "embed":
+			dg.WithHint("put it on the line before a package-level var with a type and no initializer: var content: string")
+		default:
+			dg.WithHint("put it on the line before a func declaration")
+		}
+	}
 }
 
 func (p *parser) endDecl() {
@@ -487,6 +571,11 @@ func (p *parser) docFor(off int) string {
 		pos := p.file.Position(c.Span.Start)
 		// a comment after code on its line (`ID: int64 // ...`) belongs to that code
 		trailing := strings.TrimSpace(string(p.file.Content[p.file.LineStart(pos.Line):c.Span.Start])) != ""
+		if pos.Line == expect && !trailing && strings.HasPrefix(c.Text, "//go:") &&
+			!strings.HasPrefix(c.Text, "//go:build") && !strings.HasPrefix(c.Text, "//go:generate") {
+			expect-- // a directive (directivesFor) between the doc and the declaration
+			continue
+		}
 		if pos.Line != expect || trailing || !strings.HasPrefix(c.Text, "//") || strings.HasPrefix(c.Text, "//go:") {
 			if pos.Line < expect {
 				break
@@ -514,6 +603,8 @@ func (p *parser) parseDecl() (decl Decl) {
 	switch p.tok().Kind {
 	case FUN:
 		d := p.parseFunDecl(start, doc)
+		d.Directives = p.directivesFor(start.Start)
+		p.placeDirectives(d.Directives)
 		p.endDecl()
 		return d
 	case STRUCT:
@@ -547,7 +638,8 @@ func (p *parser) parseDecl() (decl Decl) {
 			p.errorf(diag.EUnsupportedSyntax, kw.Span, "package-level variables are declared with var").
 				WithFix(kw.Span, "var", "write var")
 		}
-		d := &PropDecl{Doc: doc, Mutable: true}
+		d := &PropDecl{Doc: doc, Mutable: true, Directives: p.directivesFor(start.Start)}
+		p.placeDirectives(d.Directives)
 		d.Name = p.parseIdent("in variable declaration")
 		if p.accept(COLON) {
 			d.Type = p.parseType()
@@ -555,8 +647,9 @@ func (p *parser) parseDecl() (decl Decl) {
 		if p.accept(ASSIGN) {
 			p.skipNL()
 			d.Value = p.parseExpr()
-		} else {
-			p.errorf(diag.EUnexpectedToken, p.tok().Span, "a package-level var requires an initializer")
+		} else if d.Type == nil {
+			p.errorf(diag.EUnexpectedToken, d.Name.S, "a package-level var needs a type or an initializer").
+				WithHint("write var %s: Type for its zero value, or var %s = value", d.Name.Name, d.Name.Name)
 		}
 		d.S = p.spanFrom(start)
 		p.endDecl()

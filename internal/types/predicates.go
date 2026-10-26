@@ -1,6 +1,7 @@
 package types
 
 import (
+	"fmt"
 	gotypes "go/types"
 )
 
@@ -400,6 +401,68 @@ func RawResults(s *Signature) []Type {
 // Zeroable reports whether the Go zero value of t is a valid Lyth value of t.
 func Zeroable(t Type) bool {
 	return zeroable(t, map[*TypeDecl]bool{})
+}
+
+// NoZeroReason explains why a type that is not Zeroable has no zero value,
+// down to the field that causes it: "User has no zero value: its field
+// Plan has type Plan, a string-backed enum without a "" entry".
+func NoZeroReason(t Type) string {
+	return t.String() + " has no zero value" + noZeroCause(t, map[*TypeDecl]bool{})
+}
+
+func noZeroCause(t Type, seen map[*TypeDecl]bool) string {
+	switch t := t.(type) {
+	case *Array:
+		return noZeroCause(t.Elem, seen)
+	case *Named:
+		if u := DefinedUnder(t); u != nil {
+			return noZeroCause(u, seen)
+		}
+		if t.Decl == nil || t.Decl.Kind == InterfaceDecl || seen[t.Decl] {
+			return ""
+		}
+		if t.Decl.Backing != nil {
+			return ": it is a string-backed enum without a \"\" entry"
+		}
+		seen[t.Decl] = true
+		for _, f := range t.Decl.Fields {
+			if zeroable(f.Type, map[*TypeDecl]bool{}) {
+				continue
+			}
+			what := ""
+			switch ft := f.Type.(type) {
+			case *Pointer:
+				what = ", a non-null pointer"
+			case *Signature:
+				what = ", a non-null function"
+			case *Chan:
+				what = ", a non-null channel"
+			case *AnyType:
+				what = ", a non-null interface"
+			case *Named:
+				if ft.Decl != nil && ft.Decl.Kind == InterfaceDecl {
+					what = ", a non-null interface"
+				} else if ft.Decl != nil && ft.Decl.Backing != nil {
+					what = ", a string-backed enum without a \"\" entry"
+				} else if ft.Decl == nil {
+					switch ft.Go.Underlying().(type) {
+					case *gotypes.Interface:
+						what = ", a non-null interface"
+					case *gotypes.Signature:
+						what = ", a non-null function"
+					case *gotypes.Pointer:
+						what = ", a non-null pointer"
+					case *gotypes.Chan:
+						what = ", a non-null channel"
+					}
+				}
+			case *GoType:
+				what = ", a non-null interface"
+			}
+			return fmt.Sprintf(": its field %s has type %s%s", f.Name, f.Type, what)
+		}
+	}
+	return ""
 }
 
 func zeroable(t Type, seen map[*TypeDecl]bool) bool {
