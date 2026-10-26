@@ -868,6 +868,12 @@ func (fl *fnLower) exprStmt(e syntax.Expr) {
 	case *syntax.ParenExpr:
 		fl.exprStmt(x.X)
 		return
+	case *syntax.CallExpr:
+		if c, s, ci := fl.safeCallOf(x); c != nil {
+			// u?.Save() as a statement: its result, if any, is unused.
+			fl.safeCallStmt(c, s, ci, func(call *ast.CallExpr) ast.Stmt { return &ast.ExprStmt{X: call} })
+			return
+		}
 	}
 	g := fl.expr(e)
 	switch g := g.(type) {
@@ -1469,6 +1475,29 @@ func (fl *fnLower) deferGo(call syntax.Expr, body *syntax.Block, isGo bool, span
 			}
 		})
 		callExpr = &ast.CallExpr{Fun: &ast.FuncLit{Type: &ast.FuncType{Params: &ast.FieldList{}}, Body: &ast.BlockStmt{List: stmts}}}
+	} else if c, ok := syntax.Unparen(call).(*syntax.CallExpr); ok && fl.info.Calls[c] != nil && fl.info.Calls[c].Safe &&
+		fl.info.Calls[c].Kind == check.CallPrelude && fl.info.Calls[c].Prelude == check.PreludeClose {
+		// defer ch?.close(): deferred only when ch is not null.
+		s := syntax.Unparen(c.Fun).(*syntax.SelectorExpr)
+		ch := fl.stash(s.X, fl.expr(s.X))
+		call := &ast.CallExpr{Fun: ast.NewIdent("close"), Args: []ast.Expr{cloneIdentExpr(ch)}}
+		var st ast.Stmt = &ast.DeferStmt{Defer: fl.l.pos(span), Call: call}
+		if isGo {
+			st = &ast.GoStmt{Go: fl.l.pos(span), Call: call}
+		}
+		markTree(fl.l, st, span)
+		fl.emitSynth(&ast.IfStmt{Cond: nilCmp(ch, token.NEQ), Body: &ast.BlockStmt{List: []ast.Stmt{st}}}, span)
+		return
+	} else if c, s, ci := fl.safeCallOf(call); c != nil {
+		// defer u?.Close(): deferred only when u is not null.
+		fl.safeCallStmt(c, s, ci, func(call *ast.CallExpr) ast.Stmt {
+			markTree(fl.l, call, span)
+			if isGo {
+				return &ast.GoStmt{Go: fl.l.pos(span), Call: call}
+			}
+			return &ast.DeferStmt{Defer: fl.l.pos(span), Call: call}
+		})
+		return
 	} else if t, ok := syntax.Unparen(call).(*syntax.TryExpr); ok && !isGo && fl.deferErr != "" {
 		callExpr = fl.deferTry(t)
 	} else if c, ok := syntax.Unparen(call).(*syntax.CatchExpr); ok {

@@ -159,7 +159,16 @@ func (c *Checker) lhs(e syntax.Expr) *operand {
 			return c.record(&operand{mode: ModeValue, typ: t, sym: v, expr: e})
 		}
 	}
-	return c.value(e, nil)
+	x := c.value(e, nil)
+	if ix, ok := syntax.Unparen(e).(*syntax.IndexExpr); ok && x.mode != ModeInvalid {
+		if m, ok := collectionOf(c.info.TypeOf(ix.X)).(*types.Map); ok {
+			// Reading m[k] can find no entry, which is null for a value
+			// type without a zero value; m[k] = v stores a value of the
+			// map's own element type.
+			x.typ = m.Elem
+		}
+	}
+	return x
 }
 
 func (c *Checker) localDecl(s *syntax.LocalDecl) bool {

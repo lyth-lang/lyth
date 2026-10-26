@@ -1,0 +1,63 @@
+// Safe calls as statements, deferred, and in goroutines run only when the
+// receiver is not null; so do the channel operations of a nullable channel,
+// and a receive from a null channel is null.
+import "fmt"
+import "sync"
+
+struct U {
+    N: string
+}
+
+func *U.Touch() {
+    fmt.Println("touched", self.N)
+}
+
+func *U.Hello(): string = "hello ${self.N}"
+
+func *U.Work(wg: *sync.WaitGroup) {
+    fmt.Println("working", self.N)
+    wg.Done()
+}
+
+func *U.Greet(greeting: string = "hi", times: int = 1): string = "${greeting} ${self.N} x${times}"
+
+func deferred(u: *U?) {
+    defer u?.Touch()
+    fmt.Println("body of", u?.N ?: "null")
+}
+
+func main() {
+    deferred(&U(N = "a"))
+    deferred(null)
+
+    u: *U? = &U(N = "b")
+    u?.Hello() // the result is unused
+    fmt.Println(u?.Greet(times = 2) ?: "", u?.Greet("yo") ?: "")
+
+    wg: sync.WaitGroup
+    wg.Add(1)
+    w: *U? = &U(N = "worker")
+    go w?.Work(&wg)
+    wg.Wait()
+    none: *U? = null
+    go none?.Work(&wg) // nothing starts: wg.Done would panic
+
+    c: (chan int)? = make(chan int, 2)
+    defer c?.close()
+    c?.send(1)
+    c?.send(2)
+    fmt.Println(c?.receive() ?: -1, c?.receive() ?: -1)
+    n: (chan int)? = null
+    n?.send(3)
+    n?.close()
+    fmt.Println(n?.receive() == null)
+}
+
+// Output:
+// body of a
+// touched a
+// body of null
+// hi b x2 yo b x1
+// working worker
+// 1 2
+// true

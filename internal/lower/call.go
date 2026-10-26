@@ -281,20 +281,60 @@ func hasSpread(e *syntax.CallExpr) bool {
 }
 
 // safeCall lowers x?.m(args): the call happens only when x is non-null.
-func (fl *fnLower) safeCall(e *syntax.CallExpr, s *syntax.SelectorExpr, ci *check.CallInfo) ast.Expr {
+// safeCallParts lowers x?.m(args) up to the call: the receiver, evaluated
+// once, the statements its arguments need, and the call, all of which run
+// only when the receiver is not null.
+func (fl *fnLower) safeCallParts(e *syntax.CallExpr, s *syntax.SelectorExpr, ci *check.CallInfo) (ast.Expr, []ast.Stmt, *ast.CallExpr) {
 	recv := fl.stash(s.X, fl.receiver(s))
 	sub, stmts := fl.sub()
 	args := sub.exprList(ci.Args, nil)
+	if ci.ArgParams != nil {
+		args = sub.bindArgs(e, ci, args)
+	} else {
+		for i, a := range ci.Args {
+			if i < len(ci.Sig.Params) {
+				args[i] = sub.adaptConst(a, args[i], ci.Sig.Params[i])
+			}
+		}
+	}
 	call := &ast.CallExpr{Fun: &ast.SelectorExpr{X: cloneIdentExpr(recv), Sel: ast.NewIdent(fl.info.Selections[s].GoName)}, Args: args}
 	if hasSpread(e) {
 		call.Ellipsis = 1
 	}
+	return recv, *stmts, call
+}
+
+// safeCallStmt lowers x?.m(args) whose result is unused, or that a defer
+// or go statement runs (wrap): if x != nil { defer x.m(args) }. The
+// receiver and arguments are evaluated at the statement, as Go does for a
+// deferred call.
+func (fl *fnLower) safeCallStmt(e *syntax.CallExpr, s *syntax.SelectorExpr, ci *check.CallInfo, wrap func(*ast.CallExpr) ast.Stmt) {
+	recv, body, call := fl.safeCallParts(e, s, ci)
+	body = append(body, wrap(call))
+	fl.emitSynth(&ast.IfStmt{Cond: nilCmp(recv, token.NEQ), Body: &ast.BlockStmt{List: body}}, e.S)
+}
+
+// safeCallOf returns the call and selector of a safe method call x?.m(...).
+func (fl *fnLower) safeCallOf(e syntax.Expr) (*syntax.CallExpr, *syntax.SelectorExpr, *check.CallInfo) {
+	c, ok := syntax.Unparen(e).(*syntax.CallExpr)
+	if !ok {
+		return nil, nil, nil
+	}
+	s, ok := syntax.Unparen(c.Fun).(*syntax.SelectorExpr)
+	ci := fl.info.Calls[c]
+	if !ok || ci == nil || !ci.Safe || ci.Ext != nil || ci.Kind == check.CallPrelude {
+		return nil, nil, nil
+	}
+	return c, s, ci
+}
+
+func (fl *fnLower) safeCall(e *syntax.CallExpr, s *syntax.SelectorExpr, ci *check.CallInfo) ast.Expr {
 	t := fl.info.TypeOf(e)
 	if t == nil || t == types.Unit || len(ci.Sig.Results) == 0 {
-		body := append(*stmts, &ast.ExprStmt{X: call})
-		fl.emitSynth(&ast.IfStmt{Cond: nilCmp(recv, token.NEQ), Body: &ast.BlockStmt{List: body}}, e.S)
+		fl.safeCallStmt(e, s, ci, func(c *ast.CallExpr) ast.Stmt { return &ast.ExprStmt{X: c} })
 		return ast.NewIdent("nil")
 	}
+	recv, stmts, call := fl.safeCallParts(e, s, ci)
 	name := fl.temp(lowerFirst(s.Sel.Name))
 	spec := &ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(name)}, Type: fl.l.typeExpr(t)}
 	fl.emitSynth(&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{spec}}}, e.S)
@@ -302,7 +342,7 @@ func (fl *fnLower) safeCall(e *syntax.CallExpr, s *syntax.SelectorExpr, ci *chec
 	if types.IsNullable(t) && !types.IsNilable(types.Base(t)) && !types.MayBeNull(ci.Sig.Results[0]) {
 		val = &ast.CallExpr{Fun: ast.NewIdent("new"), Args: []ast.Expr{call}}
 	}
-	body := append(*stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(name)}, Tok: token.ASSIGN, Rhs: []ast.Expr{val}})
+	body := append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(name)}, Tok: token.ASSIGN, Rhs: []ast.Expr{val}})
 	fl.emitSynth(&ast.IfStmt{Cond: nilCmp(recv, token.NEQ), Body: &ast.BlockStmt{List: body}}, e.S)
 	return ast.NewIdent(name)
 }
@@ -370,6 +410,12 @@ func (fl *fnLower) builtin(e *syntax.CallExpr, ci *check.CallInfo) ast.Expr {
 // prelude lowers prelude methods on built-in types to standard library calls.
 func (fl *fnLower) prelude(e *syntax.CallExpr, ci *check.CallInfo) ast.Expr {
 	s := syntax.Unparen(e.Fun).(*syntax.SelectorExpr)
+	if ci.Safe {
+		switch ci.Prelude {
+		case check.PreludeSend, check.PreludeClose, check.PreludeReceive:
+			return fl.safeChanOp(e, s, ci)
+		}
+	}
 	recv := fl.expr(s.X)
 	strconvPkg := func() string { return fl.l.useImport("strconv", "strconv") }
 	switch ci.Prelude {
@@ -404,6 +450,35 @@ func (fl *fnLower) prelude(e *syntax.CallExpr, ci *check.CallInfo) ast.Expr {
 		return &ast.CallExpr{Fun: sel(fmtPkg, "Errorf"), Args: []ast.Expr{strLit("%s: %w"), msgs[1], msgs[0]}}
 	}
 	return ast.NewIdent("nil")
+}
+
+// safeChanOp lowers ch?.send(v), ch?.close(), and ch?.receive() on a
+// nullable channel: the operation runs only when the channel is not null,
+// and a receive from a null channel is null.
+func (fl *fnLower) safeChanOp(e *syntax.CallExpr, s *syntax.SelectorExpr, ci *check.CallInfo) ast.Expr {
+	ch := fl.stash(s.X, fl.expr(s.X))
+	sub, stmts := fl.sub()
+	switch ci.Prelude {
+	case check.PreludeSend:
+		sub.emit(sub.sendStmt(e, cloneIdentExpr(ch), ci), e.S)
+		fl.emitSynth(&ast.IfStmt{Cond: nilCmp(ch, token.NEQ), Body: &ast.BlockStmt{List: *stmts}}, e.S)
+		return ast.NewIdent("_")
+	case check.PreludeClose:
+		body := append(*stmts, &ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("close"), Args: []ast.Expr{cloneIdentExpr(ch)}}})
+		fl.emitSynth(&ast.IfStmt{Cond: nilCmp(ch, token.NEQ), Body: &ast.BlockStmt{List: body}}, e.S)
+		return ast.NewIdent("_")
+	}
+	t := fl.info.TypeOf(e)
+	name := fl.temp("v")
+	spec := &ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(name)}, Type: fl.l.typeExpr(t)}
+	fl.emitSynth(&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{spec}}}, e.S)
+	var val ast.Expr = &ast.UnaryExpr{Op: token.ARROW, X: cloneIdentExpr(ch)}
+	if types.IsNullable(t) && !types.IsNilable(types.Base(t)) {
+		val = &ast.CallExpr{Fun: ast.NewIdent("new"), Args: []ast.Expr{val}} // int? holds the received int
+	}
+	body := append(*stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(name)}, Tok: token.ASSIGN, Rhs: []ast.Expr{val}})
+	fl.emitSynth(&ast.IfStmt{Cond: nilCmp(ch, token.NEQ), Body: &ast.BlockStmt{List: body}}, e.S)
+	return ast.NewIdent(name)
 }
 
 // sendStmt builds Go's ch <- v for ch.send(v), given the lowered channel.

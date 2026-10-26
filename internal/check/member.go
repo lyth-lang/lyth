@@ -146,7 +146,8 @@ func (c *Checker) selector(e *syntax.SelectorExpr, want types.Type) *operand {
 		}
 	}
 	rt := m.typ
-	if sel.Safe && m.kind == SelField {
+	if sel.Safe && (m.kind == SelField || m.kind == SelMethod && c.callee != syntax.Expr(e)) {
+		// u?.Name, and the method value u?.Hello: null when u is.
 		rt = types.MakeNullable(rt)
 	}
 	return &operand{mode: ModeValue, typ: rt}
