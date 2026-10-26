@@ -9,6 +9,7 @@
 //	lyth vet [packages]
 //	lyth test [packages] [go test flags]
 //	lyth fix [packages]
+//	lyth generate [-run re] [-skip re] [-n] [-v] [-x] [packages]
 //	lyth init [module-path]
 //	lyth guide [topics | topic]
 //	lyth lsp
@@ -64,6 +65,7 @@ Usage:
   lyth test [packages] [go test flags]                    run tests (_test.lyth and _test.go files)
   lyth cover -func=c.out | -html=c.out                    show a coverage profile of Lyth code
   lyth fix [packages]                                     rewrite older Lyth syntax and Kotlin and Go spellings
+  lyth generate [-run re] [-n] [-v] [-x] [packages]       run the //go:generate lines of .lyth files
   lyth mod tidy                                           go mod tidy that sees imports in .lyth files
   lyth init [module-path]                                 create a Lyth module, with AGENTS.md for coding agents
   lyth guide [topics | topic]                             the guide to writing this version of Lyth
@@ -151,6 +153,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdCover(rest, stdout, stderr)
 	case "fix":
 		return cmdFix(rest, stdout, stderr)
+	case "generate":
+		return cmdGenerate(rest, stdout, stderr)
 	case "init":
 		return cmdInit(rest, stdout, stderr)
 	case "guide":
@@ -621,6 +625,42 @@ func cmdCover(args []string, stdout, stderr io.Writer) int {
 	wd, _ := os.Getwd()
 	if err := build.CoverFunc(wd, profile, w, nil); err != nil {
 		fmt.Fprintf(stderr, "lyth: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// cmdGenerate runs the //go:generate directives of .lyth files, which go
+// generate cannot see.
+func cmdGenerate(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("generate", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	runRE := fs.String("run", "", "run only the directives that match this regular expression")
+	skipRE := fs.String("skip", "", "skip the directives that match this regular expression")
+	dry := fs.Bool("n", false, "print the commands but do not run them")
+	verbose := fs.Bool("v", false, "print the names of packages and files as they are processed")
+	trace := fs.Bool("x", false, "print the commands as they run")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	opts := build.GenerateOptions{DryRun: *dry, Verbose: *verbose, Trace: *trace}
+	for _, re := range []struct {
+		src string
+		dst **regexp.Regexp
+	}{{*runRE, &opts.Run}, {*skipRE, &opts.Skip}} {
+		if re.src == "" {
+			continue
+		}
+		r, err := regexp.Compile(re.src)
+		if err != nil {
+			fmt.Fprintf(stderr, "lyth generate: %v\n", err)
+			return 2
+		}
+		*re.dst = r
+	}
+	var c common
+	if err := build.Generate(c.config(stdout, stderr), fs.Args(), opts); err != nil {
+		fmt.Fprintf(stderr, "lyth generate: %v\n", err)
 		return 1
 	}
 	return 0

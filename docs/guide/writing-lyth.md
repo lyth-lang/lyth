@@ -27,6 +27,8 @@ you remember about Lyth, they are right.
   with `lyth cover -func=c.out` (`go tool cover -func` cannot parse Lyth).
 - `lyth gen -stdout file.lyth` prints the Go a file becomes. Use it when you are unsure what a
   construct does.
+- `lyth generate ./...` runs the `//go:generate` lines of `.lyth` files (`go generate` reads only
+  `.go` files).
 - Keep the work in `.lyth` files. Don't edit the generated Go (in `.lyth/gen`), and don't write
   `.go` files to get around a Lyth error: a package cannot mix Lyth and non-test Go files, and
   Lyth errors have Lyth fixes.

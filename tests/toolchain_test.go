@@ -1506,3 +1506,72 @@ func main() {
 		t.Fatalf("output %q, want %q, err %v", out, want, err)
 	}
 }
+
+// TestLythGenerate runs the //go:generate lines of .lyth files, which go
+// generate cannot see: with go generate's variables, quoting, -command
+// aliases, and a failing command that stops its package only.
+func TestLythGenerate(t *testing.T) {
+	files := map[string]string{
+		"tools/stamp/main.go": `package main
+
+import (
+	"os"
+	"strings"
+)
+
+func main() {
+	out := os.Args[1]
+	data := strings.Join(os.Args[2:], " ") + " " + os.Getenv("GOFILE") + ":" + os.Getenv("GOLINE") + " " + os.Getenv("GOPACKAGE") + "\n"
+	os.WriteFile(out, []byte(data), 0o644)
+}
+`,
+		"app/app.lyth": `//go:generate go run gen/tools/stamp app.txt "two words" $DOLLAR
+//go:generate -command stamp go run gen/tools/stamp
+// A later line of the file uses the alias:
+//go:generate stamp alias.txt via alias
+
+package app
+
+func Answer(): int = 42
+`,
+		"app/app_test.lyth": `//go:generate go run gen/tools/stamp test.txt from a test file
+
+import "testing"
+
+func TestAnswer(t: *testing.T) {
+    if Answer() != 42 {
+        t.Fatal("wrong answer")
+    }
+}
+`,
+		"broken/broken.lyth": `//go:generate go run gen/tools/missing
+//go:generate go run gen/tools/stamp never.txt
+
+func main() {}
+`,
+	}
+	root := writeModule(t, "gen", files)
+	var stderr bytes.Buffer
+	cfg := &build.Config{WorkDir: root, Stdout: os.Stdout, Stderr: &stderr}
+	if err := build.Generate(cfg, []string{"./app"}, build.GenerateOptions{}); err != nil {
+		t.Fatalf("lyth generate: %v\n%s", err, stderr.String())
+	}
+	for name, want := range map[string]string{
+		"app.txt":   "two words $ app.lyth:1 app\n",
+		"alias.txt": "via alias app.lyth:4 app\n",
+		"test.txt":  "from a test file app_test.lyth:1 app\n",
+	} {
+		got, err := os.ReadFile(filepath.Join(root, "app", name))
+		if err != nil || string(got) != want {
+			t.Errorf("%s = %q (%v), want %q", name, got, err, want)
+		}
+	}
+	stderr.Reset()
+	err := build.Generate(cfg, []string{"./..."}, build.GenerateOptions{})
+	if err == nil || !strings.Contains(stderr.String(), "broken.lyth:1: running \"go\"") {
+		t.Errorf("a failing generator: err %v, stderr:\n%s", err, stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "broken", "never.txt")); err == nil {
+		t.Error("the directive after a failing one ran")
+	}
+}
