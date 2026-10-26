@@ -206,7 +206,9 @@ func (s *Session) setup(t Target) error {
 			return err
 		}
 		if _, err := os.Stat(abs); err != nil {
-			return fmt.Errorf("cannot read %s: %w", t.File, err)
+			if _, open := s.cfg.Overlay[abs]; !open {
+				return fmt.Errorf("cannot read %s: %w", t.File, err)
+			}
 		}
 		mod, err := FindModule(filepath.Dir(abs))
 		if err == nil {
@@ -215,10 +217,18 @@ func (s *Session) setup(t Target) error {
 			if err != nil {
 				return err
 			}
+			p = s.editorFiles(mod, filepath.Dir(abs), p)
 			// Other Lyth packages of the module are available as imports.
 			all, err := discover(mod)
 			if err != nil {
 				return err
+			}
+			for _, d := range s.editorDirs(mod) {
+				if i := slices.IndexFunc(all, func(q *pkgDir) bool { return q.Dir == d }); i >= 0 {
+					all[i] = s.editorFiles(mod, d, all[i])
+				} else {
+					all = append(all, s.editorFiles(mod, d, nil))
+				}
 			}
 			s.makeAvailable(all)
 			s.Targets = append(s.Targets, s.addPkg(p))
@@ -252,6 +262,13 @@ func (s *Session) setup(t Target) error {
 	all, err := discover(mod)
 	if err != nil {
 		return err
+	}
+	for _, d := range s.editorDirs(mod) {
+		if i := slices.IndexFunc(all, func(q *pkgDir) bool { return q.Dir == d }); i >= 0 {
+			all[i] = s.editorFiles(mod, d, all[i])
+		} else {
+			all = append(all, s.editorFiles(mod, d, nil))
+		}
 	}
 	if len(all) == 0 {
 		return fmt.Errorf("no .lyth files found in module %s", mod.Path)
@@ -294,6 +311,53 @@ func (s *Session) setup(t Target) error {
 		return fmt.Errorf("%s has only test files; run them with lyth test ./%s", testOnly[0], testOnly[0])
 	}
 	return nil
+}
+
+// editorDirs returns the directories of the module that hold .lyth files
+// only an editor has (Config.Overlay: a new file not saved yet).
+func (s *Session) editorDirs(mod *Module) []string {
+	var dirs []string
+	for path := range s.cfg.Overlay {
+		if !strings.HasSuffix(path, ".lyth") || fileExists(path) {
+			continue
+		}
+		dir := filepath.Dir(path)
+		if rel, err := filepath.Rel(mod.Root, dir); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+		if !slices.Contains(dirs, dir) {
+			dirs = append(dirs, dir)
+		}
+	}
+	sort.Strings(dirs)
+	return dirs
+}
+
+// editorFiles adds to p, the package in dir (nil when it has no files on
+// disk), the .lyth files there that only an editor has.
+func (s *Session) editorFiles(mod *Module, dir string, p *pkgDir) *pkgDir {
+	for path := range s.cfg.Overlay {
+		if filepath.Dir(path) != dir || !strings.HasSuffix(path, ".lyth") || fileExists(path) {
+			continue
+		}
+		if p == nil {
+			rel, _ := filepath.Rel(mod.Root, dir)
+			p = &pkgDir{Dir: dir, Rel: filepath.ToSlash(rel), ImportPath: mod.Path}
+			if p.Rel != "." {
+				p.ImportPath += "/" + p.Rel
+			}
+		}
+		if strings.HasSuffix(path, "_test.lyth") {
+			if !slices.Contains(p.TestFiles, path) {
+				p.TestFiles = append(p.TestFiles, path)
+				sort.Strings(p.TestFiles)
+			}
+		} else if !slices.Contains(p.Files, path) {
+			p.Files = append(p.Files, path)
+			sort.Strings(p.Files)
+		}
+	}
+	return p
 }
 
 func (s *Session) makeAvailable(all []*pkgDir) {

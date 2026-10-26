@@ -17,6 +17,7 @@ import (
 type client struct {
 	t       *testing.T
 	w       io.Writer
+	wmu     sync.Mutex // serializes writes; never held with mu, which the reader needs
 	mu      sync.Mutex
 	nextID  int
 	pending map[int]chan *message
@@ -51,7 +52,10 @@ func newClient(t *testing.T) *client {
 				c.mu.Lock()
 				c.diags[p.URI] = p.Diagnostics
 				c.mu.Unlock()
-				c.changed <- struct{}{}
+				select {
+				case c.changed <- struct{}{}:
+				default: // a wake-up is pending already
+				}
 				continue
 			}
 			if m.Method != "" {
@@ -76,8 +80,8 @@ func newClient(t *testing.T) *client {
 }
 
 func (c *client) notify(method string, params any) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.wmu.Lock()
+	defer c.wmu.Unlock()
 	_ = writeMessage(c.w, map[string]any{"jsonrpc": "2.0", "method": method, "params": params})
 }
 
@@ -88,8 +92,10 @@ func (c *client) call(method string, params, out any) error {
 	id := c.nextID
 	ch := make(chan *message, 1)
 	c.pending[id] = ch
-	err := writeMessage(c.w, map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params})
 	c.mu.Unlock()
+	c.wmu.Lock()
+	err := writeMessage(c.w, map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params})
+	c.wmu.Unlock()
 	if err != nil {
 		return err
 	}
@@ -540,4 +546,146 @@ func TestIncompleteCode(t *testing.T) {
 	if len(edits) != 1 || edits[0].NewText != good {
 		t.Errorf("formatting: %+v", edits)
 	}
+}
+
+// TestEditing covers requests on code being edited: references listed once
+// across packages, signature help that does not count commas in strings,
+// completion lists that are arrays even when empty, renaming an interface
+// method with the methods that implement it, and diagnostics for a file
+// that exists only in the editor.
+func TestEditing(t *testing.T) {
+	root, mainPath, libPath := workspace(t)
+	mainURI, libURI := pathToURI(mainPath), pathToURI(libPath)
+	c := newClient(t)
+	c.mustCall("initialize", map[string]any{"processId": nil, "rootUri": pathToURI(root), "capabilities": map[string]any{}, "initializationOptions": map[string]any{"vet": false}}, nil)
+	c.notify("initialized", map[string]any{})
+	open(c, mainURI, mainSrc)
+	c.waitDiags(mainURI, func(d []Diagnostic) bool { return len(d) == 0 })
+	open(c, libURI, libSrc)
+
+	var refs []Location
+	c.mustCall("textDocument/references", map[string]any{"textDocument": map[string]any{"uri": libURI},
+		"position": at(t, libSrc, "Greet", 1, 1), "context": map[string]any{"includeDeclaration": true}}, &refs)
+	if len(refs) != 2 {
+		t.Errorf("references of Greet: want the declaration and one use, got %v", refs)
+	}
+
+	edited := mainSrc + "\nfunc two(a: string, b: string): string = a + b\n\nfunc yy() { two(\"x, y\", \n}\n"
+	c.notify("textDocument/didChange", map[string]any{"textDocument": map[string]any{"uri": mainURI, "version": 2}, "contentChanges": []any{map[string]any{"text": edited}}})
+	var h struct {
+		ActiveParameter int
+	}
+	c.mustCall("textDocument/signatureHelp", tdp(mainURI, at(t, edited, "\"x, y\", ", 0, 8)), &h)
+	if h.ActiveParameter != 1 {
+		t.Errorf("signature help after one argument with a comma in a string: active parameter %d, want 1", h.ActiveParameter)
+	}
+
+	var comp map[string]json.RawMessage
+	c.mustCall("textDocument/completion", tdp("file:///nowhere/x.lyth", Position{}), &comp)
+	if string(comp["items"]) != "[]" {
+		t.Errorf("completion items for an unknown document: %s, want []", comp["items"])
+	}
+
+	ifSrc := `interface Named {
+    Name(): string
+}
+
+struct P : Named {
+    N: string
+}
+
+func P.Name(): string = self.N
+
+struct Other {
+    Size: int
+}
+
+func Other.Count(): int = self.Size
+
+func show(n: Named, p: P): string = n.Name() + p.Name()
+`
+	ifPath := filepath.Join(root, "lib", "named.lyth")
+	if err := os.WriteFile(ifPath, []byte(ifSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ifURI := pathToURI(ifPath)
+	open(c, ifURI, ifSrc)
+	var edit struct {
+		Changes map[string][]TextEdit `json:"changes"`
+	}
+	c.mustCall("textDocument/rename", map[string]any{"textDocument": map[string]any{"uri": ifURI}, "position": at(t, ifSrc, "Name()", 0, 1), "newName": "Label"}, &edit)
+	if n := len(edit.Changes[ifURI]); n != 4 {
+		t.Errorf("renaming Named.Name: want the interface method, P.Name, and both calls, got %v", edit.Changes)
+	}
+	if err := c.call("textDocument/rename", map[string]any{"textDocument": map[string]any{"uri": ifURI}, "position": at(t, ifSrc, "P.Name", 0, 3), "newName": "Label"}, nil); err == nil || !strings.Contains(err.Error(), "rename the interface method") {
+		t.Errorf("renaming a method that implements an interface method: %v", err)
+	}
+	if err := c.call("textDocument/rename", map[string]any{"textDocument": map[string]any{"uri": ifURI}, "position": at(t, ifSrc, "Other.Count", 0, 7), "newName": "Size"}, nil); err == nil || !strings.Contains(err.Error(), "already has a member Size") {
+		t.Errorf("renaming a method to the name of a field: %v", err)
+	}
+
+	newURI := pathToURI(filepath.Join(root, "lib", "fresh.lyth"))
+	open(c, newURI, "func Fresh(): int = undefinedThing\n")
+	d := c.waitDiags(newURI, func(d []Diagnostic) bool { return len(d) > 0 })
+	if !strings.Contains(d[0].Message, "undefined: undefinedThing") {
+		t.Errorf("diagnostics of a file not saved yet: %v", d)
+	}
+}
+
+// TestDependents checks that diagnostics of open documents follow changes
+// to the packages they import: an edit in another open document, and a
+// change on disk the client reports through didChangeWatchedFiles.
+func TestDependents(t *testing.T) {
+	root, mainPath, libPath := workspace(t)
+	mainURI, libURI := pathToURI(mainPath), pathToURI(libPath)
+	c := newClient(t)
+	var init struct{}
+	c.mustCall("initialize", map[string]any{"processId": nil, "rootUri": pathToURI(root),
+		"capabilities":          map[string]any{"workspace": map[string]any{"didChangeWatchedFiles": map[string]any{"dynamicRegistration": true}}},
+		"initializationOptions": map[string]any{"vet": false}}, &init)
+	c.notify("initialized", map[string]any{})
+	open(c, mainURI, mainSrc)
+	c.waitDiags(mainURI, func(d []Diagnostic) bool { return len(d) == 0 })
+	open(c, libURI, libSrc)
+
+	// Greet takes two parameters now: main's call has one argument.
+	changed := strings.Replace(libSrc, "func Greet(name: string): string", "func Greet(name: string, title: string): string", 1)
+	c.notify("textDocument/didChange", map[string]any{"textDocument": map[string]any{"uri": libURI, "version": 2}, "contentChanges": []any{map[string]any{"text": changed}}})
+	c.waitDiags(mainURI, func(d []Diagnostic) bool { return len(d) > 0 && strings.Contains(d[0].Message, "Greet") })
+
+	// Back as it was in the editor, then changed on disk while closed.
+	c.notify("textDocument/didChange", map[string]any{"textDocument": map[string]any{"uri": libURI, "version": 3}, "contentChanges": []any{map[string]any{"text": libSrc}}})
+	c.waitDiags(mainURI, func(d []Diagnostic) bool { return len(d) == 0 })
+	c.notify("textDocument/didClose", map[string]any{"textDocument": map[string]any{"uri": libURI}})
+	if err := os.WriteFile(libPath, []byte(strings.Replace(libSrc, "func User.Label()", "func User.Tag()", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c.notify("workspace/didChangeWatchedFiles", map[string]any{"changes": []any{map[string]any{"uri": libURI, "type": 2}}})
+	c.waitDiags(mainURI, func(d []Diagnostic) bool { return len(d) > 0 && strings.Contains(d[0].Message, "Label") })
+}
+
+// TestVetTestFiles checks that go vet findings in a _test.lyth file are
+// published, and that an edit drops the findings of the saved file.
+func TestVetTestFiles(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/vettest\n\ngo 1.26\n"), 0o644)
+	_ = os.MkdirAll(filepath.Join(root, "names"), 0o755)
+	_ = os.WriteFile(filepath.Join(root, "names", "lib.lyth"), []byte("func Name(): string = \"x\"\n"), 0o644)
+	src := "import \"testing\"\n\nfunc TestName(t: *testing.T) {\n    t.Errorf(\"%d\", Name())\n}\n"
+	path := filepath.Join(root, "names", "lib_test.lyth")
+	_ = os.WriteFile(path, []byte(src), 0o644)
+	c := newClient(t)
+	c.mustCall("initialize", map[string]any{"capabilities": map[string]any{}, "initializationOptions": map[string]any{"vet": true}}, nil)
+	uri := pathToURI(path)
+	open(c, uri, src)
+	d := c.waitDiags(uri, func(d []Diagnostic) bool { return len(d) > 0 })
+	if d[0].Source != "vet" || d[0].Range.Start.Line != 3 {
+		t.Errorf("vet diagnostics of a test file: %+v", d)
+	}
+	fixed := strings.Replace(src, "%d", "%s", 1)
+	c.notify("textDocument/didChange", map[string]any{"textDocument": map[string]any{"uri": uri, "version": 2}, "contentChanges": []any{map[string]any{"text": fixed}}})
+	c.waitDiags(uri, func(d []Diagnostic) bool { return len(d) == 0 })
 }

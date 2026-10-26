@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -640,12 +641,126 @@ func (s *Server) rename(params json.RawMessage) (any, error) {
 	if why := a.renamable(o.key); why != "" {
 		return nil, &rpcError{Code: codeRequestFailed, Message: "cannot rename: " + why}
 	}
+	keys, why := a.renameSet(o.key, p.NewName)
+	if why != "" {
+		return nil, &rpcError{Code: codeRequestFailed, Message: "cannot rename: " + why}
+	}
 	changes := map[string][]TextEdit{}
-	for _, r := range a.refs(o.key) {
-		uri := s.uri(r.file.path)
-		changes[uri] = append(changes[uri], TextEdit{Range: r.file.idx.rangeOf(r.start, r.end), NewText: p.NewName})
+	for _, k := range keys {
+		for _, r := range a.refs(k) {
+			uri := s.uri(r.file.path)
+			changes[uri] = append(changes[uri], TextEdit{Range: r.file.idx.rangeOf(r.start, r.end), NewText: p.NewName})
+		}
 	}
 	return map[string]any{"changes": changes}, nil
+}
+
+// renameSet returns the declarations a rename of k changes together, or why
+// it cannot: an interface method takes along the methods of the module's
+// types that implement it, a method that implements an interface method of
+// the module is renamed through the interface, and the new name must not be
+// taken where a renamed declaration lives.
+func (a *analysis) renameSet(k any, newName string) ([]any, string) {
+	var decls []*types.TypeDecl
+	seen := map[*types.TypeDecl]bool{}
+	for _, fd := range a.files {
+		if fd.pkg == nil || fd.pkg.Checked == nil {
+			continue
+		}
+		for _, ts := range fd.pkg.Checked.Types {
+			if ts.Decl != nil && !seen[ts.Decl] {
+				seen[ts.Decl] = true
+				decls = append(decls, ts.Decl)
+			}
+		}
+	}
+	taken := func(td *types.TypeDecl) bool {
+		if td.LookupField(newName) != nil {
+			return true
+		}
+		for _, m := range td.Methods {
+			if m.Name == newName {
+				return true
+			}
+		}
+		return false
+	}
+	switch v := k.(type) {
+	case *types.Method: // an interface method
+		var iface *types.TypeDecl
+		for _, td := range decls {
+			if td.Kind == types.InterfaceDecl && slices.Contains(td.Methods, v) {
+				iface = td
+			}
+		}
+		if iface == nil {
+			return []any{k}, ""
+		}
+		if taken(iface) {
+			return nil, fmt.Sprintf("%s already has a method %s", iface.Name, newName)
+		}
+		set := []any{k}
+		for _, td := range decls {
+			if td.Kind == types.InterfaceDecl || !implementsDecl(td, iface) {
+				continue
+			}
+			for _, m := range td.Methods {
+				if m.GoName == v.GoName {
+					if taken(td) {
+						return nil, fmt.Sprintf("%s implements %s and already has a member %s", td.Name, iface.Name, newName)
+					}
+					set = append(set, key(m))
+				}
+			}
+		}
+		return set, ""
+	case *check.FuncSym:
+		if v.Recv == nil {
+			if v.Pkg != nil && v.Pkg.Scope != nil && v.Pkg.Scope.LookupLocal(newName) != nil {
+				return nil, fmt.Sprintf("package %s already declares %s", v.Pkg.Name, newName)
+			}
+			return []any{k}, ""
+		}
+		for _, td := range decls {
+			if td.Kind != types.InterfaceDecl || !implementsDecl(v.Recv, td) {
+				continue
+			}
+			for _, im := range td.Methods {
+				if im.GoName == v.GoName {
+					return nil, fmt.Sprintf("%s implements %s.%s; rename the interface method to rename them together", v.Name(), td.Name, im.Name)
+				}
+			}
+		}
+		if taken(v.Recv) {
+			return nil, fmt.Sprintf("%s already has a member %s", v.Recv.Name, newName)
+		}
+	case *types.Field:
+		for _, td := range decls {
+			if slices.Contains(td.Fields, v) && taken(td) {
+				return nil, fmt.Sprintf("%s already has a member %s", td.Name, newName)
+			}
+		}
+	case *types.TypeDecl:
+		for _, fd := range a.files {
+			if fd.pkg != nil && fd.pkg.Checked != nil && fd.pkg.Checked.Path == v.PkgPath && fd.pkg.Checked.Scope.LookupLocal(newName) != nil {
+				return nil, fmt.Sprintf("package %s already declares %s", fd.pkg.Checked.Name, newName)
+			}
+		}
+	}
+	return []any{k}, ""
+}
+
+// implementsDecl reports whether the (non-generic) type td or a pointer to
+// it implements the interface iface, in Go's terms.
+func implementsDecl(td, iface *types.TypeDecl) bool {
+	if td.Shadow == nil || iface.Shadow == nil || len(td.TypeParams) > 0 || len(iface.TypeParams) > 0 {
+		return false
+	}
+	it, ok := iface.Shadow.Underlying().(*gotypes.Interface)
+	if !ok {
+		return false
+	}
+	return gotypes.Implements(td.Shadow, it) || gotypes.Implements(gotypes.NewPointer(td.Shadow), it)
 }
 
 // ---------------------------------------------------------------------------

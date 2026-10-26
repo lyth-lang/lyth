@@ -52,6 +52,9 @@ type Server struct {
 	timers              map[string]*time.Timer
 	lythDiags, vetDiags map[string][]Diagnostic
 	shutdown            bool
+	// watch is set when the client lets the server register a watcher for
+	// files changed outside the editor (dynamic registration).
+	watch bool
 
 	compileMu sync.Mutex // one compilation at a time
 	vetMu     sync.Mutex // one go vet at a time
@@ -112,6 +115,9 @@ func (s *Server) dispatch(m *message) {
 	if m.ID == nil {
 		s.notification(m.Method, m.Params)
 		return
+	}
+	if m.Method == "" {
+		return // the client's response to a request of the server's
 	}
 	var result any
 	var err error
@@ -177,11 +183,19 @@ func (s *Server) initialize(params json.RawMessage) any {
 		InitializationOptions struct {
 			Vet *bool `json:"vet"`
 		} `json:"initializationOptions"`
+		Capabilities struct {
+			Workspace struct {
+				DidChangeWatchedFiles struct {
+					DynamicRegistration bool `json:"dynamicRegistration"`
+				} `json:"didChangeWatchedFiles"`
+			} `json:"workspace"`
+		} `json:"capabilities"`
 	}
 	_ = json.Unmarshal(params, &p)
 	if p.InitializationOptions.Vet != nil {
 		s.opts.Vet = *p.InitializationOptions.Vet
 	}
+	s.watch = p.Capabilities.Workspace.DidChangeWatchedFiles.DynamicRegistration
 	return map[string]any{
 		"capabilities": map[string]any{
 			"textDocumentSync":           map[string]any{"openClose": true, "change": 1, "save": map[string]any{"includeText": false}},
@@ -221,6 +235,29 @@ func (s *Server) notification(method string, params json.RawMessage) {
 	}
 	_ = json.Unmarshal(params, &p)
 	switch method {
+	case "initialized":
+		if s.watch {
+			// Files changed outside the editor (a git checkout, a generator)
+			// change what the open documents compile against.
+			watchers := []any{}
+			for _, g := range []string{"**/*.lyth", "**/*.go", "**/go.mod", "**/go.work"} {
+				watchers = append(watchers, map[string]any{"globPattern": g})
+			}
+			s.send(map[string]any{"jsonrpc": "2.0", "id": "lyth-watch", "method": "client/registerCapability", "params": map[string]any{
+				"registrations": []any{map[string]any{"id": "lyth-watch", "method": "workspace/didChangeWatchedFiles", "registerOptions": map[string]any{"watchers": watchers}}},
+			}})
+		}
+	case "workspace/didChangeWatchedFiles":
+		s.mu.Lock()
+		s.gen++ // analyses read the changed files from disk
+		open := make([]string, 0, len(s.docs))
+		for path := range s.docs {
+			open = append(open, path)
+		}
+		s.mu.Unlock()
+		for _, path := range open {
+			s.schedule(path)
+		}
 	case "textDocument/didOpen":
 		path := s.open(p.TextDocument.URI)
 		s.setDoc(path, p.TextDocument.Text)
@@ -232,6 +269,9 @@ func (s *Server) notification(method string, params json.RawMessage) {
 		}
 		path := canonical(uriToPath(p.TextDocument.URI))
 		s.setDoc(path, p.ContentChanges[len(p.ContentChanges)-1].Text)
+		s.mu.Lock()
+		delete(s.vetDiags, path) // they describe the saved file; vet runs again on save
+		s.mu.Unlock()
 		s.schedule(path)
 	case "textDocument/didSave":
 		path := canonical(uriToPath(p.TextDocument.URI))
@@ -375,7 +415,31 @@ func (s *Server) schedule(path string) {
 	if t := s.timers[path]; t != nil {
 		t.Stop()
 	}
-	s.timers[path] = time.AfterFunc(s.opts.Debounce, func() { s.check(path) })
+	s.timers[path] = time.AfterFunc(s.opts.Debounce, func() {
+		s.check(path)
+		s.checkDependents(path)
+	})
+}
+
+// checkDependents checks the open documents of other packages after path
+// changed: they may import its package, and their diagnostics would
+// otherwise describe the old code until they are edited.
+func (s *Server) checkDependents(path string) {
+	defer s.survive("checking the importers of " + path)
+	s.mu.Lock()
+	var others []string
+	seen := map[string]bool{filepath.Dir(path): true}
+	for p := range s.docs {
+		if dir := filepath.Dir(p); !seen[dir] {
+			seen[dir] = true
+			others = append(others, p)
+		}
+	}
+	s.mu.Unlock()
+	sort.Strings(others)
+	for _, p := range others {
+		s.check(p)
+	}
 }
 
 // check analyzes path's package and publishes the diagnostics of its files.
@@ -518,12 +582,16 @@ func (s *Server) vet(path string) {
 		u := unitFor(path, false)
 		s.notify("$/progress", map[string]any{"token": "lyth-vet", "value": map[string]any{"kind": "begin", "title": "go vet"}})
 		defer s.notify("$/progress", map[string]any{"token": "lyth-vet", "value": map[string]any{"kind": "end"}})
-		cfg := &build.Config{WorkDir: u.workDir, Stdout: io.Discard, Stderr: io.Discard}
+		// Test files too: go vet checks them, and the editor shows them.
+		cfg := &build.Config{WorkDir: u.workDir, Tests: true, Stdout: io.Discard, Stderr: io.Discard}
 		var sess *build.Session
 		var err error
 		s.compiling(func() { sess, err = build.Compile(cfg, u.target) })
 		if err != nil || sess == nil || sess.Sink.HasErrors() {
-			return // the check reports these
+			// The check reports these; findings of the code before them
+			// would be stale.
+			s.clearVet(path)
+			return
 		}
 		before := len(sess.Sink.All())
 		var pkgs []string
@@ -560,6 +628,22 @@ func (s *Server) vet(path string) {
 		s.mu.Unlock()
 		s.publish(files)
 	}()
+}
+
+// clearVet drops the go vet findings of path's package, after a save whose
+// code does not compile.
+func (s *Server) clearVet(path string) {
+	dir := filepath.Dir(path)
+	s.mu.Lock()
+	var files []string
+	for f := range s.vetDiags {
+		if filepath.Dir(f) == dir {
+			s.vetDiags[f] = nil
+			files = append(files, f)
+		}
+	}
+	s.mu.Unlock()
+	s.publish(files)
 }
 
 var (

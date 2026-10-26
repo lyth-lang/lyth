@@ -369,9 +369,17 @@ func (a *analysis) at(path string, off int) *occurrence {
 // refs returns every occurrence of k.
 func (a *analysis) refs(k any) []*occurrence {
 	var out []*occurrence
+	type at struct {
+		path       string
+		start, end int
+	}
+	seen := map[at]bool{}
 	for _, list := range a.occ {
 		for _, o := range list {
-			if o.key == k {
+			// A file indexed twice (a package checked for itself and for
+			// an importer) lists its occurrences once.
+			if key := (at{o.file.path, o.start, o.end}); o.key == k && !seen[key] {
+				seen[key] = true
 				out = append(out, o)
 			}
 		}

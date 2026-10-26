@@ -12,6 +12,7 @@ import (
 	"unicode/utf16"
 
 	"github.com/lyth-lang/lyth/internal/check"
+	"github.com/lyth-lang/lyth/internal/diag"
 	"github.com/lyth-lang/lyth/internal/source"
 	"github.com/lyth-lang/lyth/internal/syntax"
 	"github.com/lyth-lang/lyth/internal/types"
@@ -68,7 +69,8 @@ func (c *completions) add(it completionItem, rank string) {
 func (s *Server) completion(params json.RawMessage) (any, error) {
 	path, pos := positionParams(params)
 	text, ok := s.doc(path)
-	c := &completions{seen: map[string]bool{}}
+	// items is never null: the protocol's CompletionList requires an array.
+	c := &completions{seen: map[string]bool{}, items: []completionItem{}}
 	result := map[string]any{"isIncomplete": false, "items": &c.items}
 	if !ok {
 		return result, nil
@@ -661,37 +663,38 @@ func utf16Index(s string, byteOff int) int { return len(utf16.Encode([]rune(s[:b
 // enclosingCall finds the unclosed ( before off: its offset, the index of
 // the argument at off, and the name of a named argument being written.
 func enclosingCall(text string, off int) (open, arg int, named string) {
+	// Tokens, not bytes: commas and parentheses in strings do not count.
+	toks, _ := syntax.Lex(source.NewFile("", "", []byte(text[:off])), &diag.Sink{})
 	depth, commas := 0, 0
-	lastComma := off
-	for i := off - 1; i >= 0 && off-i < 4000; i-- {
-		switch text[i] {
-		case ')', ']', '}':
+	last := -1 // the comma nearest the cursor, at the call's level
+	for i := len(toks) - 1; i >= 0; i-- {
+		switch toks[i].Kind {
+		case syntax.RPAREN, syntax.RBRACK, syntax.RBRACE, syntax.TEMPLATE_EXPR_END:
 			depth++
-		case '[':
+		case syntax.LBRACK:
 			depth--
-		case '{':
+		case syntax.LBRACE, syntax.TEMPLATE_EXPR_START:
 			if depth == 0 {
 				return -1, 0, ""
 			}
 			depth--
-		case '(':
+		case syntax.LPAREN:
 			if depth == 0 {
-				seg := strings.TrimSpace(text[i+1 : off])
-				if commas > 0 {
-					seg = strings.TrimSpace(text[lastComma+1 : off])
+				first := i
+				if last >= 0 {
+					first = last
 				}
-				if eq := strings.Index(seg, "="); eq > 0 && !strings.HasPrefix(seg[eq:], "==") {
-					if name := strings.TrimSpace(seg[:eq]); identRE.MatchString(name) {
-						named = name
-					}
+				// x = ... after the comma or ( names the argument.
+				if first+2 < len(toks) && toks[first+1].Kind == syntax.IDENT && toks[first+2].Kind == syntax.ASSIGN {
+					named = toks[first+1].Text
 				}
-				return i, commas, named
+				return toks[i].Span.Start, commas, named
 			}
 			depth--
-		case ',':
+		case syntax.COMMA:
 			if depth == 0 {
 				if commas == 0 {
-					lastComma = i
+					last = i
 				}
 				commas++
 			}
