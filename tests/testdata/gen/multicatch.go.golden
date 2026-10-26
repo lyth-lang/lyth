@@ -68,22 +68,18 @@ func main() {
 		return
 	}
 	p, q = v, v2
-	v4 := p
-	v5 := q
 //line multicatch.lyth:41
 	v3, err := sum("5", "6")
 	if err != nil {
 		v3 = -1
 	}
-	v7 := v4
-	v8 := v5
 //line multicatch.lyth:41
-	v6, err := sum("5", "z")
+	v4, err := sum("5", "z")
 	if err != nil {
-		v6 = -1
+		v4 = -1
 	}
 //line multicatch.lyth:41
-	fmt.Println(v7, v8, v3, v6)
+	fmt.Println(p, q, v3, v4)
 	name, size, err := lookup("")
 	if err != nil {
 //line multicatch.lyth:42

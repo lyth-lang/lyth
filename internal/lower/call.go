@@ -52,12 +52,12 @@ func (fl *fnLower) call(e *syntax.CallExpr) ast.Expr {
 		xs := fl.exprList(ops, nil)
 		fun, args = xs[0], xs[1:]
 	} else if s, ok := syntax.Unparen(e.Fun).(*syntax.SelectorExpr); ok && fl.info.Selections[s] != nil && fl.info.Selections[s].Kind != check.SelPkgMember {
-		// Method call: receiver first.
-		recvOps := append([]syntax.Expr{s.X}, ci.Args...)
-		mark := len(*fl.stmts)
+		// Method call: receiver first. A pointer method called on a variable,
+		// field, or element takes its address, so a receiver read before an
+		// argument that needs statements is its address: v := &b.c, then
+		// v.add(x). A copy would lose what the method changes.
 		recv := fl.receiver(s)
-		_ = mark
-		rest := fl.exprListAfter(recv, s.X, recvOps[1:])
+		rest := fl.exprListAfterRecv(recv, s.X, ci.Args, fl.needsAddr(s))
 		recv, args = rest[0], rest[1:]
 		fun = &ast.SelectorExpr{X: recv, Sel: ast.NewIdent(fl.info.Selections[s].GoName)}
 	} else {
@@ -87,16 +87,26 @@ func (fl *fnLower) call(e *syntax.CallExpr) ast.Expr {
 // call of the function with the receiver first: coll.Filter(x, f).
 func (fl *fnLower) extCall(e *syntax.CallExpr, ci *check.CallInfo) ast.Expr {
 	s := syntax.Unparen(e.Fun).(*syntax.SelectorExpr)
-	xs := fl.exprList(append([]syntax.Expr{s.X}, ci.Args...), nil)
-	recv, args := xs[0], xs[1:]
-	if p, ok := recv.(*ast.ParenExpr); ok {
-		recv = p.X // an argument needs no parentheses: Halved(3 * time.Second)
-	}
-	switch {
-	case ci.Ext.Addr:
-		recv = &ast.UnaryExpr{Op: token.AND, X: recv}
-	case ci.Ext.Deref:
-		recv = &ast.StarExpr{X: recv}
+	var recv ast.Expr
+	var args []ast.Expr
+	if ci.Ext.Addr {
+		// A pointer receiver is the operand's address, also when it is read
+		// before an argument that needs statements.
+		first := fl.expr(s.X)
+		if p, ok := first.(*ast.ParenExpr); ok {
+			first = p.X
+		}
+		xs := fl.exprListAfterRecv(&ast.UnaryExpr{Op: token.AND, X: first}, s.X, ci.Args, false)
+		recv, args = xs[0], xs[1:]
+	} else {
+		xs := fl.exprList(append([]syntax.Expr{s.X}, ci.Args...), nil)
+		recv, args = xs[0], xs[1:]
+		if p, ok := recv.(*ast.ParenExpr); ok {
+			recv = p.X // an argument needs no parentheses: Halved(3 * time.Second)
+		}
+		if ci.Ext.Deref {
+			recv = &ast.StarExpr{X: recv}
+		}
 	}
 	fun := fl.l.extFunc(ci.Ext)
 	if ci.ExplicitTypeArgs && len(ci.TypeArgs) > 0 {
@@ -144,7 +154,7 @@ func (fl *fnLower) bindArgs(e *syntax.CallExpr, ci *check.CallInfo, args []ast.E
 		}
 		args[i] = fl.adaptConst(a, args[i], pt)
 		if len(slots[p]) == 0 {
-			first[p] = entry{order: i, impure: !fl.pure(a, args[i])}
+			first[p] = entry{order: i, impure: !fl.pure(a, args[i]) && !fl.callFree(a)}
 		}
 		slots[p] = append(slots[p], args[i])
 	}
@@ -165,7 +175,7 @@ func (fl *fnLower) bindArgs(e *syntax.CallExpr, ci *check.CallInfo, args []ast.E
 	if spill {
 		for i, a := range ci.Args {
 			p := ci.ArgParams[i]
-			if p < 0 || p >= np || fl.pure(a, args[i]) {
+			if p < 0 || p >= np || fl.pure(a, args[i]) || fl.callFree(a) {
 				continue
 			}
 			tmp := fl.temp(paramBase(ci.Sig, p))
@@ -204,9 +214,29 @@ func (fl *fnLower) defaultArg(d check.DefaultArg, pt types.Type) ast.Expr {
 	return sub.exprAs(d.Expr, pt)
 }
 
+// needsAddr reports whether a method call through the selector s takes the
+// address of its receiver operand: a pointer method on a value.
+func (fl *fnLower) needsAddr(s *syntax.SelectorExpr) bool {
+	sel := fl.info.Selections[s]
+	if sel == nil || sel.Kind != check.SelMethod || !sel.PtrRecv || fl.info.Implicit[s.X] == check.ConvUnbox {
+		return false
+	}
+	switch types.Base(fl.info.TypeOf(s.X)).(type) {
+	case *types.Pointer, nil:
+		return false
+	}
+	return !types.IsInterface(fl.info.TypeOf(s.X))
+}
+
 // exprListAfter lowers operands after an already-lowered first operand,
 // spilling the first operand if later ones need statements.
 func (fl *fnLower) exprListAfter(first ast.Expr, firstSyn syntax.Expr, rest []syntax.Expr) []ast.Expr {
+	return fl.exprListAfterRecv(first, firstSyn, rest, false)
+}
+
+// exprListAfterRecv is exprListAfter for a method's receiver; addr spills
+// the receiver's address, for a pointer method that takes it.
+func (fl *fnLower) exprListAfterRecv(first ast.Expr, firstSyn syntax.Expr, rest []syntax.Expr, addr bool) []ast.Expr {
 	out := []ast.Expr{first}
 	for _, e := range rest {
 		mark := len(*fl.stmts)
@@ -218,11 +248,15 @@ func (fl *fnLower) exprListAfter(first ast.Expr, firstSyn syntax.Expr, rest []sy
 				if j > 0 {
 					syn = rest[j-1]
 				}
-				if fl.pure(syn, out[j]) {
+				if fl.pure(syn, out[j]) || fl.callFree(syn) {
 					continue
 				}
 				tmp := fl.temp("v")
-				spill := &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(tmp)}, Tok: token.DEFINE, Rhs: []ast.Expr{out[j]}}
+				val := out[j]
+				if j == 0 && addr {
+					val = &ast.UnaryExpr{Op: token.AND, X: val}
+				}
+				spill := &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(tmp)}, Tok: token.DEFINE, Rhs: []ast.Expr{val}}
 				markTree(fl.l, spill, syn.Span())
 				spills = append(spills, spill)
 				out[j] = ast.NewIdent(tmp)

@@ -149,6 +149,9 @@ func (c *Checker) lhs(e syntax.Expr) *operand {
 		sym := c.lookup(id.Name)
 		if v, ok := sym.(*VarSym); ok {
 			c.info.Uses[id] = v
+			if v.owner != nil && v.owner != c.fn {
+				v.captured = true // assigned by a lambda, go block, or defer block
+			}
 			t := v.Type
 			if v.Kind == GlobalVar {
 				t = c.globalType(v)
@@ -293,7 +296,7 @@ func (c *Checker) rebind(param *VarSym, name *syntax.Ident, t types.Type, sameSc
 		c.errorf(diag.ETypeMismatch, name.S, "%s would change type from %s to %s; choose a new name", name.Name, param.Type, t).
 			WithRelated(param.Span, "parameter %s declared here", name.Name)
 	}
-	v := &VarSym{name: name.Name, Type: param.Type, Mutable: true, Kind: LocalVar, Span: name.S, Rebinds: param, InPlace: sameScope, FreshName: param.captured}
+	v := &VarSym{name: name.Name, Type: param.Type, Mutable: true, Kind: LocalVar, Span: name.S, Rebinds: param, InPlace: sameScope, FreshName: param.captured, owner: c.fn}
 	v.NotReassigned = c.fn.reassigned != nil && !c.fn.reassigned[name.Name]
 	c.info.Defs[name] = v
 	if sameScope {
@@ -308,7 +311,7 @@ func (c *Checker) rebind(param *VarSym, name *syntax.Ident, t types.Type, sameSc
 // newLocal returns a variable declared by := or name: Type. It is mutable;
 // it smart-casts when its function never reassigns it.
 func (c *Checker) newLocal(id *syntax.Ident, t types.Type) *VarSym {
-	v := &VarSym{name: id.Name, Type: t, Mutable: true, Kind: LocalVar, Span: id.S}
+	v := &VarSym{name: id.Name, Type: t, Mutable: true, Kind: LocalVar, Span: id.S, owner: c.fn}
 	v.NotReassigned = c.fn != nil && c.fn.reassigned != nil && !c.fn.reassigned[id.Name]
 	c.warnShadow(id)
 	return v

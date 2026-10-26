@@ -142,7 +142,13 @@ func (fl *fnLower) exprList(es []syntax.Expr, lvalue []bool) []ast.Expr {
 		if len(*fl.stmts) > mark && i > 0 {
 			var spills []ast.Stmt
 			for j := 0; j < i; j++ {
-				if fl.pure(es[j], out[j]) || lvalue != nil && lvalue[j] {
+				if lvalue != nil && lvalue[j] {
+					// An assignment target stays addressable: only the calls
+					// inside it run first (xs[i()] = f()?).
+					out[j] = fl.spillTarget(es[j], out[j], &spills)
+					continue
+				}
+				if fl.pure(es[j], out[j]) || fl.callFree(es[j]) {
 					continue
 				}
 				tmp := fl.temp("v")
@@ -217,6 +223,103 @@ func (fl *fnLower) pure(e syntax.Expr, x ast.Expr) bool {
 		}
 	}
 	return false
+}
+
+// spillTarget evaluates the calls inside the assignment target e (lowered
+// to g) into temporaries appended to spills, keeping the target
+// addressable: the index of xs[i()], the map key of m[k()], the pointer of
+// p().f or *p(). Go evaluates those operands before the right side.
+func (fl *fnLower) spillTarget(e syntax.Expr, g ast.Expr, spills *[]ast.Stmt) ast.Expr {
+	if fl.callFree(e) {
+		return g
+	}
+	spill := func(syn syntax.Expr, x ast.Expr) ast.Expr {
+		tmp := fl.temp("v")
+		st := &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(tmp)}, Tok: token.DEFINE, Rhs: []ast.Expr{x}}
+		fl.l.mark(st, syn.Span())
+		*spills = append(*spills, st)
+		return ast.NewIdent(tmp)
+	}
+	for {
+		p, ok := g.(*ast.ParenExpr)
+		if !ok {
+			break
+		}
+		g = p.X
+	}
+	switch s := syntax.Unparen(e).(type) {
+	case *syntax.IndexExpr:
+		gi, ok := g.(*ast.IndexExpr)
+		if !ok {
+			return g
+		}
+		if !fl.callFree(s.X) {
+			if _, isArray := types.Base(fl.info.TypeOf(s.X)).(*types.Array); isArray {
+				gi.X = fl.spillTarget(s.X, gi.X, spills) // the array itself, not a copy
+			} else {
+				gi.X = spill(s.X, gi.X) // a slice or map: the same backing store
+			}
+		}
+		if !fl.callFree(s.Index) {
+			gi.Index = spill(s.Index, gi.Index)
+		}
+		return gi
+	case *syntax.SelectorExpr:
+		gs, ok := g.(*ast.SelectorExpr)
+		if !ok {
+			return g
+		}
+		if _, isPtr := types.Base(fl.info.TypeOf(s.X)).(*types.Pointer); isPtr {
+			gs.X = spill(s.X, gs.X)
+		} else {
+			gs.X = fl.spillTarget(s.X, gs.X, spills)
+		}
+		return gs
+	case *syntax.UnaryExpr:
+		if gs, ok := g.(*ast.StarExpr); ok && s.Op == syntax.MUL {
+			gs.X = spill(s.X, gs.X)
+			return gs
+		}
+	}
+	return g
+}
+
+// callFree reports whether evaluating e calls nothing: no function or
+// method call, receive, ? or catch. Go runs the calls of an expression in
+// lexical order and reads plain operands (variables, fields, elements) after
+// them, so an operand before a call that lowering hoists into statements is
+// evaluated first only when it calls something; a plain read stays where Go
+// reads it. total + f()? then reads total after f, as total + f() does
+// (language.md §6, ADR 0045).
+func (fl *fnLower) callFree(e syntax.Expr) bool {
+	free := true
+	syntax.Walk(e, func(n syntax.Node) {
+		if !free {
+			return
+		}
+		switch n := n.(type) {
+		case *syntax.CallExpr:
+			ci := fl.info.Calls[n]
+			if ci == nil {
+				free = false
+				return
+			}
+			switch ci.Kind {
+			case check.CallConstruct, check.CallConvert:
+			case check.CallBuiltin:
+				switch ci.Builtin {
+				case check.BuiltinLen, check.BuiltinCap, check.BuiltinMin, check.BuiltinMax:
+				default:
+					free = false
+				}
+			default:
+				free = false
+			}
+		case *syntax.TryExpr, *syntax.CatchExpr, *syntax.IfExpr, *syntax.WhenExpr:
+			free = false
+		}
+	})
+	return free
 }
 
 func identOf(e syntax.Expr) *syntax.Ident {

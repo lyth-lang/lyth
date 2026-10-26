@@ -1115,12 +1115,18 @@ only in `for` loops and membership tests.
 
 ## 6. Evaluation order
 
-Lyth evaluates operands, arguments, and collection-literal elements left to
-right, completely. This is stricter than Go, which leaves the order of variable
-reads relative to calls unspecified. When the generator must hoist part of an
-expression into statements (e.g. for `?`, `catch`, `if`-expressions), it spills
-preceding operands with side effects into temporaries so that the order
-survives. Expressions that need no hoisting are emitted unchanged.
+Lyth evaluates expressions in Go's order ([ADR 0045](../adr/0045-go-evaluation-order.md)).
+Calls, method calls, and channel receives run in lexical left-to-right order,
+the calls of `?` and `catch` and those in `if` and `when` values included.
+Plain operands (variables, fields, elements) are read as the go compiler reads
+them: after the calls of their expression. When the generator hoists part of
+an expression into statements, it evaluates the operands before it that call
+something into temporaries first, and leaves plain reads in place, so a `?`
+never changes what the rest of the expression reads: `total + f()?` reads
+`total` after `f`, as `total + g()` reads it after `g`. A pointer method called
+on a field or element changes that field or element, also when an argument is
+hoisted. Code should not depend on a variable that a call in the same
+expression changes; Go leaves that order unspecified.
 
 ## 7. Builtins and prelude
 

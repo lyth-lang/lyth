@@ -143,8 +143,8 @@ left to right: first "did it fail?", then "is anything there?".
 ### 3.5 Evaluation order and conditional contexts
 
 `?` may appear in any expression position. The generator hoists the call and its
-check into statements, spilling earlier operands with side effects into
-temporaries so that left-to-right order is preserved
+check into statements, spilling earlier operands that call something into
+temporaries so that the calls keep their lexical order
 ([language.md §6](language.md#6-evaluation-order)). In conditionally evaluated
 positions, such as the right operand of `&&`/`||`/`?:`, an `if`/`when` branch,
 or a `while` condition, the hoisted code is placed inside the corresponding

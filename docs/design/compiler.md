@@ -187,8 +187,11 @@ through crafted source is impossible.
 - **Expression linearization.** Each Lyth expression lowers to `(prelude
   statements, Go expression)`. Constructs that need statements (`?`, `catch`,
   `if`/`when` expressions, `?.`/`?:` chains, `!!`) append to the prelude. When a
-  later operand needs a prelude, earlier operands with side effects are spilled
-  into temporaries to keep left-to-right order. Short-circuit contexts (`&&`,
+  later operand needs a prelude, earlier operands that call something are
+  spilled into temporaries to keep the calls in lexical order; plain reads stay
+  where Go reads them, after the calls ([ADR 0045](../adr/0045-go-evaluation-order.md)).
+  A receiver whose pointer method takes its address is spilled as that
+  address. Short-circuit contexts (`&&`,
   `||`, `?:`, branches, loop conditions) get their own nested preludes, placed
   in the corresponding Go branch or loop. Expressions without preludes are
   emitted as written, so the common case stays verbatim.

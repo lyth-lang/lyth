@@ -1,0 +1,59 @@
+// The calls inside an assignment's targets run before the right side's, as
+// in Go, also when the right side is hoisted (a ?, a catch, an if value):
+// indexes, map keys, pointers reached through calls, in compound
+// assignments and assignment lists. Arrays are assigned in place.
+import "fmt"
+import "strconv"
+
+var log: []string = []
+
+func at(i: int): int {
+    log = append(log, "at ${i}")
+    return i
+}
+
+func key(k: string): string {
+    log = append(log, "key ${k}")
+    return k
+}
+
+func num(s: string): int throws {
+    log = append(log, "num ${s}")
+    return strconv.Atoi(s)?
+}
+
+func pair(): (int, int) throws {
+    log = append(log, "pair")
+    return 7, 8
+}
+
+struct Box { V: int }
+
+var box = &Box()
+
+func get(): *Box {
+    log = append(log, "get")
+    return box
+}
+
+func run(): string throws {
+    xs := [0, 0]
+    xs[at(1)] = num("5")?
+    m: map[string]int = [:]
+    m[key("a")] = num("6")?
+    xs[at(0)] += num("1") catch { 0 }
+    get().V = if len(xs) > 1 { num("9")? } else { 0 }
+    arr: [2]int = [0, 0]
+    arr[at(1)] = num("4")?
+    xs[at(0)], xs[at(1)] = pair()?
+    return "${xs} ${m} ${box.V} ${arr}"
+}
+
+func main() throws {
+    fmt.Println(run()?)
+    fmt.Println(log)
+}
+
+// Output:
+// [7 8] map[a:6] 9 [0 4]
+// [at 1 num 5 key a num 6 at 0 num 1 get num 9 at 1 num 4 at 0 at 1 pair]

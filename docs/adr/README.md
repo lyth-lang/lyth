@@ -49,3 +49,4 @@ Accepted ADRs are immutable; a superseding ADR links back.
 | [0042](0042-dollar-names-in-strings.md) | `$name` in a string is literal unless it names a variable | Accepted (amends 0012) |
 | [0043](0043-struct-embedding.md) | Struct embedding | Accepted |
 | [0044](0044-remaining-spellings.md) | Remaining spellings: `null`, import aliases, and `in` as a name | Accepted (amends 0031) |
+| [0045](0045-go-evaluation-order.md) | Go's evaluation order, with and without hoisting | Accepted (replaces language.md §6's rule) |

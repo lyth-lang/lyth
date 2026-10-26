@@ -758,10 +758,17 @@ func (fl *fnLower) assignStmt(s *syntax.AssignStmt) {
 // tupleAssign lowers (a, b) = (x, y) to Go's a, b = x, y and (a, b) = f()
 // to a, b = f(); Go evaluates every operand before assigning, like Lyth.
 func (fl *fnLower) tupleAssign(s *syntax.AssignStmt, lhs *syntax.TupleExpr) {
-	if names := fl.multiFallible(s.Rhs, len(lhs.Elems)); names != nil {
+	if fl.multiFallibleExpr(s.Rhs, len(lhs.Elems)) {
 		// a, b = call()? or a, b = call() catch { ... }: bind the success
-		// values to fresh variables, then assign them as Go would.
+		// values to fresh variables, then assign them as Go would. The
+		// calls inside the targets run first (xs[i()], ys[j()] = f()?).
 		xs := fl.exprList(lhs.Elems, trues(len(lhs.Elems)))
+		var spills []ast.Stmt
+		for i, el := range lhs.Elems {
+			xs[i] = fl.spillTarget(el, xs[i], &spills)
+		}
+		*fl.stmts = append(*fl.stmts, spills...)
+		names := fl.multiFallible(s.Rhs, len(lhs.Elems))
 		var dst, src []ast.Expr
 		for i, n := range names {
 			if id, ok := xs[i].(*ast.Ident); ok && id.Name == "_" {
@@ -1729,6 +1736,18 @@ func setPos(n ast.Node, pos token.Pos) {
 			n.Lbrace = pos
 		}
 	}
+}
+
+// multiFallibleExpr reports whether multiFallible lowers e.
+func (fl *fnLower) multiFallibleExpr(e syntax.Expr, n int) bool {
+	var info *check.TryInfo
+	switch x := syntax.Unparen(e).(type) {
+	case *syntax.TryExpr:
+		info = fl.info.Tries[x]
+	case *syntax.CatchExpr:
+		info = fl.info.Tries[x]
+	}
+	return info != nil && len(info.Success) == n && n >= 2
 }
 
 // multiFallible lowers x? or x catch { ... } of a call with n success

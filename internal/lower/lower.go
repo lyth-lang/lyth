@@ -1184,6 +1184,7 @@ func (l *fileLowerer) propDecl(d *syntax.PropDecl) {
 	if d.Value != nil {
 		fl := newFnLower(l, &types.Signature{}, false)
 		fl.initializer = true
+		fl.collectNames(d.Value) // lambdas in the initializer have locals too
 		var stmts []ast.Stmt
 		fl.stmts = &stmts
 		x := fl.exprAs(d.Value, v.Type)

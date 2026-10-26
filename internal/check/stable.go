@@ -74,3 +74,7 @@ func reassignedNames(params []string, body syntax.Node) map[string]bool {
 // declaration, so a null check or type test of it smart-casts it:
 // parameters and receivers, and locals the function never reassigns.
 func (v *VarSym) Settled() bool { return !v.Mutable || v.NotReassigned }
+
+// Captured reports whether a function literal, go block, or defer block
+// nested in the variable's function uses it: calling one may change it.
+func (v *VarSym) Captured() bool { return v.captured }

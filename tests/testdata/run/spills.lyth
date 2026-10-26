@@ -1,0 +1,91 @@
+// Evaluation order is Go's: calls, method calls, and receives run in
+// lexical order, ? and catch included, and plain operands are read after the
+// calls of their expression, as the go compiler reads them. A call that
+// lowering hoists into statements keeps both: an earlier operand that calls
+// something runs first, and a plain read stays after the calls, so the
+// result is the same with and without a ? (ADR 0045).
+import "errors"
+import "fmt"
+import "strings"
+
+var log: []string = []
+var total = 1
+
+func note(s: string): int {
+    log = append(log, s)
+    return len(log)
+}
+
+func next(n: int): int throws {
+    log = append(log, "next ${n}")
+    if n < 0 {
+        throw errors.New("negative")
+    }
+    return n + 1
+}
+
+func bumpTotal(): int {
+    total = 100
+    return 1
+}
+
+func bumpTotalF(): int throws {
+    total = 100
+    return 1
+}
+
+struct Counter { n: int }
+func *Counter.add(k: int) { self.n += k }
+func *Counter.bump(): int {
+    self.n += 100
+    return 1
+}
+func Counter.show(k: int): int = self.n + k
+
+struct Box {
+    c: Counter
+    sb: strings.Builder
+}
+
+func main() throws {
+    out: []int = []
+    for i in 0..<3 {
+        out = append(out, next(i)?)
+    }
+    fmt.Println(out)
+
+    // A plain read after the calls, with and without ?.
+    fmt.Println(total + bumpTotal())
+    total = 1
+    fmt.Println(total + bumpTotalF()?)
+
+    // Calls in order: note("a") runs before next(5).
+    log = []
+    fmt.Println(note("a") + next(5)?, log)
+
+    // A pointer method on a field changes the field, also when an argument
+    // is hoisted, and a value method's copy is taken after the calls.
+    b := Box()
+    b.c.add(next(4)?)
+    b.c.add(if total > 50 { 10 } else { 20 })
+    fmt.Println(b.c.n, b.c.show(b.c.bump()), b.c.show(b.c.bump() + next(0)?))
+    b.sb.WriteString(if b.c.n > 0 { "pos" } else { "neg" })
+    b.sb.WriteString(",${next(1)?}")
+    fmt.Println(b.sb.String())
+
+    m := 10
+    r := m + (next(-1) catch {
+        m = 1000
+        0
+    })
+    fmt.Println(r, m)
+}
+
+// Output:
+// [1 2 3]
+// 101
+// 101
+// 7 [a next 5]
+// 215 116 217
+// pos,2
+// 1000 1000
