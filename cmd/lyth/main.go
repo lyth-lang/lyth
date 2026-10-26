@@ -358,7 +358,7 @@ func cmdBuild(args []string, stdout, stderr io.Writer) int {
 		if s.Mod.Synthetic {
 			name = strings.TrimSuffix(filepath.Base(fs.Arg(0)), ".lyth")
 		}
-		output = filepath.Join(wd, name)
+		output = filepath.Join(wd, name+s.ExeSuffix())
 	}
 	okBuild, err := s.GoBuild(output, pkgs, extra)
 	printTimings(s, &c, stderr)

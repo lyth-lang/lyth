@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -38,6 +39,13 @@ func docSources(t *testing.T) []string {
 }
 
 var lythFence = regexp.MustCompile("(?ms)^```(?:kotlin|lyth)[ \t]*\n(.*?)^```")
+
+// windowsErrors respells what Windows says about a missing file as Unix
+// does, which is how the recorded outputs print it.
+var windowsErrors = strings.NewReplacer(
+	"The system cannot find the file specified.", "no such file or directory",
+	"The system cannot find the path specified.", "no such file or directory",
+)
 
 // TestDocExamples compiles and runs every documented program (an example
 // with func main) and compares its output, stdout and stderr together, with
@@ -81,6 +89,9 @@ func TestDocExamples(t *testing.T) {
 					out, err := runDocExample(src)
 					if err != nil {
 						t.Fatalf("example %d in %s:\n%s\n%v", i+1, rel, src, err)
+					}
+					if runtime.GOOS == "windows" {
+						out = windowsErrors.Replace(out)
 					}
 					r.output = out
 					if strings.Contains(src, "// output varies") || os.Getenv("LYTH_BLESS") != "" {

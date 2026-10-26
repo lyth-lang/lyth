@@ -479,13 +479,14 @@ func TestVetOnSave(t *testing.T) {
 // TestEditorPaths checks that locations sent back use the editor's spelling
 // of a path reached through a symlink, as macOS's /var is /private/var.
 func TestEditorPaths(t *testing.T) {
-	s := &Server{aliases: [][2]string{{"/private", "/"}, {"/real/dir", "/link"}}}
+	slash := filepath.FromSlash // the paths use the OS's separator
+	s := &Server{aliases: [][2]string{{slash("/private"), slash("/")}, {slash("/real/dir"), slash("/link")}}}
 	for path, want := range map[string]string{
 		"/private/var/m/main.lyth": "file:///var/m/main.lyth",
 		"/real/dir/a.lyth":         "file:///link/a.lyth",
 		"/other/b.lyth":            "file:///other/b.lyth",
 	} {
-		if got := s.uri(path); got != want {
+		if got := s.uri(slash(path)); got != want {
 			t.Errorf("uri(%s) = %s, want %s", path, got, want)
 		}
 	}

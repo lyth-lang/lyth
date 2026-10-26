@@ -720,7 +720,9 @@ func TestCalc(t: *testing.T) throws {
 	}
 	got := map[string]int{} // single-line block text -> count
 	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n")[1:] {
-		file, rest, _ := strings.Cut(line, ":")
+		// file:sl.sc,el.ec stmts count; a Windows file name has a colon too.
+		i := strings.LastIndex(line, ":")
+		file, rest := line[:i], line[i+1:]
 		if file == filepath.Join(root, "util", "util.lyth") {
 			continue // untested, listed with zero counts
 		}
@@ -761,7 +763,8 @@ func TestCalc(t: *testing.T) throws {
 	if _, minor, err := golang.GoVersion(root); err == nil && minor < 27 {
 		parse = "66.7%"
 	}
-	for _, want := range []string{"calc/calc.lyth:3:", "Add", "100.0%", "calc/calc.lyth:6:", "Parse", parse, "Sign", "total:"} {
+	calcFile := filepath.FromSlash("calc/calc.lyth")
+	for _, want := range []string{calcFile + ":3:", "Add", "100.0%", calcFile + ":6:", "Parse", parse, "Sign", "total:"} {
 		if !strings.Contains(funcs.String(), want) {
 			t.Errorf("lyth cover -func output lacks %q:\n%s", want, funcs.String())
 		}
@@ -1699,7 +1702,7 @@ func main() {
 	if s.WorkFile == "" {
 		t.Fatal("the session did not use a workspace file")
 	}
-	bin := filepath.Join(t.TempDir(), "app")
+	bin := filepath.Join(t.TempDir(), "app.bin")
 	if ok, err := s.GoBuild(bin, []string{"example.com/app"}, nil); err != nil || !ok {
 		t.Fatalf("build failed: %v\n%s", err, render(s.Sink.All()))
 	}
@@ -1741,7 +1744,7 @@ func TestModVendor(t *testing.T) {
 		t.Fatalf("vendor/modules.txt: %v\n%s", err, list)
 	}
 	s := compileModule(t, root, false)
-	bin := filepath.Join(t.TempDir(), "app")
+	bin := filepath.Join(t.TempDir(), "app.bin")
 	if ok, err := s.GoBuild(bin, []string{"example.com/app"}, nil); err != nil || !ok {
 		t.Fatalf("build from vendor/ failed: %v\n%s", err, render(s.Sink.All()))
 	}

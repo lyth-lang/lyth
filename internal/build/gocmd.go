@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -47,6 +48,20 @@ func (s *Session) overlayArgs() []string {
 		args = append(args, "-modfile="+s.ModFile)
 	}
 	return args
+}
+
+// ExeSuffix is the suffix go build gives executables for the session's
+// GOOS: .exe for Windows, which runs no file without it. go build -o file
+// writes the name it is given, so a name lyth chooses needs it.
+func (s *Session) ExeSuffix() string {
+	goos := runtime.GOOS
+	if s.goEnv != nil && s.goEnv.Vars["GOOS"] != "" {
+		goos = s.goEnv.Vars["GOOS"]
+	}
+	if goos == "windows" {
+		return ".exe"
+	}
+	return ""
 }
 
 // GoBuild runs `go build` on the given packages (import paths). It reports
@@ -217,7 +232,7 @@ func (s *Session) GoRun(pkg string, args []string, flags []string) (int, error) 
 	if name == "." || name == "" {
 		name = "main"
 	}
-	bin := filepath.Join(binDir, name)
+	bin := filepath.Join(binDir, name+s.ExeSuffix())
 	ok, err := s.GoBuild(bin, []string{pkg}, flags)
 	if err != nil || !ok {
 		return 1, err
