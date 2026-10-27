@@ -36,7 +36,8 @@ ChanType    = "chan" Type | "chan" "<-" Type | "<-" "chan" Type .
 PrimaryType = TypeName [ TypeArgs ] | FuncType | "(" Type ")" | "struct" "{" "}" .
 TypeName    = identifier [ "." identifier ] .
 TypeArgs    = "[" Type { "," Type } "]" .
-FuncType    = "(" [ Type { "," Type } ] ")" "->" ResultType [ "throws" ] .
+FuncType    = "(" [ FuncParams ] ")" "->" ResultType [ "throws" ] .
+FuncParams  = Type { "," Type } | identifier ":" Type { "," identifier ":" Type } .
 ```
 
 Types are spelled as in Go: `int`, `string`, `[]T`, `map[K]V`, `chan T`,

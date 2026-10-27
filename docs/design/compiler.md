@@ -357,7 +357,7 @@ These rules were verified against `go list` (see the toolchain tests).
 | `go build` / `go run` | Invoked with `-overlay` and `-json` (Go 1.24+ structured build output). Flags after `--` are passed through. |
 | `go test` | `lyth test` compiles the packages with their `_test.lyth` files (only the packages under test, like `go test`) and runs `go test -overlay` with go test's own flags, from the invoking directory. Hand-written `_test.go` files may sit beside `.lyth` files. Test functions keep their Go test names; a throwing test gets a wrapper that calls `t.Fatal(err)` (ADR 0014). Coverage flags write the generated files into the source tree for the run and rewrite the profile to Lyth positions (§5.3, §6.1). |
 | `go vet` | `lyth vet` runs `go vet -overlay`; positions come back through `//line`. |
-| `gofmt` | Generated code is gofmt-canonical by construction (tested). `lyth fmt` for Lyth sources is **[planned]**. |
+| `gofmt` | Generated code is gofmt-canonical by construction (tested). `lyth fmt` formats Lyth sources (whitespace only, checked against the syntax tree). |
 | Build tags, `GOOS`/`GOARCH`, `CGO_ENABLED`, `GOFLAGS` | Inherited from the environment and passed to both `go list` and `go build`. |
 | Race detector, profiling | `lyth build -- -race`. pprof and race reports show Lyth file:line through `//line`. |
 | Debugging | delve resolves breakpoints and frames through DWARF line tables, which honor `//line`. Variables appear with their Go names, which are the Lyth names for locals. |

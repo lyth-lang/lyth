@@ -20,6 +20,10 @@ File names follow Go's build-constraint conventions so generated files keep
 them: `foo_linux.lyth` compiles only for Linux, and `foo_test.lyth` is a test file.
 See [compiler.md §6.2](../design/compiler.md#62-generated-file-names).
 
+As in Go, nesting is bounded: expressions, types, and blocks nested more than
+10,000 levels deep, or chains of more than 10,000 binary or postfix operators
+(`a + b + ...`, `x.f().g()...`), are an error (E0008).
+
 ### 1.2 Comments
 
 `// line comment` and `/* block comment */` (not nested). A run of line comments,
@@ -414,7 +418,10 @@ struct User {
   exported fields.
 - A raw-string tag is emitted verbatim, except that a `json` tag without a
   name (`json:",string"`, `json:",omitempty"`) gets the automatic name, and on
-  a `T?` field also `omitzero` unless it says `omitempty` or `omitzero`. If the
+  a `T?` field also `omitzero` unless it says `omitempty` or `omitzero`. An
+  empty `json:""` opts out: the `json` key is left out of the Go tag (the other
+  keys stay), so `encoding/json` uses the field name as written, with no
+  `omitzero` ([ADR 0047](../adr/0047-go-constructs-lyth-lacked.md)). If the
   tag has no `json` key, Lyth prepends one for exported fields, and a field of
   a nullable type (`T?`) also gets `,omitzero`, so a null optional is left out
   of the output rather than written as `null`. Unexported fields get no tags

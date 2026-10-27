@@ -258,9 +258,9 @@ func main() throws {
 
 ## Tests
 
-- Tests are Go tests in `_test.lyth` files of the same package (no `package x_test`):
-  `func TestParse(t: *testing.T) { ... }`, and a test may be `throws`. `lyth test ./...` runs
-  them, with `go test` flags such as `-v` and `-run`.
+- Tests are Go tests in `_test.lyth` files: `func TestParse(t: *testing.T) { ... }`, and a test
+  may be `throws`. A test file in `package x_test` tests package `x` from outside, importing it
+  as other code does. `lyth test ./...` runs them, with `go test` flags such as `-v` and `-run`.
 - A table test declares its case struct in the test function:
   `struct tc { in: string; want: int }`, then `for c in [tc(in = "1", want = 1)] { ... }`.
 - `go vet` runs with the tests and requires a constant format string: write
@@ -321,11 +321,12 @@ What Go programmers write by habit, and the Lyth for it:
 | `try { } catch (e: E) { }` | `f() catch (e: *E) { } catch { }`, or end with `?` |
 | `xs.filter { }.map { }` | `import "lyth/coll"`, then `xs.Filter { }.Map { }` |
 
-## Not supported yet
+## Not in Lyth
 
 Packages mixing Lyth and non-test Go files (put the Go code in a package of its own),
 anonymous struct types (declare a struct, also inside a function), and `T?` on type parameters
-(return `(T, bool)`). The compiler reports each of these with a way around it.
+(return `(T, bool)`) are left out by design. The compiler reports each of these with a way
+around it.
 
 ## Changes between versions
 
