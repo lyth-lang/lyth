@@ -637,6 +637,12 @@ func (c *Checker) fieldTag(sf *syntax.Field, f *types.Field) string {
 		return tag
 	}
 	if value, ok := reflect.StructTag(tag).Lookup("json"); ok {
+		if value == "" {
+			// json:"" opts out of the automatic key: the field is untagged in
+			// Go, and encoding/json uses its name (ADR 0047).
+			rest := strings.Replace(tag, `json:""`, "", 1)
+			return strings.TrimSpace(strings.ReplaceAll(rest, "  ", " "))
+		}
 		if name, opts, _ := strings.Cut(value, ","); name == "" && value != "" {
 			// json:",omitempty" keeps the automatic name, which Go would
 			// replace with the field name (NextCursor next to items). A T?
