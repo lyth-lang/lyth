@@ -344,3 +344,42 @@ func TestRecoveryReportsMultipleErrors(t *testing.T) {
 		t.Errorf("expected 3 declarations after recovery, got %d", len(f.Decls))
 	}
 }
+
+// TestNestingLimit checks that code nested past maxNesting is one error, not
+// a stack overflow in a later pass, and that deep but reasonable code parses.
+func TestNestingLimit(t *testing.T) {
+	deep := func(open, inner, close string, n int) string {
+		return "func main() {\n    x := " + strings.Repeat(open, n) + inner + strings.Repeat(close, n) + "\n}\n"
+	}
+	tests := []struct {
+		name string
+		src  string
+		ok   bool
+	}{
+		{"parens", deep("(", "1", ")", 1000), true},
+		{"chain", "func main() {\n    x := 1" + strings.Repeat(" + 1", 1000) + "\n}\n", true},
+		{"deep parens", deep("(", "1", ")", maxNesting+1), false},
+		{"deep unary", deep("!", "true", "", 2*maxNesting), false},
+		{"deep lists", deep("[", "1", "]", maxNesting+1), false},
+		{"deep lambdas", deep("{ ", "1", " }", maxNesting+1), false},
+		{"long chain", "func main() {\n    x := 1" + strings.Repeat(" + 1", 2*maxNesting) + "\n}\n", false},
+		{"long postfix", "func main() {\n    x := a" + strings.Repeat(".b", 2*maxNesting) + "\n}\n", false},
+		{"deep types", "func main() {\n    x: " + strings.Repeat("[]", 2*maxNesting) + "int\n}\n", false},
+		{"deep blocks", "func main() {\n" + strings.Repeat("if c {\n", maxNesting) + strings.Repeat("}\n", maxNesting) + "}\n", false},
+	}
+	for _, tt := range tests {
+		_, sink := parse(t, tt.src)
+		var nesting int
+		for _, d := range sink.All() {
+			if strings.Contains(d.Message, "levels deep") {
+				nesting++
+			}
+		}
+		switch {
+		case tt.ok && sink.HasErrors():
+			t.Errorf("%s: unexpected errors: %v", tt.name, sink.All()[0].Message)
+		case !tt.ok && nesting != 1:
+			t.Errorf("%s: %d nesting errors, want 1 (%d diagnostics)", tt.name, nesting, len(sink.All()))
+		}
+	}
+}

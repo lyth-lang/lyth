@@ -59,6 +59,10 @@ type parser struct {
 	// reserved holds val and var once a declaration has used them as names
 	// (val := m[k], a Go habit): later uses read as names, without more errors.
 	reserved map[string]bool
+	// nesting counts the levels of nesting being parsed (enter, leave);
+	// tooDeep is set once maxNesting has been reported.
+	nesting int
+	tooDeep bool
 }
 
 // afterBrackets returns the token after the ']' matching the '[' at index i.
@@ -158,13 +162,39 @@ func (p *parser) continueLine(kinds ...Kind) {
 }
 
 func (p *parser) errorf(code diag.Code, span source.Span, format string, args ...any) *diag.Diagnostic {
-	if p.pos == p.lastErr {
-		// Suppress cascades at the same token; return a detached diagnostic.
+	if p.pos == p.lastErr || p.tok().Kind == ILLEGAL {
+		// Suppress cascades at the same token, and errors at a token the
+		// lexer has reported; return a detached diagnostic.
 		return &diag.Diagnostic{}
 	}
 	p.lastErr = p.pos
 	return p.sink.Errorf(code, span, format, args...)
 }
+
+// maxNesting bounds how deeply expressions, types, and blocks nest, and how
+// long a chain of binary or postfix operators is, as Go's parser bounds them:
+// every later pass recurses over the tree, and must not run out of stack.
+// Code written by people stays far below it.
+const maxNesting = 10000
+
+// enter counts a level of nesting. Past maxNesting it reports the error once,
+// skips to the end of the file, where every caller stops, and returns false;
+// the caller then returns without calling leave.
+func (p *parser) enter() bool {
+	if p.nesting >= maxNesting {
+		if !p.tooDeep {
+			p.tooDeep = true
+			p.sink.Errorf(diag.EUnsupportedSyntax, p.tok().Span, "the code nests more than %d levels deep here", maxNesting).
+				WithNote("split it into several declarations or statements")
+		}
+		p.pos = len(p.toks) - 1 // EOF
+		return false
+	}
+	p.nesting++
+	return true
+}
+
+func (p *parser) leave() { p.nesting-- }
 
 func describe(t Token) string {
 	switch t.Kind {
@@ -2117,6 +2147,10 @@ func (p *parser) unionRest(first TypeExpr) TypeExpr {
 
 func (p *parser) parsePrefixType() TypeExpr {
 	start := p.tok().Span
+	if !p.enter() {
+		return &BadType{S: start}
+	}
+	defer p.leave()
 	switch p.tok().Kind {
 	case FUN:
 		if p.peek(1).Kind == LPAREN {
@@ -2420,6 +2454,10 @@ func (p *parser) tryTypeArgs() ([]TypeExpr, bool) {
 // Statements
 
 func (p *parser) parseBlock() *Block {
+	if !p.enter() {
+		return &Block{Lbrace: p.tok().Span, Rbrace: p.tok().Span}
+	}
+	defer p.leave()
 	saved := p.noLambda
 	p.noLambda = 0
 	defer func() { p.noLambda = saved }()
@@ -2757,6 +2795,27 @@ func (p *parser) parseTypedLocalDecl() Stmt {
 // reporting it with the := or name: Type spelling that replaces it.
 func (p *parser) parseOldLocalDecl() Stmt {
 	kw := p.tok()
+	if lp := p.peek(1); kw.Kind == VAR && lp.Kind == LPAREN && (p.peek(2).Kind == RPAREN || p.peek(2).Span.StartPos().Line > lp.Span.StartPos().Line) {
+		// Go's var ( ... ) group, which Lyth has only at package level (a
+		// destructuring var (a, b) = ... stays on one line): one error for
+		// the group, not one for each of its lines.
+		p.next()
+		for depth := 0; !p.at(EOF); {
+			switch p.next().Kind {
+			case LPAREN:
+				depth++
+			case RPAREN:
+				depth--
+			}
+			if depth == 0 {
+				break
+			}
+		}
+		span := p.spanFrom(kw.Span)
+		p.errorf(diag.EUnsupportedSyntax, kw.Span, "local variables are declared with := (or name: Type = value), one per line").
+			WithNote("var ( ... ) groups are declared at package level")
+		return &BadStmt{S: span}
+	}
 	if kw.Kind == VAR && p.peek(1).Kind == IDENT {
 		switch p.peek(2).Kind {
 		case IDENT, MUL, LBRACK, MAP, CHAN:
@@ -3602,6 +3661,8 @@ func (p *parser) parseExpr() Expr { return p.parseBinary(1) }
 
 func (p *parser) parseBinary(minPrec int) Expr {
 	x := p.parseUnary()
+	levels := 0 // a chain a + b + c nests to the left
+	defer func() { p.nesting -= levels }()
 	for {
 		p.continueLine(ELVIS, LAND, LOR)
 		t := p.tok()
@@ -3615,6 +3676,10 @@ func (p *parser) parseBinary(minPrec int) Expr {
 		if !ok || prec < minPrec {
 			return x
 		}
+		if !p.enter() {
+			return x
+		}
+		levels++
 		opStart := p.next().Span
 		if not {
 			opStart = opStart.Join(p.next().Span)
@@ -3652,6 +3717,10 @@ func (p *parser) parseBinary(minPrec int) Expr {
 }
 
 func (p *parser) parseUnary() Expr {
+	if !p.enter() {
+		return &BadExpr{S: p.tok().Span}
+	}
+	defer p.leave()
 	t := p.tok()
 	switch t.Kind {
 	case SUB, ADD, NOT, XOR, AND, MUL:
@@ -3736,7 +3805,13 @@ func (p *parser) goTypeAssert(x Expr) Expr {
 }
 
 func (p *parser) parsePostfix(x Expr) Expr {
+	levels := 0 // a chain a.b().c nests to the left
+	defer func() { p.nesting -= levels }()
 	for {
+		if !p.enter() {
+			return x
+		}
+		levels++
 		p.continueLine(DOT, SAFE_DOT, CATCH)
 		t := p.tok()
 		switch t.Kind {
