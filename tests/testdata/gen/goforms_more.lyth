@@ -1,0 +1,25 @@
+// The Go that generic aliases, named function-type parameters, json:"",
+// complex numbers, and defaults on generic functions compile to.
+package shapes
+
+type Set[T: comparable] = map[T]bool
+
+type Visitor = (name: string, depth: int) -> bool
+
+struct Row {
+    Value: int `json:""`
+    Note: string? `json:""`
+    Tagged: int `json:"" db:"tagged"`
+    Auto: int
+}
+
+func Rotate(c: complex128): complex128 = c * 1i
+
+func pick[T](xs: []T, n: int = 1): []T = xs[:n]
+
+func first(xs: []int, s: Set[string], visit: Visitor): []int {
+    if visit("x", len(s)) {
+        return pick(xs)
+    }
+    return pick(xs, n = 2)
+}

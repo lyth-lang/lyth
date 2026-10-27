@@ -1,0 +1,36 @@
+// Errors of the smaller ADR 0047 forms, and of declarations that once
+// crashed the checker or reached Go's type checker.
+type Set[T: comparable] = map[T]bool
+
+type Visit = (name: string, name: int) -> bool // ERROR E0102 "parameter name is already declared"
+
+type Unnamed = (_: string, _: int) -> bool
+
+struct Loop[T] {
+    next: *Loop[[]T]? // ERROR E0216 "invalid recursive type Loop: it refers to itself with the type argument []T"
+}
+
+type Self *Self
+
+func zero[T](): int = 0
+
+func own[A: [zero[A]]int]() {} // ERROR E0201 "the constraint of A must be an interface" // ERROR E0216 "A cannot be used here: its constraint is still being declared"
+
+func seed(): int = 1
+
+func pick[T](xs: []T, n: T = seed()): T = n // ERROR E0216 "the default value of n, whose type is a type parameter, must be a constant"
+
+func through(s: Self) = s.x // ERROR E0205 "Self has no field or method x"
+
+func main() {
+    a := complex(1, 2)
+    println(a < 2i) // ERROR E0209 "operator < is not defined for complex128"
+    println(complex("x", 1)) // ERROR E0209 "complex takes two real numbers"
+    s: Set[[]int] // ERROR E0213 "[]int does not satisfy the constraint comparable of T"
+    var ( // ERROR E0008 "local variables are declared with := (or name: Type = value), one per line"
+        x = 1
+    )
+    n := 1
+    n() // ERROR E0204 "n is not a function (type int)"
+    t := int // ERROR E0104 "int is a type, not a value"
+}

@@ -1,0 +1,11 @@
+// Errors of the lexer: characters, numbers, escapes, and unterminated
+// literals.
+func main() {
+    a := 1 § 2 // ERROR E0001 "invalid character"
+    b := 0x // ERROR E0004 "invalid number literal 0x"
+    c := 1e // ERROR E0004 "invalid number literal 1e"
+    d := "bad \q escape" // ERROR E0007 "unknown escape sequence"
+    e := 'ab' // ERROR E0001 "rune literal must contain exactly one character"
+    println(a, b, c, d, e)
+    f := "never closed, which the expectation cannot quote // ERROR E0002
+}

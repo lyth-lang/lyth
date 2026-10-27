@@ -1,0 +1,20 @@
+// Warnings for an unused import, unreachable code, and safe calls or !! on
+// values that cannot be null.
+import "strings" // WARN W0002 "imported and not used"
+import "fmt"
+
+struct User {
+    name: string
+}
+
+func size(s: string): int {
+    return len(s)
+    fmt.Println("after") // WARN W0005 "unreachable code"
+}
+
+func main() {
+    u := User(name = "a")
+    fmt.Println(u?.name) // WARN W0004 "unnecessary safe call: u has non-nullable type User"
+    fmt.Println(u.name!!) // WARN W0004 "unnecessary !! on a value of non-nullable type string"
+    fmt.Println(size(u.name))
+}

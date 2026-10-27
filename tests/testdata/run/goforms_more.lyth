@@ -1,0 +1,133 @@
+// More of ADR 0047 and the spec's smaller forms: complex numbers, generic
+// type aliases, named and default arguments on generic functions, parameter
+// names in function types, named results set by defer, json:"", and literals.
+import "encoding/json"
+import "errors"
+import "fmt"
+import "reflect"
+import "strconv"
+
+// Complex numbers, as in Go.
+func magnitude2(c: complex128): float64 = real(c) * real(c) + imag(c) * imag(c)
+
+// Generic type aliases.
+type Set[T: comparable] = map[T]bool
+type Pairs[K: comparable, V] = map[K][]V
+
+func union[T: comparable](a: Set[T], b: Set[T]): Set[T] {
+    out: Set[T] = [:]
+    for k in a {
+        out[k] = true
+    }
+    for k in b {
+        out[k] = true
+    }
+    return out
+}
+
+// Named arguments and defaults on generic functions.
+func pick[T](xs: []T, n: int = 1, from: int = 0): []T = xs[from:from + n]
+
+func scale[N: ~int | ~float64](x: N, by: N = 2): N = x * by
+
+// Parameter names in function types.
+type Visitor = (name: string, depth: int) -> bool
+
+func walk(names: []string, visit: Visitor): int {
+    count := 0
+    for i, n in names {
+        if !visit(n, i) {
+            break
+        }
+        count++
+    }
+    return count
+}
+
+// Named results that a defer block sets, returned by a bare return.
+func parse(s: string): (n: int, ok: bool) {
+    defer {
+        if r := recover(); r != null {
+            n, ok = -1, false
+        }
+    }
+    if s == "" {
+        panic("empty")
+    }
+    n = len(s)
+    ok = true
+    return
+}
+
+func lookup(m: map[string]int?, k: string): int throws {
+    v := m[k] ?: throw errors.New("no ${k}")
+    return v
+}
+
+// json:"" keeps encoding/json's own key, the field name, and other keys.
+struct Row {
+    Value: int `json:""`
+    Note: string? `json:""`
+    Tagged: int `json:"" db:"tagged"`
+    Auto: int
+}
+
+func main() throws {
+    c := complex(3, 4)
+    var64: complex64 = 1 + 2i
+    fmt.Println(c, real(c), imag(c), magnitude2(c), var64 * 2, c == 3 + 4i)
+
+    s := union(Set[string](["a": true]), ["b": true]) // a conversion through a generic alias
+    fmt.Println(len(s), s["a"], s["b"], s["c"])
+    p: Pairs[string, int] = ["x": [1, 2]]
+    fmt.Println(p["x"])
+
+    xs := [10, 20, 30, 40]
+    fmt.Println(pick(xs), pick(xs, n = 2), pick(xs, from = 1, n = 3), pick(["a", "b"], 2))
+    fmt.Println(scale(3), scale(1.5, by = 3.0), scale(4, 5))
+
+    seen := walk(["a", "b", "c"]) { name, depth -> depth < 2 }
+    fmt.Println(seen)
+
+    fmt.Println(parse("abc"))
+    fmt.Println(parse(""))
+
+    m: map[string]int? = ["one": 1]
+    fmt.Println(lookup(m, "one")?)
+    lookup(m, "two") catch (err) { fmt.Println(err) }
+    total := 0
+    for k in ["one", "two", "one"] {
+        v := m[k] ?: continue
+        total += v
+    }
+    fmt.Println(total)
+
+    data := json.Marshal(Row(Value = 1, Note = null, Tagged = 2, Auto = 3))?
+    fmt.Println(string(data))
+    rt := reflect.TypeFor[Row]()
+    fmt.Println(strconv.Quote(string(rt.Field(0).Tag)), strconv.Quote(string(rt.Field(2).Tag)))
+
+    million := 1_000_000
+    bits := 0b1010_1010
+    shift := 1
+    shift <<= 4
+    fmt.Println(million, bits, shift, 0x_FF)
+    fmt.Println("é\U0001F600", len("é"), []byte("a\0b"))
+}
+
+// Output:
+// (3+4i) 3 4 25 (2+4i) true
+// 2 true true false
+// [1 2]
+// [10] [10 20] [20 30 40] [a b]
+// 6 4.5 20
+// 2
+// 3 true
+// -1 false
+// 1
+// no two
+// 2
+// {"Value":1,"Note":null,"Tagged":2,"auto":3}
+// "" "db:\"tagged\""
+// 1000000 170 16 255
+// é😀 2 [97 0 98]
