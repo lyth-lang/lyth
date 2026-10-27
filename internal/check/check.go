@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"go/token"
 	gotypes "go/types"
+	"maps"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -751,6 +753,8 @@ func (c *Checker) receiverMember(fn *funcCtx, name string) *MemberSym {
 }
 
 // suggest returns the most similar visible name, for "did you mean" hints.
+// Of equally similar names, the innermost scope's wins, then the first in
+// alphabetical order, so the hint is the same in every run.
 func (c *Checker) suggest(name string) string {
 	best, bestDist := "", suggestLimit(name)
 	consider := func(n string) {
@@ -762,8 +766,8 @@ func (c *Checker) suggest(name string) string {
 		}
 	}
 	for s := c.scope; s != nil; s = s.parent {
-		for n, sym := range s.syms {
-			if ts, ok := sym.(*TypeSym); ok && ts.Generic != "" {
+		for _, n := range slices.Sorted(maps.Keys(s.syms)) {
+			if ts, ok := s.syms[n].(*TypeSym); ok && ts.Generic != "" {
 				continue // List, Map: old spellings, never a suggestion
 			}
 			consider(n)
