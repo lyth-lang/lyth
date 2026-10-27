@@ -1,5 +1,68 @@
 [
   {
+    "type": "approximation_type",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "approximation_type",
+          "named": true
+        },
+        {
+          "type": "array_type",
+          "named": true
+        },
+        {
+          "type": "channel_type",
+          "named": true
+        },
+        {
+          "type": "empty_struct_type",
+          "named": true
+        },
+        {
+          "type": "function_type",
+          "named": true
+        },
+        {
+          "type": "generic_type",
+          "named": true
+        },
+        {
+          "type": "map_type",
+          "named": true
+        },
+        {
+          "type": "nullable_type",
+          "named": true
+        },
+        {
+          "type": "pointer_type",
+          "named": true
+        },
+        {
+          "type": "primitive_type",
+          "named": true
+        },
+        {
+          "type": "qualified_type",
+          "named": true
+        },
+        {
+          "type": "slice_type",
+          "named": true
+        },
+        {
+          "type": "type_identifier",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "array_type",
     "named": true,
     "fields": {},
@@ -7,6 +70,10 @@
       "multiple": true,
       "required": true,
       "types": [
+        {
+          "type": "approximation_type",
+          "named": true
+        },
         {
           "type": "array_type",
           "named": true
@@ -492,6 +559,10 @@
         "required": false,
         "types": [
           {
+            "type": "approximation_type",
+            "named": true
+          },
+          {
             "type": "array_type",
             "named": true
           },
@@ -552,6 +623,10 @@
       "required": true,
       "types": [
         {
+          "type": "approximation_type",
+          "named": true
+        },
+        {
           "type": "array_type",
           "named": true
         },
@@ -606,9 +681,19 @@
     "type": "const_declaration",
     "named": true,
     "fields": {
+      "group": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "parenthesized",
+            "named": true
+          }
+        ]
+      },
       "name": {
         "multiple": false,
-        "required": true,
+        "required": false,
         "types": [
           {
             "type": "identifier",
@@ -620,6 +705,10 @@
         "multiple": false,
         "required": false,
         "types": [
+          {
+            "type": "approximation_type",
+            "named": true
+          },
           {
             "type": "array_type",
             "named": true
@@ -705,6 +794,10 @@
         "multiple": false,
         "required": false,
         "types": [
+          {
+            "type": "approximation_type",
+            "named": true
+          },
           {
             "type": "array_type",
             "named": true
@@ -831,6 +924,10 @@
         "multiple": false,
         "required": true,
         "types": [
+          {
+            "type": "approximation_type",
+            "named": true
+          },
           {
             "type": "array_type",
             "named": true
@@ -1209,6 +1306,10 @@
         "required": false,
         "types": [
           {
+            "type": "approximation_type",
+            "named": true
+          },
+          {
             "type": "array_type",
             "named": true
           },
@@ -1283,6 +1384,10 @@
       "required": true,
       "types": [
         {
+          "type": "approximation_type",
+          "named": true
+        },
+        {
           "type": "array_type",
           "named": true
         },
@@ -1308,6 +1413,10 @@
         },
         {
           "type": "nullable_type",
+          "named": true
+        },
+        {
+          "type": "parameter",
           "named": true
         },
         {
@@ -1495,6 +1604,10 @@
       "multiple": true,
       "required": false,
       "types": [
+        {
+          "type": "approximation_type",
+          "named": true
+        },
         {
           "type": "array_type",
           "named": true
@@ -2160,6 +2273,10 @@
         "required": false,
         "types": [
           {
+            "type": "approximation_type",
+            "named": true
+          },
+          {
             "type": "array_type",
             "named": true
           },
@@ -2234,6 +2351,10 @@
       "multiple": true,
       "required": true,
       "types": [
+        {
+          "type": "approximation_type",
+          "named": true
+        },
         {
           "type": "array_type",
           "named": true
@@ -2364,6 +2485,10 @@
         "required": false,
         "types": [
           {
+            "type": "approximation_type",
+            "named": true
+          },
+          {
             "type": "array_type",
             "named": true
           },
@@ -2437,6 +2562,10 @@
       "multiple": false,
       "required": true,
       "types": [
+        {
+          "type": "approximation_type",
+          "named": true
+        },
         {
           "type": "array_type",
           "named": true
@@ -2527,6 +2656,10 @@
         "multiple": false,
         "required": true,
         "types": [
+          {
+            "type": "approximation_type",
+            "named": true
+          },
           {
             "type": "array_type",
             "named": true
@@ -2950,6 +3083,10 @@
       "required": true,
       "types": [
         {
+          "type": "approximation_type",
+          "named": true
+        },
+        {
           "type": "array_type",
           "named": true
         },
@@ -3116,6 +3253,10 @@
       "multiple": false,
       "required": true,
       "types": [
+        {
+          "type": "approximation_type",
+          "named": true
+        },
         {
           "type": "array_type",
           "named": true
@@ -3414,6 +3555,10 @@
       "required": false,
       "types": [
         {
+          "type": "approximation_type",
+          "named": true
+        },
+        {
           "type": "array_type",
           "named": true
         },
@@ -3473,6 +3618,10 @@
       "required": true,
       "types": [
         {
+          "type": "approximation_type",
+          "named": true
+        },
+        {
           "type": "array_type",
           "named": true
         },
@@ -3498,6 +3647,10 @@
         },
         {
           "type": "nullable_type",
+          "named": true
+        },
+        {
+          "type": "parameter",
           "named": true
         },
         {
@@ -3541,6 +3694,10 @@
         "multiple": false,
         "required": true,
         "types": [
+          {
+            "type": "approximation_type",
+            "named": true
+          },
           {
             "type": "array_type",
             "named": true
@@ -3612,6 +3769,10 @@
       "required": true,
       "types": [
         {
+          "type": "approximation_type",
+          "named": true
+        },
+        {
           "type": "array_type",
           "named": true
         },
@@ -3680,6 +3841,10 @@
         "multiple": false,
         "required": true,
         "types": [
+          {
+            "type": "approximation_type",
+            "named": true
+          },
           {
             "type": "array_type",
             "named": true
@@ -3751,6 +3916,10 @@
         "required": false,
         "types": [
           {
+            "type": "approximation_type",
+            "named": true
+          },
+          {
             "type": "array_type",
             "named": true
           },
@@ -3797,6 +3966,10 @@
           {
             "type": "type_identifier",
             "named": true
+          },
+          {
+            "type": "union_type",
+            "named": true
           }
         ]
       },
@@ -3835,6 +4008,10 @@
         "multiple": false,
         "required": true,
         "types": [
+          {
+            "type": "approximation_type",
+            "named": true
+          },
           {
             "type": "array_type",
             "named": true
@@ -4104,6 +4281,10 @@
         "required": true,
         "types": [
           {
+            "type": "approximation_type",
+            "named": true
+          },
+          {
             "type": "array_type",
             "named": true
           },
@@ -4156,12 +4337,85 @@
     }
   },
   {
+    "type": "union_type",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "approximation_type",
+          "named": true
+        },
+        {
+          "type": "array_type",
+          "named": true
+        },
+        {
+          "type": "channel_type",
+          "named": true
+        },
+        {
+          "type": "empty_struct_type",
+          "named": true
+        },
+        {
+          "type": "function_type",
+          "named": true
+        },
+        {
+          "type": "generic_type",
+          "named": true
+        },
+        {
+          "type": "map_type",
+          "named": true
+        },
+        {
+          "type": "nullable_type",
+          "named": true
+        },
+        {
+          "type": "pointer_type",
+          "named": true
+        },
+        {
+          "type": "primitive_type",
+          "named": true
+        },
+        {
+          "type": "qualified_type",
+          "named": true
+        },
+        {
+          "type": "slice_type",
+          "named": true
+        },
+        {
+          "type": "type_identifier",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "var_declaration",
     "named": true,
     "fields": {
+      "group": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "parenthesized",
+            "named": true
+          }
+        ]
+      },
       "name": {
         "multiple": false,
-        "required": true,
+        "required": false,
         "types": [
           {
             "type": "identifier",
@@ -4173,6 +4427,10 @@
         "multiple": false,
         "required": false,
         "types": [
+          {
+            "type": "approximation_type",
+            "named": true
+          },
           {
             "type": "array_type",
             "named": true
@@ -5000,11 +5258,11 @@
   },
   {
     "type": "rune",
-    "named": false
+    "named": true
   },
   {
     "type": "rune",
-    "named": true
+    "named": false
   },
   {
     "type": "sealed",
@@ -5116,6 +5374,10 @@
   },
   {
     "type": "}",
+    "named": false
+  },
+  {
+    "type": "~",
     "named": false
   }
 ]

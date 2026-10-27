@@ -352,3 +352,155 @@ func init() {
             (identifier)
             (parenthesized))
           (operator))))))
+
+================================================================================
+Go forms: groups, named results, type sets, three-part for, if init
+================================================================================
+
+// Formatting flags.
+const (
+    FilterHTML: uint = 1 << iota
+    StripEscape
+)
+
+var (
+    ErrQuote = errors.New("quote")
+    counter: int
+)
+
+interface Number {
+    ~int | ~float64
+}
+
+type Set[T: comparable] = map[T]bool
+
+type Visit = (name: string, depth: int) -> bool
+
+func split(n: int): (q: int, r: int) {
+    for i := 0; i < n; i++ {
+        q = i
+    }
+    if v, ok := m[k]; ok {
+        r = v
+    }
+    c := 2i
+    return
+}
+
+func Max[T: int | float64](a: T, b: T): T = a
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (line_comment)
+  (const_declaration
+    (parenthesized
+      (typed_local
+        (identifier)
+        (primitive_type))
+      (operator)
+      (number)
+      (operator)
+      (identifier)
+      (identifier)))
+  (var_declaration
+    (parenthesized
+      (identifier)
+      (operator)
+      (identifier)
+      (method_call
+        (identifier)
+        (parenthesized
+          (string
+            (string_content))))
+      (typed_local
+        (identifier)
+        (primitive_type))))
+  (interface_declaration
+    (type_identifier)
+    (interface_body
+      (approximation_type
+        (primitive_type))
+      (operator)
+      (approximation_type
+        (primitive_type))))
+  (type_alias
+    (type_identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier)
+        (primitive_type)))
+    (map_type
+      (type_identifier)
+      (primitive_type)))
+  (type_alias
+    (type_identifier)
+    (function_type
+      (parameter
+        (identifier)
+        (primitive_type))
+      (parameter
+        (identifier)
+        (primitive_type))
+      (primitive_type)))
+  (function_declaration
+    (identifier)
+    (parameters
+      (parameter
+        (identifier)
+        (primitive_type)))
+    (tuple_type
+      (parameter
+        (identifier)
+        (primitive_type))
+      (parameter
+        (identifier)
+        (primitive_type)))
+    (block
+      (for_statement
+        (identifier)
+        (operator)
+        (number)
+        (identifier)
+        (operator)
+        (identifier)
+        (identifier)
+        (operator)
+        (block
+          (identifier)
+          (operator)
+          (identifier)))
+      (if_expression
+        (identifier)
+        (identifier)
+        (operator)
+        (identifier)
+        (bracketed
+          (identifier))
+        (identifier)
+        (block
+          (identifier)
+          (operator)
+          (identifier)))
+      (short_var_declaration
+        (identifier))
+      (number)
+      (keyword)))
+  (function_declaration
+    (identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier)
+        (union_type
+          (primitive_type)
+          (primitive_type))))
+    (parameters
+      (parameter
+        (identifier)
+        (type_identifier))
+      (parameter
+        (identifier)
+        (type_identifier)))
+    (type_identifier))
+  (operator)
+  (identifier))

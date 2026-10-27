@@ -191,13 +191,21 @@ module.exports = grammar({
       ),
 
     type_parameters: ($) => seq('[', commaSep1($.type_parameter), ']'),
-    type_parameter: ($) => seq(field('name', alias($.identifier, $.type_identifier)), optional(seq(':', field('constraint', $._type)))),
+    type_parameter: ($) =>
+      seq(
+        field('name', alias($.identifier, $.type_identifier)),
+        optional(seq(':', field('constraint', choice($._type, $.union_type)))),
+      ),
+    // A type set: ~int | ~float64
+    union_type: ($) => prec.left(seq($._type, repeat1(seq('|', $._type)))),
+    approximation_type: ($) => prec.right(2, seq('~', $._type)),
 
     parameters: ($) => seq('(', repeat(choice($.parameter, $._element)), ')'),
     parameter: ($) => prec.dynamic(20, seq(field('name', nameOrIn($)), ':', optional('...'), field('type', $._type))),
 
     _result: ($) => choice($._type, $.tuple_type),
-    tuple_type: ($) => prec.dynamic(5, seq('(', commaSep1($._type), ')')),
+    // (int, error), and named results (n: int, err: error?)
+    tuple_type: ($) => prec.dynamic(5, seq('(', commaSep1(choice($.parameter, $._type)), ')')),
 
     struct_declaration: ($) =>
       prec.dynamic(
@@ -273,11 +281,28 @@ module.exports = grammar({
         seq('type', field('name', alias($.identifier, $.type_identifier)), optional($.type_parameters), field('type', $._type)),
       ),
 
+    // const X: T = e, and Go's groups, const ( A: uint = 1 << iota; B )
     const_declaration: ($) =>
-      prec.dynamic(10, prec.right(seq('const', field('name', $.identifier), optional(seq(':', field('type', $._type)))))),
+      prec.dynamic(
+        10,
+        prec.right(
+          choice(
+            seq('const', field('name', $.identifier), optional(seq(':', field('type', $._type)))),
+            seq('const', field('group', $.parenthesized)),
+          ),
+        ),
+      ),
 
     var_declaration: ($) =>
-      prec.dynamic(10, prec.right(seq(choice('var', 'val'), field('name', $.identifier), optional(seq(':', field('type', $._type)))))),
+      prec.dynamic(
+        10,
+        prec.right(
+          choice(
+            seq(choice('var', 'val'), field('name', $.identifier), optional(seq(':', field('type', $._type)))),
+            seq('var', field('group', $.parenthesized)),
+          ),
+        ),
+      ),
 
     // x := 1, a, b := f()
     short_var_declaration: ($) =>
@@ -301,6 +326,7 @@ module.exports = grammar({
         $.function_type,
         $.nullable_type,
         $.empty_struct_type,
+        $.approximation_type,
       ),
     // struct{}: Go's empty struct; struct{}{} is its value.
     empty_struct_type: (_) => prec(2, seq('struct', '{', '}')),
@@ -316,7 +342,8 @@ module.exports = grammar({
     array_type: ($) => prec.right(seq('[', choice($.number, '...', $.identifier), ']', $._type)),
     map_type: ($) => prec.right(seq('map', '[', $._type, ']', $._type)),
     channel_type: ($) => prec.right(choice(seq('chan', optional('<-'), $._type), seq('<-', 'chan', $._type))),
-    function_type: ($) => prec.right(seq('(', commaSep($._type), ')', '->', $._type, optional('throws'))),
+    function_type: ($) =>
+      prec.right(seq('(', commaSep(choice($.parameter, $._type)), ')', '->', $._type, optional('throws'))),
     nullable_type: ($) => prec.left(3, seq($._type, token.immediate('?'))),
 
     // ------------------------------------------------------------------ control flow
@@ -337,6 +364,7 @@ module.exports = grammar({
         $.operator,
         ',',
         ':',
+        ';', // for i := 0; i < n; i++, if v := f(); v > 0
         $.type_test,
         alias($._header_call, $.call_expression),
         alias($._header_method_call, $.method_call),
@@ -400,7 +428,7 @@ module.exports = grammar({
       choice(
         '+', '-', '*', '/', '%', '=', '==', '!=', '<', '>', '<=', '>=', '&&', '||', '!', '&', '|', '^', '<<', '>>', '&^',
         '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<=', '>>=', '&^=', '++', '--', '->', '?', '?:', '!!', '..', '..<', '...',
-        '<-', '.', '?.', '!in', '!is', 'as?',
+        '<-', '.', '?.', '!in', '!is', 'as?', '~',
       ),
 
     identifier: (_) => /[\p{L}_][\p{L}\p{Nd}_]*/u,

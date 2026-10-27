@@ -107,6 +107,8 @@ export default {
 				{ match: String.raw`\b0[xX][\h_]+\b`, name: 'constant.numeric.hexadecimal.lyth' },
 				{ match: String.raw`\b0[bB][01_]+\b`, name: 'constant.numeric.binary.lyth' },
 				{ match: String.raw`\b0[oO][0-7_]+\b`, name: 'constant.numeric.octal.lyth' },
+				// 2i, 1.5i: imaginary literals
+				{ match: String.raw`\b\d[\d_]*(?:\.(?!\.)\d[\d_]*)?(?:[eE][+-]?\d+)?i\b`, name: 'constant.numeric.imaginary.lyth' },
 				// `1..10` is a range, not a float
 				{ match: String.raw`\b\d[\d_]*(?:\.(?!\.)\d[\d_]*)?(?:[eE][+-]?\d+)?\b`, name: 'constant.numeric.decimal.lyth' },
 			],
@@ -230,6 +232,7 @@ export default {
 			patterns: [
 				{ match: String.raw`\b(true|false)\b`, name: 'constant.language.boolean.lyth' },
 				{ match: String.raw`\bnull\b`, name: 'constant.language.null.lyth' },
+				{ match: String.raw`\biota\b`, name: 'constant.language.iota.lyth' },
 				{ match: String.raw`\bself\b`, name: 'variable.language.self.lyth' },
 			],
 		},
