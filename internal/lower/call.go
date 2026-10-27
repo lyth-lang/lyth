@@ -441,19 +441,59 @@ func (fl *fnLower) prelude(e *syntax.CallExpr, ci *check.CallInfo) ast.Expr {
 		fl.emit(fl.sendStmt(e, recv, ci), e.S)
 		return ast.NewIdent("_")
 	case check.PreludeWrap:
-		fmtPkg := fl.l.useImport("fmt", "fmt")
-		msgExpr := ci.Args[0]
-		if tv := fl.info.Types[msgExpr]; tv.Value != nil && tv.Value.Kind() == constant.String {
-			format := escapePercent(constant.StringVal(tv.Value)) + ": %w"
-			return &ast.CallExpr{Fun: sel(fmtPkg, "Errorf"), Args: []ast.Expr{strLit(format), recv}}
-		}
-		if tmpl, ok := syntax.Unparen(msgExpr).(*syntax.TemplateLit); ok {
-			return fl.wrapTemplate(fmtPkg, s.X, recv, tmpl)
-		}
-		msgs := fl.exprListAfter(recv, s.X, ci.Args)
-		return &ast.CallExpr{Fun: sel(fmtPkg, "Errorf"), Args: []ast.Expr{strLit("%s: %w"), msgs[1], msgs[0]}}
+		return fl.wrapErr(s.X, ci.Args[0], recv)
+	case check.PreludeWrapFailure:
+		// The call itself; ? and catch wrap its error when it fails
+		// (wrapOnFailure).
+		return recv
 	}
 	return ast.NewIdent("nil")
+}
+
+// wrapErr lowers err.wrap(msg) to fmt.Errorf("msg: %w", err). recvSyn is the
+// receiver's Lyth expression, evaluated before msg; nil when recv is a
+// variable that msg cannot change.
+func (fl *fnLower) wrapErr(recvSyn, msg syntax.Expr, recv ast.Expr) ast.Expr {
+	fmtPkg := fl.l.useImport("fmt", "fmt")
+	if tv := fl.info.Types[msg]; tv.Value != nil && tv.Value.Kind() == constant.String {
+		format := escapePercent(constant.StringVal(tv.Value)) + ": %w"
+		return &ast.CallExpr{Fun: sel(fmtPkg, "Errorf"), Args: []ast.Expr{strLit(format), recv}}
+	}
+	if tmpl, ok := syntax.Unparen(msg).(*syntax.TemplateLit); ok {
+		return fl.wrapTemplate(fmtPkg, recvSyn, recv, tmpl)
+	}
+	if recvSyn == nil {
+		return &ast.CallExpr{Fun: sel(fmtPkg, "Errorf"), Args: []ast.Expr{strLit("%s: %w"), fl.expr(msg), recv}}
+	}
+	msgs := fl.exprListAfter(recv, recvSyn, []syntax.Expr{msg})
+	return &ast.CallExpr{Fun: sel(fmtPkg, "Errorf"), Args: []ast.Expr{strLit("%s: %w"), msgs[1], msgs[0]}}
+}
+
+// wrapOnFailure lowers the context of f().wrap(msg) around err, the error of
+// the call in the branch where it failed, so the message is evaluated only
+// then: the statements the message needs, and the wrapped error. For any
+// other x it returns err itself.
+func (fl *fnLower) wrapOnFailure(x syntax.Expr, err ast.Expr) ([]ast.Stmt, ast.Expr) {
+	msg := fl.wrapMessage(x)
+	if msg == nil {
+		return nil, err
+	}
+	sub, stmts := fl.sub()
+	wrapped := sub.wrapErr(nil, msg, err)
+	return *stmts, wrapped
+}
+
+// wrapMessage returns msg when x is f().wrap(msg) on a call that can fail,
+// and nil otherwise.
+func (fl *fnLower) wrapMessage(x syntax.Expr) syntax.Expr {
+	call, ok := syntax.Unparen(x).(*syntax.CallExpr)
+	if !ok {
+		return nil
+	}
+	if ci := fl.info.Calls[call]; ci != nil && ci.Prelude == check.PreludeWrapFailure && len(ci.Args) == 1 {
+		return ci.Args[0]
+	}
+	return nil
 }
 
 // safeChanOp lowers ch?.send(v), ch?.close(), and ch?.receive() on a
@@ -514,7 +554,7 @@ func escapePercent(s string) string { return strings.ReplaceAll(s, "%", "%%") }
 func (fl *fnLower) wrapTemplate(fmtPkg string, recvSyn syntax.Expr, recv ast.Expr, tmpl *syntax.TemplateLit) ast.Expr {
 	// The receiver is evaluated first (method call order), so it is stashed
 	// when the template's operands could observe it changing.
-	if !fl.pure(recvSyn, recv) {
+	if recvSyn != nil && !fl.pure(recvSyn, recv) {
 		recv = fl.stash(recvSyn, recv)
 	}
 	var exprs []syntax.Expr

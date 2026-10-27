@@ -1,0 +1,80 @@
+// f().wrap("ctx") adds context to the error of a call that can fail, only
+// when it fails (ADR 0052): with ? it propagates the wrapped error, in a
+// catch the handler sees it, the message is evaluated only on failure, a
+// call returning only an error that succeeds stays null, and errors.Is
+// sees through the wrapping.
+import "errors"
+
+var ErrMissing = errors.New("missing")
+
+var calls = 0
+
+func context(): string {
+    calls++
+    return "port"
+}
+
+func open(path: string): string throws {
+    if path == "missing.toml" {
+        throw ErrMissing
+    }
+    return "data of ${path}"
+}
+
+func parse(s: string): int throws {
+    if s == "x" {
+        throw errors.New("not a number")
+    }
+    return 80
+}
+
+func readConfig(path: string): string throws {
+    data := open(path).wrap("reading config ${path}")?
+    return data
+}
+
+func check(n: int): error? = if n < 0 { errors.New("negative") } else { null }
+
+func validate(n: int): int throws {
+    check(n).wrap("validating ${n}")?
+    return n
+}
+
+func join(fail: bool) throws {
+    if fail {
+        errors.Join(ErrMissing).wrap("joining")?
+    }
+    errors.Join().wrap("joining nothing")?
+}
+
+func port(s: string): int = parse(s).wrap(context()) catch (err) {
+    println(err)
+    -1
+}
+
+func errOf(): error? {
+    readConfig("missing.toml") catch (e) {
+        return e
+    }
+    return null
+}
+
+func main() {
+    println(readConfig("app.toml") catch { "?" }, readConfig("missing.toml") catch (e) { "error: ${e}" })
+    println(validate(3) catch { -2 }, validate(-1) catch (e) { println(e); -2 })
+    join(false) catch (e) { println("unexpected:", e) }
+    join(true) catch (e) { println(e) }
+    println(port("80"), calls)
+    println(port("x"), calls)
+    println(errors.Is(errOf(), ErrMissing))
+}
+
+// Output:
+// data of app.toml error: reading config missing.toml: missing
+// validating -1: negative
+// 3 -2
+// joining: missing
+// 80 0
+// port: not a number
+// -1 1
+// true

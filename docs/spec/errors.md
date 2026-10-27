@@ -208,7 +208,7 @@ cfg := loadConfig(path) catch (err) {                           // log and defau
     log.Warn("using default config", "err", err)
     defaultConfig()
 }
-user := repo.Find(ctx, id) catch (err) { throw err.wrap("find user ${id}") }  // context
+user := repo.Find(ctx, id).wrap("find user ${id}")?            // context
 ```
 
 The handler block is a plain block, not a lambda: `return` inside it returns from
@@ -273,6 +273,17 @@ requires a non-null `error` (E0305). It has no unwinding semantics.
 - `err.wrap("message")` is a prelude method that lowers to
   `fmt.Errorf("message: %w", err)`, the idiomatic Go wrap.
   `errors.Is`/`errors.As`/`errors.Unwrap` see through it.
+- `f().wrap("message")` on a call that can fail wraps the call's error only
+  when it fails, and is still a call that can fail
+  ([ADR 0052](../adr/0052-wrapping-a-call.md)): `data := os.ReadFile(path).wrap("reading ${path}")?`
+  is `data, err := os.ReadFile(path); if err != nil { return ..., fmt.Errorf("reading %s: %w", path, err) }`.
+  The message is evaluated only on failure. This holds for a call that
+  returns only an error as well: when it returns nil, nothing is wrapped. The
+  error is wrapped in the branch that handles it, so the call is written with
+  `?` or an untyped `catch`, whose binder is the wrapped error; elsewhere
+  (a typed `catch`, a pass-through `return`, destructuring, a value) it is
+  E0216. To wrap an error value, store it first (`e := errors.New("x")`,
+  then `e.wrap(...)`).
 - Sentinel errors are ordinary package-level values:
   `var ErrNotFound = errors.New("not found")`. Compare them with
   `errors.Is(err, ErrNotFound)`, as in Go.

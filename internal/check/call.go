@@ -71,6 +71,15 @@ func (c *Checker) call(e *syntax.CallExpr, want types.Type) *operand {
 			}
 		}
 		info.Safe, info.TryFirst = sel.Safe, sel.TryFirst
+		if info.Prelude == PreludeWrapFailure && c.wrapHandled != syntax.Expr(e) {
+			// The error is wrapped in the branch that handles it, so the
+			// wrapped call is handled where it is written.
+			text := e.Span().Short()
+			c.errorf(diag.EInvalidUse, e.Span(), "%s wraps the error of a call that can fail, so it must be handled where it is written", text).
+				WithHint("propagate it with %s?, or handle it with %s catch (err) { ... }", text, text).
+				WithNote("a typed catch, pass-through return, or destructuring cannot wrap the error; wrap it in the handler with err.wrap(...)").
+				WithHint("to wrap an error value, store it first: e := %s, then e.wrap(...)", syntax.Unparen(e.Fun).(*syntax.SelectorExpr).X.Span().Short())
+		}
 		if sel.Kind == SelField && sel.Safe {
 			c.errorf(diag.EUnsupported, e.S, "calling a function-typed field through ?. is not supported yet")
 			return invalid(e)

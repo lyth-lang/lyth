@@ -1275,6 +1275,7 @@ library. Each one replaces a common multi-line Go idiom:
 |---|---|---|
 | `s.toInt()` / `s.toInt64()` / `s.toFloat64()` / `s.toBool()` (fallible) | `strconv.Atoi`/`ParseInt(s,10,64)`/`ParseFloat(s,64)`/`ParseBool` | 0.1.0 |
 | `err.wrap("context")` | `fmt.Errorf("context: %w", err)` | 0.1.0 |
+| `f().wrap("context")?`, `f().wrap("context") catch (err) { ... }` | `fmt.Errorf("context: %w", err)` where `f()` failed (errors.md §4.3) | 0.8.0 |
 
 Everything else belongs in libraries. Lyth's standard library is imported as
 `lyth/<name>` and compiled with the program (ADR 0030); its first package,

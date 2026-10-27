@@ -540,6 +540,9 @@ func calleeBase(f syntax.Expr) string {
 	case *syntax.Ident:
 		return lowerFirst(f.Name)
 	case *syntax.SelectorExpr:
+		if c, ok := syntax.Unparen(f.X).(*syntax.CallExpr); ok && f.Sel.Name == "wrap" {
+			return calleeBase(c.Fun) // f().wrap("ctx") gives f's value
+		}
 		name := f.Sel.Name
 		for _, p := range []string{"Get", "get", "Find", "find", "Load", "load", "Read", "read", "Parse", "parse", "New", "new"} {
 			if rest, ok := strings.CutPrefix(name, p); ok && rest != "" {
@@ -1110,7 +1113,8 @@ func (fl *fnLower) tryInto(e *syntax.TryExpr, names []string, define bool, span 
 		// if _, err := call; err != nil { return ..., err } (value discarded)
 		init := &ast.AssignStmt{Lhs: append(blanks(len(info.Success)), ast.NewIdent(errName)), Tok: token.DEFINE, Rhs: []ast.Expr{operand}}
 		fl.l.mark(init, e.X.Span())
-		fail := fl.failStmts(ast.NewIdent(errName))
+		pre, failErr := fl.wrapOnFailure(e.X, ast.NewIdent(errName))
+		fail := append(pre, fl.failStmts(failErr)...)
 		for _, s := range fail {
 			markTree(fl.l, s, opSpan)
 		}
@@ -1133,7 +1137,8 @@ func (fl *fnLower) tryInto(e *syntax.TryExpr, names []string, define bool, span 
 		tok = token.ASSIGN
 	}
 	fl.emit(&ast.AssignStmt{Lhs: lhs, Tok: tok, TokPos: fl.l.pos(span), Rhs: []ast.Expr{operand}}, span)
-	fl.emitSynth(&ast.IfStmt{If: fl.l.pos(span), Cond: nilCmp(ast.NewIdent(errName), token.NEQ), Body: &ast.BlockStmt{List: fl.failStmts(ast.NewIdent(errName))}}, opSpan)
+	pre, failErr := fl.wrapOnFailure(e.X, ast.NewIdent(errName))
+	fl.emitSynth(&ast.IfStmt{If: fl.l.pos(span), Cond: nilCmp(ast.NewIdent(errName), token.NEQ), Body: &ast.BlockStmt{List: append(pre, fl.failStmts(failErr)...)}}, opSpan)
 }
 
 // catchInto lowers `x catch (err) { ... }`, binding the value to name
@@ -1286,6 +1291,13 @@ func (fl *fnLower) catchHandler(e *syntax.CatchExpr, info *check.TryInfo, target
 		}
 	}
 	sub, stmts := fl.sub()
+	if msg := fl.wrapMessage(e.X); msg != nil && info.Binder != nil {
+		// f().wrap(msg) catch (err): the handler sees the wrapped error.
+		if name, ok := fl.locals[info.Binder]; ok {
+			wrapped := sub.wrapErr(nil, msg, ast.NewIdent(name))
+			sub.emit(&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(name)}, Tok: token.ASSIGN, Rhs: []ast.Expr{wrapped}}, e.X.Span())
+		}
+	}
 	valueExpr := fl.info.BlockValues[e.Body]
 	for i, s := range e.Body.Stmts {
 		if target != nil && valueExpr != nil && i == len(e.Body.Stmts)-1 {

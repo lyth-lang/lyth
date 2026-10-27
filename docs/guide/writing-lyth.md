@@ -65,9 +65,7 @@ struct NotFound {
 func *NotFound.Error(): string = "no user named ${self.Name}"
 
 func parseAge(s: string): int throws {
-    n := strconv.Atoi(strings.TrimSpace(s)) catch (err) {
-        throw err.wrap("age ${s}")
-    }
+    n := strconv.Atoi(strings.TrimSpace(s)).wrap("age ${s}")?
     if n !in 0..150 {
         throw errors.New("age ${n} is out of range")
     }
@@ -212,8 +210,9 @@ func main() throws {
 ## Errors
 
 - A function that can fail is `func f(): T throws`, Go's `(T, error)`.
-- `f()?` returns the error to the caller. `throw err` returns one. `err.wrap("loading ${path}")`
-  wraps it with context.
+- `f()?` returns the error to the caller. `throw err` returns one. Add context where it fails:
+  `f().wrap("loading ${path}")?` wraps the error only when `f()` fails (also with `catch (err)`,
+  which then sees the wrapped error); `err.wrap("...")` wraps an error value.
 - `f() catch { fallback }`, or `f() catch (err) { ...; fallback }`, handles it in place.
   `f() catch {}` ignores it explicitly.
 - In a lambda that can fail (a callback such as `g.Go { }` or a transaction function), a bare
@@ -394,6 +393,7 @@ The table lists older Lyth forms and the Go and Kotlin habits the compiler recog
 | `json:""` on a field kept an empty tag | the Go field is untagged, so encoding/json uses the field name | no: a wire change only where the tag was written |
 | a field or method `len`, `init`, ... was `len_`, `init_` in Go | it keeps its name; Go code of the package uses `x.len` | no: Go code to change |
 | `f()?.name` on a call that can fail (propagate, then select) | `(f()?).name`; `?.` is only the safe call | yes |
+| `f().wrap("ctx")` used as an error value, on a call returning only an error (it wrapped even a nil error) | `f().wrap("ctx")?` or `catch`, which wrap only on failure; or store a value first: `e := f()`, then `e.wrap("ctx")` | no: the meaning changes |
 | a `*T` or `*T?` passed or assigned where `T?` is expected | a copy: `*p` (`users[i]` for `&users[i]`), or `if p != null { *p } else { null }` | no: the copy no longer follows changes to `*p`; a hint gives the edit |
 
 ## Topics

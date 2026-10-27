@@ -65,6 +65,9 @@ type Checker struct {
 	// number of arguments of the call whose callee is checked.
 	selectorSel *syntax.Ident
 	calleeArgs  int
+	// wrapHandled is the operand of the ? or untyped catch being checked,
+	// the one place where f().wrap("ctx") may be written (ADR 0052).
+	wrapHandled syntax.Expr
 	conf        *Config
 	pkg         *Package
 	info        *Info

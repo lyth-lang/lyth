@@ -238,9 +238,7 @@ import "errors"
 import "os"
 
 func loadProfile(user: string, attempt: int): string throws {
-    data := os.ReadFile("/profiles/${user}.json") catch (err) {
-        throw err.wrap("loading profile of ${user} (attempt ${attempt})")
-    }
+    data := os.ReadFile("/profiles/${user}.json").wrap("loading profile of ${user} (attempt ${attempt})")?
     return string(data)
 }
 
@@ -252,8 +250,11 @@ func main() {
 }
 ```
 
-`err.wrap` with a template becomes a single `fmt.Errorf` with format verbs and
-`%w`, the same call (and the same allocations) as hand-written Go.
+`.wrap(...)` on a call that can fail wraps its error only when it fails, and
+the message is evaluated only then. With a template it becomes a single
+`fmt.Errorf` with format verbs and `%w` in the `if err != nil` branch, the
+same call (and the same allocations) as hand-written Go. On an error value,
+`err.wrap(...)` does the same.
 
 ## Closing resources
 

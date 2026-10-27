@@ -1,0 +1,24 @@
+// f().wrap("ctx") is the Go a careful programmer writes: the call, and
+// fmt.Errorf with %w in the branch where it failed (ADR 0052).
+import "errors"
+import "os"
+import "strconv"
+
+func readConfig(path: string): string throws {
+    data := os.ReadFile(path).wrap("reading config ${path}")?
+    return string(data)
+}
+
+func remove(path: string) throws {
+    os.Remove(path).wrap("removing ${path}")?
+}
+
+func port(s: string): int = strconv.Atoi(s).wrap("port ${s}") catch (err) {
+    println(err)
+    -1
+}
+
+func main() {
+    println(readConfig("a") catch { "" }, port("1"))
+    remove("a") catch (e) { println(errors.Unwrap(e) != null) }
+}

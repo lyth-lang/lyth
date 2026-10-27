@@ -56,3 +56,4 @@ Accepted ADRs are immutable; a superseding ADR links back.
 | [0049](0049-optional-values-are-copies.md) | Optional values are copies of a pointer's value: `*p`, no implicit `*T` to `T?` | Accepted (amends 0009) |
 | [0050](0050-safe-call-only.md) | `?.` is only the safe call; `(f()?).name` propagates | Accepted |
 | [0051](0051-returns-in-catch-handlers.md) | A bare `return` in a `catch` of a fallible lambda warns | Accepted |
+| [0052](0052-wrapping-a-call.md) | `f().wrap("context")` wraps a call's error when it fails | Accepted |

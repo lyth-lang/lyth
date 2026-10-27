@@ -2177,7 +2177,10 @@ func (c *Checker) tryExpr(e *syntax.TryExpr) *operand {
 
 // tryMode checks x?; discard reports that the success value is unused.
 func (c *Checker) tryMode(e *syntax.TryExpr, discard bool) *operand {
+	save := c.wrapHandled
+	c.wrapHandled = syntax.Unparen(e.X)
 	x := c.fallibleOperand(e.X, discard)
+	c.wrapHandled = save
 	if x.mode == ModeInvalid {
 		return invalid(e)
 	}
@@ -2320,7 +2323,13 @@ func (c *Checker) catchStmt(e *syntax.CatchExpr) {
 }
 
 func (c *Checker) catchMode(e *syntax.CatchExpr, want types.Type, discard bool) *operand {
+	save := c.wrapHandled
+	c.wrapHandled = nil
+	if e.Type == nil {
+		c.wrapHandled = syntax.Unparen(e.X)
+	}
 	x := c.fallibleOperand(e.X, discard)
+	c.wrapHandled = save
 	if _, isError := x.typ.(*types.Result); !isError && x.mode == ModeValue && types.IsErrorType(x.typ) {
 		// n := err catch { 0 }: catch handles a failing call, not a value.
 		c.errorf(diag.ECatchNotFall, e.CatchSpan, "catch needs a call that returns an error; %s is an error value", e.X.Span().Short()).

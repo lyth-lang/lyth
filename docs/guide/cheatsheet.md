@@ -80,6 +80,7 @@ has the exact rules.
 | `find(id) catch (_: *NotFound) { guest }?` | `if _, ok := errors.AsType[*NotFound](err); ok { u = guest } else { return ..., err }` |
 | `return w.Write(b)` (in a `throws` function) | `return w.Write(b)` |
 | `err.wrap("loading ${path}")` | `fmt.Errorf("loading %s: %w", path, err)` |
+| `data := load(path).wrap("loading ${path}")?` | `data, err := load(path); if err != nil { return ..., fmt.Errorf("loading %s: %w", path, err) }` |
 | `n, err := strconv.Atoi(s)` | the same |
 | `func main() throws` | `main` that prints the error and exits with status 1 |
 

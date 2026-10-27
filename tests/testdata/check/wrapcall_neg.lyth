@@ -1,0 +1,35 @@
+// f().wrap("ctx") wraps the error of a call that can fail only when it
+// fails, in the branch that handles it, so it is written with ? or an
+// untyped catch (ADR 0052).
+import "errors"
+import "os"
+
+struct NotFound {
+    ID: int
+}
+
+func *NotFound.Error(): string = "not found"
+
+func load(): string throws = string(os.ReadFile("x").wrap("reading")?)
+
+func passThrough(): []byte throws = os.ReadFile("x").wrap("reading") // ERROR E0216 "must be handled where it is written"
+
+func destructured(): string throws {
+    data, _ := os.ReadFile("x").wrap("reading") // ERROR E0216 "propagate it with os.ReadFile"
+    return string(data)
+}
+
+func typed(): string throws {
+    s := load().wrap("loading") catch (_: *NotFound) { "none" }? // ERROR E0216 "a typed catch, pass-through return, or destructuring cannot wrap the error"
+    return s
+}
+
+func values() {
+    e := errors.New("x").wrap("y") // ERROR E0216 "to wrap an error value, store it first: e := errors.New"
+    println(e)
+}
+
+func main() {
+    println(passThrough() catch { []byte("") }, destructured() catch { "" }, typed() catch { "" })
+    values()
+}

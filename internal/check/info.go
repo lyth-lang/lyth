@@ -62,9 +62,10 @@ const (
 	PreludeToFloat64
 	PreludeToBool
 	PreludeWrap
-	PreludeSend    // ch.send(v): ch <- v
-	PreludeReceive // ch.receive(): <-ch
-	PreludeClose   // ch.close(): close(ch)
+	PreludeWrapFailure // f().wrap("ctx") on a call that can fail: the error, wrapped when it fails
+	PreludeSend        // ch.send(v): ch <- v
+	PreludeReceive     // ch.receive(): <-ch
+	PreludeClose       // ch.close(): close(ch)
 )
 
 // CallInfo describes a resolved call.

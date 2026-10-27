@@ -350,7 +350,7 @@ ordinary Lyth. Ignoring an error silently is a compile error. Errors are Go
 import "os"
 
 func readConfig(path: string): string throws {
-    data := os.ReadFile(path) catch (err) { throw err.wrap("reading config ${path}") }
+    data := os.ReadFile(path).wrap("reading config ${path}")?
     return string(data)
 }
 
@@ -359,7 +359,9 @@ func main() throws {
 }
 ```
 
-`err.wrap("...")` becomes `fmt.Errorf("...: %w", err)`. A `main` that throws
+`.wrap("...")` on a call that can fail adds context to its error when it
+fails: here `fmt.Errorf("reading config %s: %w", path, err)` in the branch
+that returns it. On an error value, `err.wrap("...")` does the same. A `main` that throws
 prints the error and exits with status 1. To handle one type of error and pass
 on the rest, `catch (e: *NotFound) { ... }?` matches like `errors.AsType`
 ([an example](lyth-for-go-programmers.md#handling-one-kind-of-error)). The

@@ -114,6 +114,13 @@ func (c *Checker) selector(e *syntax.SelectorExpr, want types.Type) *operand {
 		c.errorf(diag.EUnsupportedSyntax, call.Join(e.OpSpan), "?. is a safe call, and %s can fail rather than be null", callName(e.X)).
 			WithFix(call.Join(e.OpSpan), "("+call.Text()+"?).", "to propagate the error and then select .%s, write (%s?).%s", name, call.Text(), name)
 	} else {
+		if r, ok := t.(*types.Result); ok && name == "wrap" && c.callee == syntax.Expr(e) {
+			// f().wrap("ctx") wraps the error of a call that can fail, only
+			// when it fails, and is still a call that can fail (ADR 0052).
+			sel.Kind, sel.Prelude, sel.Recv = SelPrelude, PreludeWrapFailure, t
+			c.info.Selections[e] = sel
+			return &operand{mode: ModeValue, typ: &types.Signature{Params: []types.Type{types.String}, ParamNames: []string{"message"}, Results: r.Raw}}
+		}
 		x = c.singleValue(x)
 		if x.mode == ModeInvalid {
 			return invalid(e)
