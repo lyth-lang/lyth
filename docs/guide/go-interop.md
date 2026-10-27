@@ -317,10 +317,9 @@ and would remove modules only Lyth code uses, or leave them out of `vendor/`.
 The [REST API example](../../examples/todoapi/README.md) uses `pgx` this way.
 
 A module in a `go.work` workspace builds against the workspace's other
-modules, as Go code does. Lyth compiles the Lyth packages of the module it
-runs in: a Lyth package of another module in the workspace is seen through
-its generated Go, so run `lyth gen -in-tree` there, or keep the Lyth packages
-that import each other in one module.
+modules, as Go code does, their Lyth packages included: lyth compiles a Lyth
+package of another module of the workspace along with the program (into the
+program's `.lyth/gen`), without writing into that module.
 
 ## Limits and differences
 

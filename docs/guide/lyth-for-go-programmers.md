@@ -586,7 +586,7 @@ meaning Go would get wrong ([ADR 0031](../adr/0031-go-spelling.md)):
 | `null` | `nil` | Lyth's null is never a typed nil |
 | `func T.M()`, `func *T.M()`, `self` | `func (t T) M()` | the receiver always has the same name and cannot be shadowed; there are no static methods, so constructors stay package functions (`NewServer`) |
 | `for x in xs`, `for i, x in xs`, `for i in 0..<n` | `for _, x := range xs`, `for i := 0; i < n; i++` | element first, and ranges `a..<b`, `a..b`; Go's `range` would be a false friend, and `for i, x := range xs` is an error whose hint gives the Lyth form |
-| `while c`, `while true` | `for c`, `for` | `for` only iterates |
+| `while c`, `while true` | `for c`, `for` | `for c` would read like `for x in xs`; Go's three-part `for` stays |
 | `when x { ... }` | `switch x { ... }` | an expression, exhaustive over enums and sealed interfaces; `break` exits the loop |
 | `if`/`when` as values; `= expr` bodies | statements | fewer temporaries |
 | `ch.send(v)`, `ch.receive()`, `ch.close()` | `ch <- v`, `<-ch`, `close(ch)` | `<-` appears only in the types `chan<- T` and `<-chan T` |
@@ -596,8 +596,7 @@ meaning Go would get wrong ([ADR 0031](../adr/0031-go-spelling.md)):
 | `x as T`, `v := x as? T`, `x is T` | `x.(T)`, `v, ok := x.(T)` | the same words as other type tests; `is` smart-casts, so the branch needs no second name |
 | `(string) -> bool`, `(string) -> unit throws` | `func(string) bool`, `func(string) error` | a function type reads like the lambdas that fill it |
 | `outer@ for ...`, `break@outer` | `outer:` above the loop | the label is part of the loop it names |
-| one `var` or `const` per line; `enum` | `var ( ... )`, `const ( ... iota )` | an enum gives names on the wire and exhaustive `when`; Lyth has no `iota` |
-| unnamed results; `defer f.Close()?` | named results | the one use Go needs them for, a deferred error, is `?` in `defer` |
+| `enum Color { Red, Green }` | `const ( ColorRed Color = iota; ... )` | names on the wire and exhaustive `when`; Go's `const ( ... iota )` groups stay for flags and sizes |
 
 A few of these make Lyth slightly *longer* than Go: `name: Type` costs a
 character per parameter, `send(...) catch {}` is longer than an ignored

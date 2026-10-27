@@ -201,6 +201,11 @@
   },
   {
     "file": "docs/spec/language.md",
+    "source": "import \"fmt\"\n\n// Formatting can be controlled with these flags.\nconst (\n    FilterHTML: uint = 1 \u003c\u003c iota\n    StripEscape\n    AlignRight\n)\n\nfunc main() {\n    fmt.Println(FilterHTML, StripEscape, AlignRight)\n}\n",
+    "output": "1 2 4\n"
+  },
+  {
+    "file": "docs/spec/language.md",
     "source": "enum Level { Debug, Info, Warn }\n\nsealed interface Event {\n    Level(): Level\n}\n\nstruct Login : Event {\n    User: string\n}\n\nfunc Login.Level(): Level = Level.Info\n\nstruct Failure : Event {\n    Reason: string\n}\n\nfunc Failure.Level(): Level = Level.Warn\n\nfunc describe(e: Event): string = when e {\n    is Login -\u003e \"login by ${e.User}\"\n    is Failure -\u003e \"failure: ${e.Reason}\"\n}\n\nfunc main() {\n    events: []Event = [Login(User = \"ada\"), Failure(Reason = \"disk full\")]\n    for e in events {\n        tag := when e.Level() {\n            Debug -\u003e \"D\"\n            Info -\u003e \"I\"\n            Warn -\u003e \"W\"\n        }\n        println(tag, describe(e))\n    }\n}\n",
     "output": "I login by ada\nW failure: disk full\n"
   },

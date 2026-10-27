@@ -51,3 +51,4 @@ Accepted ADRs are immutable; a superseding ADR links back.
 | [0044](0044-remaining-spellings.md) | Remaining spellings: `null`, import aliases, and `in` as a name | Accepted (amends 0031) |
 | [0045](0045-go-evaluation-order.md) | Go's evaluation order, with and without hoisting | Accepted (replaces language.md §6's rule) |
 | [0046](0046-smart-casts-between-assignments.md) | Smart casts between assignments | Accepted (amends 0031) |
+| [0047](0047-go-constructs-lyth-lacked.md) | The Go constructs Lyth lacked: three-part `for`, `if` init, groups with `iota`, named results, type sets, complex numbers, generic aliases | Accepted (amends 0012, 0031) |

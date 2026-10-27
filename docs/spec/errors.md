@@ -276,8 +276,11 @@ requires a non-null `error` (E0305). It has no unwinding semantics.
   `errors.Is(err, ErrNotFound)`, as in Go.
 - Custom error types are structs with a `func T.Error(): string` method, the
   same name Go's `error` interface uses.
-- Typed `when` over errors (branch conditions using `errors.Is`/`errors.As`) is
-  **[planned]**.
+- A `when` over an error compares values and tests dynamic types, which a
+  wrapped error does not match (W0007 warns). To match through wrapping, use
+  a typed `catch` chain (§4.1) or a `when` of conditions:
+  `when { errors.Is(err, ErrNotFound) -> ...; else -> ... }`. Lyth has no
+  separate error `when`: typed `catch` is that construct.
 
 ### 4.4 No silently discarded errors
 

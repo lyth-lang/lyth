@@ -27,7 +27,7 @@ go install ./cmd/lyth
 
 | Command | What it does |
 |---|---|
-| `lyth run file.lyth [-- args]` | Builds and runs a single file. Outside a module, Lyth creates a throwaway one in your user cache; inside a module it currently builds the file's whole package. |
+| `lyth run file.lyth [-- args]` | Builds and runs that file alone, as `go run file.go` does. Outside a module, Lyth creates a throwaway one in your user cache; inside a module, the file's package is not built with it (`lyth run ./dir` runs the package). |
 | `lyth run ./cmd/api [-- args]` | Builds and runs a main package of the current module. `-race` and `-ldflags` go to the Go build; arguments after the package go to the program. |
 | `lyth build [-o out] [-race] [packages] [-- go build flags]` | Compiles packages with `go build`. With no packages, every directory containing `.lyth` files. `-o dir/` writes the binary into `dir`. |
 | `lyth check [packages]` | Parses and type-checks, test files included, without running the Go compiler on the result. The fastest feedback loop. |
@@ -126,7 +126,9 @@ directory. The `.lyth/` directory ignores itself in git. The one exception is
 generated files sit beside their sources until `go test` exits
 ([coverage](testing.md#coverage)). If you want the
 generated code committed, for example so that users of a library need no Lyth
-toolchain, use `lyth gen -in-tree`.
+toolchain, use `lyth gen -in-tree`. Code that imports `lyth/coll` then imports
+its generated copy, which `-in-tree` writes to `internal/lyth/coll` in the
+module, so plain `go build` and `go test` work.
 
 ```bash
 lyth build -timings ./cmd/api

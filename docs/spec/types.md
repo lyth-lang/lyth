@@ -239,8 +239,8 @@ This is the idiomatic Go representation for optional JSON fields (`*int` with
   representation, as [ADR 0017](../adr/0017-nullable-values-into-go.md)
   specifies. An assignment list from one call cannot check its values, so it
   rejects such a conversion (E0201).
-- `T?` where `T` is a type parameter is **[planned]**. It needs a uniform
-  representation that does not depend on the instantiation.
+- `T?` where `T` is a type parameter is not supported (§10): it would need a
+  uniform representation that does not depend on the instantiation.
 - Go code can write through a pointer Lyth hands it, and Lyth cannot see
   that. `json.Unmarshal(data, &u)` decodes into the existing box of an
   optional field of `u`, which a copy of `u` made before shares (`u := base`
@@ -463,9 +463,19 @@ and its limits. See [ADR 0028](../adr/0028-generic-declarations.md).
   (`func Page[T].First(): T`); they cannot add their own (Go has no generic
   methods), which generic extension functions replace. An instance's members
   have the type arguments substituted (`Page[User].Items` is `[]User`).
-- **Not yet**: `T?` for a type parameter (E0407), named arguments and default
-  values on generic functions (E0601), generic type aliases, and declaring
-  type-set constraints.
+- **Type sets** may be written in constraints and interfaces, as in Go:
+  `[T: int | float64]`, `interface Number { ~int | ~float64 }` (language.md
+  §3.4). An untyped constant is assignable to `T` when it fits every type of
+  the set (`total: T = 0` for `T: Number`).
+- **Named arguments and defaults** work on generic functions too. A default
+  of a parameter whose type is a type parameter must be a constant; it takes
+  the type the call's other arguments give `T`, and must fit it (E0215):
+  `func Clamp[T: int | float64](x: T, lo: T = 0, hi: T = 100): T`.
+- **Not supported**: `T?` for a type parameter (E0407), by design for now:
+  Go's only uniform representation, `*T`, is a box even where Lyth's `T?`
+  is not (`*User?` is a nilable `*User`), so a `T?` instantiated with a
+  pointer would change representation at the call. Generic code returns
+  `(T, bool)` instead, as Go does.
 
 ## 11. Interfaces and method sets
 

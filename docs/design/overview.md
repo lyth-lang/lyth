@@ -117,10 +117,10 @@ Precisely, and only what has been demonstrated (tracked in
   (`func Find(id int64) (*User, error)`).
 - **Toolchain**: `go build/test/vet`, modules, build tags, cross-compilation,
   `-race`, pprof, and delve all work on Lyth output because it is plain Go.
-- **Documented limitations**: declaring type-set constraints, cgo inside Lyth
-  files, `goto` and `fallthrough`,
-  external test packages, and mixing Go and Lyth files in one package. Each has
-  a specific diagnostic today.
+- **Documented limitations**: cgo inside Lyth files, `goto` and `fallthrough`,
+  anonymous struct types, `T?` on type parameters, and mixing Go and Lyth
+  files in one package (a package is one language; packages of both import
+  each other). Each has a specific diagnostic with the way around it.
 
 ## 6. A taste of Lyth
 

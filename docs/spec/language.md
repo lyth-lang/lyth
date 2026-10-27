@@ -129,6 +129,7 @@ appears only in the channel types `<-chan T` and `chan<- T`, and `<-ch` or
 ```ebnf
 int_lit    = decimal | "0x" hex_digits | "0o" octal_digits | "0b" binary_digits .
 float_lit  = decimal "." decimal [exponent] | decimal exponent .
+imag_lit   = ( decimal | float_lit ) "i" .
 rune_lit   = "'" ( unicode_char | escape ) "'" .
 string_lit = '"' { string_char | escape | template } '"' .
 template   = "${" Expression "}" .
@@ -137,6 +138,10 @@ raw_string = "`" { any char except "`" } "`" .
 
 - Digits may be separated by `_` (`1_000_000`). A number starts with a digit
   (no `.5`).
+- **Complex numbers** are Go's: the types `complex64` and `complex128`,
+  imaginary literals (`2i`, `1.5i`), and the builtins `complex(re, im)`,
+  `real(c)`, and `imag(c)`. They take `+ - * /` and `== !=`, not ordering
+  (E0209); `math/cmplx` has the rest.
 - Escapes: `\n \r \t \a \b \f \v \\ \" \' \$ \0 \uXXXX \U00XXXXXX \xHH`.
   As in Go, `\xHH` is one byte in a string (`"\xff"` is the byte 0xff) and the
   code point U+00HH in a rune (`'\xff'` is 255).
@@ -173,7 +178,9 @@ ImportSpec    = [ identifier | "_" ] string_lit .
 A package is a directory. The package clause is optional. When it is
 omitted, the name is `main` if a file in the package declares a top-level
 `func main()`, otherwise the directory name (which must then be a valid
-identifier). External test packages (`package foo_test`) are **[planned]**.
+identifier). A `_test.lyth` file whose package clause names the directory's
+package with `_test` (`package shapes_test`) is an external test package, as
+in Go: it imports the package under test and sees only its exported names.
 
 Import paths are Go import paths, resolved by the Go toolchain
 against the enclosing module's `go.mod`. An import may refer to a Go package or a
@@ -226,9 +233,32 @@ TypeParam   = identifier [ ":" Type ] .
 Receiver    = [ "*" ] Type .
 ParamList   = Param { "," Param } [ "," ] .
 Param       = identifier ":" [ "..." ] Type [ "=" Expression ] .
-ResultType  = Type | "(" Type "," Type { "," Type } ")" .
+ResultType  = Type | "(" Type "," Type { "," Type } ")" | "(" Named { "," Named } ")" .
+Named       = identifier ":" Type .
 FuncBody    = Block | "=" Expression .
 ```
+
+- **Named results**, as in Go ([ADR 0047](../adr/0047-go-constructs-lyth-lacked.md)):
+  `func split(n: int): (q: int, r: int)`, and with `throws`,
+  `func *Writer.Write(buf: []byte): (n: int) throws`. The names are locals
+  holding their zero values (a type without one is E0405), visible to
+  `defer` blocks, which may assign them. A `return` with values sets and
+  returns them; a bare `return` returns them as they are, and only a
+  function with named results may write one (E0207 otherwise). They lower
+  to Go's named results, the error of a `throws` function named `err`:
+
+  ```kotlin
+  func split(n: int): (q: int, r: int) {
+      q = n / 2
+      r = n % 2
+      return
+  }
+
+  func main() {
+      q, r := split(7)
+      println(q, r)
+  }
+  ```
 
 - `func name(...)` with a block body and no result type returns nothing. A
   block body returns its result with `return`; there is no implicit return of
@@ -499,14 +529,21 @@ method (`Area(): float64`) needs an exported method, an unexported one
 (`ping()`) can only be implemented in the same package.
 A bare `Type` line embeds another interface. A struct may declare the
 interfaces it implements (§3.3). An interface may be generic,
-`interface Container[T] { Get(): T }`. Declaring type-set constraints
-(`~int | ~float64`) is **[planned]**; Go's (`cmp.Ordered`) work today.
+`interface Container[T] { Get(): T }`. An interface may hold a type set, as
+in Go ([ADR 0047](../adr/0047-go-constructs-lyth-lacked.md)):
+`interface Number { ~int | ~int64 | ~float64 }`, where `~T` stands for every
+type whose underlying type is `T`; a line with a type alone (`interface Int {
+int }`) is a set of one. Such an interface is a constraint only (E0216
+elsewhere), and a constraint may be a set itself: `[T: int | float64]`. The
+operators of a type parameter are those every type of its set has.
 
 ### 3.5 Variables and constants
 
 ```ebnf
-VarDecl   = "var" identifier ( ":" Type [ "=" Expression ] | "=" Expression ) NEWLINE .
-ConstDecl = "const" identifier [ ":" Type ] "=" Expression NEWLINE .
+VarDecl    = "var" ( VarSpec | "(" { VarSpec NEWLINE } ")" ) NEWLINE .
+VarSpec    = identifier ( ":" Type [ "=" Expression ] | "=" Expression ) .
+ConstDecl  = "const" ( ConstSpec | "(" { ConstSpec NEWLINE } ")" ) NEWLINE .
+ConstSpec  = identifier [ ":" Type ] "=" Expression | identifier .
 ```
 
 A top-level `var` declares a Go package-level variable, with Go's dependency-
@@ -523,11 +560,40 @@ inside a function, local variables are declared with `:=` (§4.1). `const` may
 also appear in a function body, as in Go; a local constant is in scope from its
 declaration to the end of the block and may refer to earlier constants.
 
+**Groups.** As in Go ([ADR 0047](../adr/0047-go-constructs-lyth-lacked.md)),
+`var ( ... )` groups package-level variables and `const ( ... )` groups
+constants (also in a function), one per line, each written as on its own
+(`A: uint = 1 << iota`, `counter: int`). A comment above the group is its doc.
+In a constant declaration `iota` is the entry's index in its group (0 outside
+one), and an entry with only a name repeats the type and expression of the
+last entry with a value, with its own `iota`:
+
+```kotlin
+import "fmt"
+
+// Formatting can be controlled with these flags.
+const (
+    FilterHTML: uint = 1 << iota
+    StripEscape
+    AlignRight
+)
+
+func main() {
+    fmt.Println(FilterHTML, StripEscape, AlignRight)
+}
+```
+
+A repeated entry whose value does not fit its type is reported at that entry
+(E0215). Each entry declares one name (`A, B = 1, 2` is E0008). `iota`
+outside a constant declaration is E0101. Enumerations whose values have
+names on the wire and exhaustive `when` are `enum` (§3.7); groups are for
+flags, sizes, and Go-compatible names.
+
 ### 3.6 Defined types and type aliases
 
 ```ebnf
 TypeDefDecl   = "type" identifier [ TypeParams ] Type NEWLINE .
-TypeAliasDecl = "type" identifier "=" Type NEWLINE .
+TypeAliasDecl = "type" identifier [ TypeParams ] "=" Type NEWLINE .
 ```
 
 Both use Go's spelling ([ADR 0037](../adr/0037-type-declarations.md)).
@@ -557,8 +623,10 @@ type a second name; it does not create a new type, so values convert freely
 and the alias has the methods of the aliased type. It lowers to a Go alias
 declaration (`type Handler = func(Ctx) error`). Aliases are how Lyth names
 function types and long instantiations without the cost of a new type. An
-alias may refer to other aliases but not to itself (E0216). Generic aliases
-are **[planned]**. The spelling before ADR 0037, `typealias Handler = ...`,
+alias may refer to other aliases but not to itself (E0216). An alias may be
+generic, as in Go 1.24: `type Set[T: comparable] = map[T]bool`, used with its
+type arguments (`Set[string]`, which must satisfy the constraints, E0213).
+The spelling before ADR 0037, `typealias Handler = ...`,
 is E0008 with the edit to `type Handler = ...`.
 
 ### 3.7 Enums and sealed interfaces
@@ -774,9 +842,11 @@ edit that removes them, and a parenthesized list is not a value anywhere
 ### 4.4 Control flow
 
 ```ebnf
-If       = "if" Expression Block [ "else" ( If | Block ) ] .
+If       = "if" [ SimpleStmt ";" ] Expression Block [ "else" ( If | Block ) ] .
 While    = [ Label ] "while" Expression Block .
-For      = [ Label ] "for" BindingName [ "," BindingName ] "in" Expression Block .
+For      = [ Label ] "for" BindingName [ "," BindingName ] "in" Expression Block
+         | [ Label ] "for" [ SimpleStmt ] ";" [ Expression ] ";" [ SimpleStmt ] Block .
+SimpleStmt = LocalDecl | Assignment | IncDec | Call .
 Label    = identifier "@" .
 Return   = "return" [ Expression { "," Expression } ] .
 Throw    = "throw" Expression .
@@ -792,9 +862,19 @@ Continue = "continue" [ "@" identifier ] .
 - A header expression cannot end in a trailing lambda, because the `{` after
   it starts the body (Go's rule for composite literals in headers).
   Parenthesize it: `if (xs.Any { it > 0 }) { ... }`.
+- `if v := f(); cond { ... }` declares `v` for the whole `if`, its `else if`s
+  and its `else`, as in Go ([ADR 0047](../adr/0047-go-constructs-lyth-lacked.md)):
+  `if v, ok := m[k]; ok { ... }`, `if r := recover(); r != null { ... }`.
 - `while c { ... }` loops while `c` holds; an endless loop is
-  `while true { ... }`. `for` only iterates: `for c { ... }` is a syntax
-  error, since `x in xs` is also a membership test.
+  `while true { ... }`. `for c { ... }` is a syntax error, since `x in xs` is
+  also a membership test.
+- Go's three-part loop is `for` too ([ADR 0047](../adr/0047-go-constructs-lyth-lacked.md)):
+  `for i := 0; i < n; i++ { ... }`, `for i, j := 0, n - 1; i < j; i, j = i + 1, j - 1 { ... }`.
+  The init and post are simple statements (the post cannot declare, E0216),
+  any part may be empty, and `continue` runs the post statement. Its
+  variables are fresh per iteration, as in Go 1.22. `for ; ; { }` is E0008
+  with the edit to `while true`; counting by one reads best as
+  `for i in 0..<n`.
 - `for x in e` iterates like Go's `range`, but binds the element first:
   - `[]T`/`[N]T`: `x` is the element; `for i, x in xs` gives index and element.
   - `map[K]V`: `for k, v in m`; `for k in m` gives keys. Iteration order is
@@ -808,7 +888,7 @@ Continue = "continue" [ "@" identifier ] .
     range-over-func, so `maps.Keys(m)`, `strings.Lines(s)`, and
     `slices.All(xs)` work directly.
   Go's `for i, x := range xs` is E0008; its hint gives the Lyth form (for
-  `for _, x := range xs`, `for x in xs`). Loop variables are read-only and
+  `for _, x := range xs`, `for x in xs`). Its loop variables are read-only and
   fresh per iteration (Go 1.22 semantics), so closures capture them safely.
 - `break` and `continue` apply to the innermost loop, also inside `when`. (Go's
   `break` inside a `switch` exits the switch; the generated code labels the
@@ -1231,8 +1311,9 @@ same function. In those cases it gets a numeric suffix.
 
 ## 9. Tests
 
-Test code lives in files ending in `_test.lyth`, in the package under test
-(external test packages, `package foo_test`, are **[planned]**). They are
+Test code lives in files ending in `_test.lyth`, in the package under test or,
+as in Go, in an external test package (`package foo_test`, §2) that imports
+it. They are
 compiled only by `lyth test` (and checked by `lyth check`, `lyth vet`, `lyth gen`),
 never by `lyth build` or `lyth run`, and lower to `x.lyth_test.go`.
 

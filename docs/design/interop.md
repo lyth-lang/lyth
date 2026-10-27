@@ -159,11 +159,10 @@ A Lyth package compiles to a normal Go package:
 
 | Limitation | Diagnostic today | Plan |
 |---|---|---|
-| Go and Lyth files in the same package | E0601 "package mixes Go and Lyth files" (hand-written `_test.go` files are allowed: only go test compiles them) | Two-phase check: emit Go stubs for Lyth declarations, type-check Go files plus stubs with `go/types`, then check Lyth bodies (like Kotlin/Java joint compilation stubs). |
+| Go and Lyth files in the same package | E0601 "package mixes Go and Lyth files" (hand-written `_test.go` files are allowed: only go test compiles them) | Not planned for now ([ADR 0047](../adr/0047-go-constructs-lyth-lacked.md)): packages of either language import each other. Joint compilation would emit Go stubs of the Lyth declarations, check them with the Go files in `go/types`, and build the Lyth shadow package from the stubs' objects. |
 | Go APIs whose last result is a concrete error type | treated as an ordinary value | Opt-in `?` with nil check before interface conversion. |
 | `//go:linkname` (`unsafe` itself works: `run/unsafeptr`) | E0601 "//go:linkname is not supported in Lyth" | not planned |
 | `lyth/coll` in a module that builds from `vendor/` (other vendored builds work: `lyth mod vendor`) | an error naming `GOFLAGS=-mod=mod` | Vendor the standard library's generated Go too. |
-| Lyth packages of another module in a `go.work` workspace (the module's own packages and Go modules of the workspace work: `TestWorkspaceModule`) | E0103 when the other module has no generated Go | Discover the workspace's Lyth packages and overlay their generated Go too. |
 | Go generic methods (Go does not have them) | n/a | n/a |
 | Lyth-name ↔ Go-name collisions in a package | E0102 | — |
 

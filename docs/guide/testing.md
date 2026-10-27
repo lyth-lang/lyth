@@ -158,8 +158,23 @@ Flags other than Lyth's own (`-tags`, `-diagnostics`, `-no-line-directives`, `-t
 ```
 
 `lyth build` and `lyth run` ignore test files; `lyth check`, `lyth vet`, and
-`lyth gen` include them. External test packages (`package foo_test`) are not
-supported yet.
+`lyth gen` include them.
+
+A test file may also be an external test package, as in Go: `package
+slug_test` imports the package under test and sees what it exports, which is
+how examples read in `go doc`:
+
+```kotlin
+package slug_test
+
+import "fmt"
+import "example.com/app/slug"
+
+func ExampleMake() {
+    fmt.Println(slug.Make("Hello Lyth"))
+    // Output: hello-lyth
+}
+```
 
 ## Coverage
 

@@ -125,13 +125,17 @@ func main() throws {
   `func add(a: int, b: int): int = a + b`. Parameters and results are `name: Type` and `: Type`.
   An unexported expression-bodied function may omit its result type (`func sq(n: int) = n * n`).
   A block body returns with `return`; the last expression is not returned by itself.
-- Several results: `func split(s: string): (string, string)`, `return a, b`.
+- Several results: `func split(s: string): (string, string)`, `return a, b`. Results may be
+  named as in Go, `func split(n: int): (q: int, r: int)` (a bare `return` returns them), and with
+  `throws`, `func *W.Write(p: []byte): (n: int) throws`: `defer` blocks can set `n`.
 - Locals: `x := 1` declares a mutable variable, `x = 2` assigns, `x: int64 = 0` or `x: int64`
   (the zero value) when the type matters. `a, b := f()` and `a, b = b, a + b` work as in Go.
   There is no `val` or `var` inside functions.
 - Package level: `var Default = "x"`, `var mu: sync.Mutex` (the zero value), `const Max = 10`.
-  `const` also works inside a function. `func init() { ... }` runs before `main`, as in Go; a
-  package may have several.
+  `const` also works inside a function. Groups are Go's, with `name: Type` entries:
+  `const ( FlagA: uint = 1 << iota; FlagB )` and `var ( ErrA = errors.New("a"); count: int )`,
+  one per line; an entry with only a name repeats the one above with the next `iota`.
+  `func init() { ... }` runs before `main`, as in Go; a package may have several.
 - Files of the package directory are embedded as in Go: `//go:embed schema.sql` on the line
   before `var schema: string` (or `[]byte`, or `embed.FS` for several files), with no
   initializer. `//go:noinline` and the other compiler directives go on the line before a `func`.
@@ -146,7 +150,8 @@ func main() throws {
   it has no methods. Exported fields get
   lower-camel `json` tags automatically (`UserID` → `userID`, `IDs` → `ids`, `HTTPServer` →
   `httpServer`), and a null `T?` field is left out of the JSON. A name like `ETag` warns
-  (W0008): give it a tag such as `json:"etag"`. `json:",string"` keeps the automatic name.
+  (W0008): give it a tag such as `json:"etag"`. `json:",string"` keeps the automatic name, and
+  `json:""` keeps Go's: the field is untagged in Go and encodes as `"ETag"`.
   Construct by calling the type:
   `User(Name = "a", Age = 3)`, positionally with every field, and `&User(...)` for a pointer. Go
   structs take named arguments: `&http.Server(Addr = ":8080")`.
@@ -162,13 +167,16 @@ func main() throws {
   `struct Circle : Shape { R: float64 }` also declares it, and the compiler checks it.
 - Generics: `func Max[T: cmp.Ordered](a: T, b: T): T`, `struct Page[T] { Items: []T }`,
   `func Page[T].First(): T`. Calls infer type arguments; write them in brackets when nothing
-  determines them: `errors.AsType[*NotFound](err)`.
+  determines them: `errors.AsType[*NotFound](err)`. Type sets are Go's: `[T: int | float64]`,
+  `interface Number { ~int | ~float64 }`. `T?` on a type parameter is not supported: return
+  `(T, bool)` as Go does.
 - Extension functions: `func string.Shout(): string = strings.ToUpper(self) + "!"`.
 - Defined types and aliases, as in Go: `type UserID int64`, `type Role string`,
   `type Set[T: comparable] map[T]struct{}` (a new type: `UserID(n)` converts, and methods can
   be declared on it), and `type Handler = (http.ResponseWriter, *http.Request) -> unit throws`
-  (another name for the same type). Structs and interfaces keep `struct Name { ... }` and
-  `interface Name { ... }`.
+  (another name for the same type; generic too: `type Set[T: comparable] = map[T]bool`).
+  Function types may name their parameters: `(name: string, depth: int) -> bool`. Structs and
+  interfaces keep `struct Name { ... }` and `interface Name { ... }`.
 - Enums: `enum Color { Red, Green }`, used as `Color.Red`, or `Red` inside `when c { ... }`.
   JSON carries the entry name in lower camel case (`"red"`) and rejects anything else. For
   fixed wire values, use a string-backed enum: `enum Plan: string { Free = "free", Pro = "pro" }`
@@ -231,8 +239,9 @@ func main() throws {
 - No parentheses around conditions, braces always: `if c { } else if d { } else { }`,
   `while c { }`, `while true { }`.
 - Loops: `for x in xs`, `for i, x in xs`, `for k, v in m`, `for i in 0..<n`, `for i in 1..n`,
-  and Go iterators: `for k in maps.Keys(m)`, `for k, v in maps.All(m)`. There is no `range`, no
-  three-part `for`, and no descending range: count down with `while`.
+  and Go iterators: `for k in maps.Keys(m)`, `for k, v in maps.All(m)`. There is no `range`.
+  Go's three-part loop works for other steps: `for i := n - 1; i >= 0; i-- { }`.
+- `if` takes Go's init statement: `if v, ok := m[k]; ok { }`, `if r := recover(); r != null { }`.
 - `if` and `when` are expressions: `label := if n > 0 { "pos" } else { "neg" }`.
   `when code { 200, 204 -> a; in 500..599 -> b; else -> c }`, and `is T ->` branches over
   interfaces. A `when` over an enum or a
@@ -269,7 +278,7 @@ What Go programmers write by habit, and the Lyth for it:
 | `Point{X: 1, Y: 2}` | `Point(X = 1, Y = 2)` |
 | `gin.H{"error": msg}`, `url.Values{"q": {"go"}}` | `gin.H(["error": msg])`, `url.Values(["q": ["go"]])` |
 | `for i, x := range xs` | `for i, x in xs` |
-| `for i := 0; i < n; i++` | `for i in 0..<n` |
+| `for i := 0; i < n; i++` | the same, or `for i in 0..<n` |
 | `for { }`, `for cond { }` | `while true { }`, `while cond { }` |
 | `ch <- v`, `<-ch`, `close(ch)` | `ch.send(v)`, `ch.receive()`, `ch.close()` |
 | `go func() { ... }()` | `go { ... }` |
@@ -289,8 +298,8 @@ What Go programmers write by habit, and the Lyth for it:
 | `func(string) bool`, `func(string) error` (types) | `(string) -> bool`, `(string) -> unit throws` |
 | `x.(T)`, `v, ok := x.(T)`, `_, ok := x.(T)` | `x as T`, `v := x as? T`, `ok := x is T` |
 | `switch x := v.(type) { case int: ... }` | `when x := v { is int -> ... }` |
-| `var ( ... )`, `const ( ... )` | one `var` or `const` per line; no `iota`: write the values, or declare an enum |
-| `func f() (n int, err error)` (named results) | `func f(): int throws`, with `n` a local |
+| `const ( A T = iota; B )`, `var ( x int )` | `const ( A: T = iota; B )`, `var ( x: int )` |
+| `func f() (n int, err error)` (named results) | `func f(): (n: int) throws` |
 | a label on its own line above a loop | `outer@ for ...` |
 
 ## Coming from Kotlin
@@ -314,10 +323,9 @@ What Go programmers write by habit, and the Lyth for it:
 
 ## Not supported yet
 
-`when` over errors, external test packages (`package x_test`), packages mixing Lyth and
-non-test Go files, anonymous struct types (declare a struct, also inside a function), `T?` on
-type parameters, and named arguments and default values on generic functions. The compiler
-reports each of these with a way around it.
+Packages mixing Lyth and non-test Go files (put the Go code in a package of its own),
+anonymous struct types (declare a struct, also inside a function), and `T?` on type parameters
+(return `(T, bool)`). The compiler reports each of these with a way around it.
 
 ## Changes between versions
 
@@ -344,7 +352,6 @@ The table lists older Lyth forms and the Go and Kotlin habits the compiler recog
 | `Point{X: 1}` | `Point(X = 1)` | yes |
 | `gin.H{"k": v}` | `gin.H(["k": v])` | yes |
 | `strings.split(s, ",")` | `strings.Split(s, ",")` | yes |
-| `for i := 0; i < n; i++` | `for i in 0..<n` | yes when `n` cannot change in the loop (a range reads it once), else a hint |
 | `go func() { ... }()` | `go { ... }` | yes |
 | `ch <- v`, `<-ch` | `ch.send(v)`, `ch.receive()` | yes |
 | `const userKey ctxKey = 1` | `const userKey: ctxKey = 1` | yes |
@@ -353,7 +360,6 @@ The table lists older Lyth forms and the Go and Kotlin habits the compiler recog
 | `val`, `var` as names (`val := m[k]`) | another name, such as `value` | no: a name to choose |
 | `try { ... } catch (e: Exception) { ... }` | `f() catch (e) { ... }` on each call that can fail | no |
 | `outer: for ...`, `break outer` (also with the label on its own line) | `outer@ for ...`, `break@outer` | yes |
-| `var ( A = 1; B = 2 )` (a Go var group) | `var A = 1`, `var B = 2`, one per line | yes |
 | `func(string) bool` (a Go function type) | `(string) -> bool` | yes; `func(...) error` is a hint: `(...) -> unit throws`, or `-> error?` |
 | `import "net/http" as h` | `import h "net/http"` | yes |
 | `typealias Handler = (Ctx) -> unit` | `type Handler = (Ctx) -> unit` | yes |
@@ -369,6 +375,9 @@ The table lists older Lyth forms and the Go and Kotlin habits the compiler recog
 | a `T?` passed to a Go `any` parameter arrived as a pointer (`*string`) | it arrives as its value, or a nil interface when null; pass `&x` where Go writes through a pointer | no: a run-time change |
 | an enum encoded as its number in JSON | its name (`"pendingReview"`); declare `MarshalJSON` and `UnmarshalJSON` to keep numbers | no: a wire change |
 | `n, err := strconv.Atoi(s)` then `throw err` or passing `err` as `error` without a check | `if err != null { throw err }`: the destructured error is `error?` (E0305, E0401 otherwise) | no: a check to add |
+| `lyth run main.lyth` inside a module ran the file's whole package | it runs that file alone, as `go run main.go` does; `lyth run .` runs the package | no: a command to change |
+| `json:""` on a field kept an empty tag | the Go field is untagged, so encoding/json uses the field name | no: a wire change only where the tag was written |
+| a field or method `len`, `init`, ... was `len_`, `init_` in Go | it keeps its name; Go code of the package uses `x.len` | no: Go code to change |
 
 ## Topics
 
