@@ -11,7 +11,7 @@ snippets = ["./snippets/lyth.json"]
 # editors/tree-sitter-lyth (set by ../build-zed-extension.sh).
 [grammars.lyth]
 repository = "https://github.com/lyth-lang/lyth"
-rev = "4b16ada4ca5a0f448f02bfc6c88bafe782a5dc0f"
+rev = "3fdbd9afc55c7fcf54d44da130fda809ab178c35"
 path = "editors/tree-sitter-lyth"
 
 [language_servers.lyth]
