@@ -50,7 +50,11 @@ func (c *Checker) aliasType(ts *TypeSym) types.Type {
 		return ts.Type
 	}
 	ts.aliasBusy = true
-	c.withScope(c.scopeFor(ts.Alias.S), func() { ts.Type = c.resolveType(ts.Alias.Type) })
+	scope := c.scopeFor(ts.Alias.S)
+	if len(ts.Alias.TypeParams) > 0 {
+		scope, ts.AliasParams = c.typeParams(ts.Alias.TypeParams, scope)
+	}
+	c.withScope(scope, func() { ts.Type = c.resolveType(ts.Alias.Type) })
 	ts.aliasBusy = false
 	if ts.Type == types.Unit {
 		c.errorf(diag.EInvalidUse, ts.Alias.Type.Span(), "unit cannot be aliased")
@@ -845,9 +849,15 @@ func (c *Checker) resolveInterface(decl *types.TypeDecl, d *syntax.InterfaceDecl
 		decl.Methods = append(decl.Methods, &types.Method{Name: m.Name.Name, GoName: MemberGoName(m.Name.Name), Sig: sig, Pub: Exported(m.Name.Name), Span: m.Name.S})
 	}
 	for _, e := range d.Embeds {
+		save := c.inConstraint
+		c.inConstraint = true // an embedded constraint keeps the interface a constraint
 		t := c.resolveType(e)
 		if t != types.Invalid && !types.IsInterface(t) {
-			c.errorf(diag.ETypeMismatch, e.Span(), "%s is not an interface and cannot be embedded in interface %s", t, decl.Name)
+			// interface Int { int }: a type set of one type, as in Go.
+			t = c.unionType(&syntax.UnionType{Terms: []*syntax.UnionTerm{{Type: e, S: e.Span()}}, S: e.Span()})
+		}
+		c.inConstraint = save
+		if t == types.Invalid {
 			continue
 		}
 		decl.Embeds = append(decl.Embeds, t)
@@ -875,6 +885,9 @@ func (c *Checker) signature(params []*syntax.Param, result *syntax.ResultType, t
 		sig.ParamNames = append(sig.ParamNames, p.Name.Name)
 	}
 	if result != nil {
+		for _, n := range result.Names {
+			sig.ResultNames = append(sig.ResultNames, n.Name)
+		}
 		for _, rt := range result.Types {
 			t := c.resolveType(rt)
 			if t == types.Unit {
@@ -1027,14 +1040,6 @@ func (c *Checker) checkDefaults(fs *FuncSym) {
 	if d == nil || fs.Sig == nil {
 		return
 	}
-	if len(fs.Sig.TypeParams) > 0 {
-		for _, p := range d.Params {
-			if p.Default != nil {
-				c.errorf(diag.EUnsupported, p.Default.Span(), "generic functions cannot have default values yet")
-				return
-			}
-		}
-	}
 	params := map[string]bool{}
 	for _, p := range d.Params {
 		params[p.Name.Name] = true
@@ -1070,13 +1075,20 @@ func (c *Checker) checkDefaults(fs *FuncSym) {
 			c.errorf(diag.EInvalidUse, ref.S, "a default value cannot refer to parameter %s", ref.Name).
 				WithNote("defaults are evaluated at the call site, before the call")
 		default:
-			x := c.expr(p.Default, fs.Sig.Params[i])
+			want := fs.Sig.Params[i]
+			if hasTypeParams(want) {
+				want = nil // an untyped constant, taking T's type at each call
+			}
+			x := c.expr(p.Default, want)
 			if _, ok := x.typ.(*types.Result); ok && x.mode == ModeValue {
 				c.errorf(diag.EInvalidUse, p.Default.Span(), "a default value cannot fail: %s returns an error", p.Default.Span().Short()).
 					WithNote("defaults are evaluated at every call site that leaves the parameter out, where nothing handles the error").
 					WithHint("give %s a default that cannot fail, or compute the value in the body of %s", p.Name.Name, fs.name)
+			} else if x = c.singleValue(x); hasTypeParams(fs.Sig.Params[i]) && x.mode != ModeInvalid && x.val == nil {
+				// The default is evaluated with the caller's type arguments:
+				// only a constant takes whatever type they give T.
+				c.errorf(diag.EInvalidUse, p.Default.Span(), "the default value of %s, whose type is a type parameter, must be a constant", p.Name.Name)
 			} else {
-				x = c.singleValue(x)
 				c.assign(x, fs.Sig.Params[i], "default value of "+p.Name.Name)
 			}
 		}
@@ -1682,6 +1694,41 @@ func (c *Checker) funcDirectives(d *syntax.FunDecl) {
 	}
 }
 
+// repeatedConst evaluates the expression of src for the group entry d that
+// repeats it, with d's iota. The expression was checked for src; what this
+// evaluation records is put back, and its errors are reported at d's name.
+func (c *Checker) repeatedConst(d, src *syntax.ConstDecl, want types.Type) *operand {
+	saved := map[syntax.Expr]TypeAndValue{}
+	syntax.Walk(src.Value, func(n syntax.Node) {
+		if e, ok := n.(syntax.Expr); ok {
+			if tv, ok := c.info.Types[e]; ok {
+				saved[e] = tv
+			}
+		}
+	})
+	sink := c.sink
+	c.sink = &diag.Sink{}
+	x := c.expr(src.Value, want)
+	errs := c.sink.All()
+	c.sink = sink
+	syntax.Walk(src.Value, func(n syntax.Node) {
+		if e, ok := n.(syntax.Expr); ok {
+			if tv, ok := saved[e]; ok {
+				c.info.Types[e] = tv
+			} else {
+				delete(c.info.Types, e)
+			}
+		}
+	})
+	for _, e := range errs {
+		if e.Severity == diag.Error {
+			c.errorf(e.Code, d.Name.S, "constant %s (%s with iota = %d): %s", d.Name.Name, src.Value.Span().Short(), d.Iota, e.Message)
+			return invalid(src.Value)
+		}
+	}
+	return x
+}
+
 // localConst declares a constant in a function body. Its value is checked
 // in the enclosing scope, so it may refer to earlier local constants.
 func (c *Checker) localConst(d *syntax.ConstDecl) {
@@ -1724,11 +1771,29 @@ func (c *Checker) constValue(k *ConstSym) {
 // its type and value.
 func (c *Checker) constInit(k *ConstSym) {
 	d := k.Decl
-	var want types.Type
-	if d.Type != nil {
-		want = c.resolveType(d.Type)
+	src := d // the entry whose type and expression the constant has
+	if d.Repeat != nil {
+		src = d.Repeat
 	}
-	x := c.expr(d.Value, want)
+	if src.Value == nil {
+		k.Type = types.Invalid // reported by the parser
+		return
+	}
+	saveIota := c.iota
+	iota := d.Iota
+	c.iota = &iota
+	defer func() { c.iota = saveIota }()
+	var want types.Type
+	if src.Type != nil {
+		want = c.resolveType(src.Type)
+	}
+	var x *operand
+	if d.Repeat == nil {
+		x = c.expr(d.Value, want)
+	} else {
+		x = c.repeatedConst(d, src, want)
+	}
+	d = src // errors about the type are reported at the entry that wrote it
 	switch {
 	case x.mode == ModeInvalid:
 		k.Type = types.Invalid
@@ -1745,6 +1810,20 @@ func (c *Checker) constInit(k *ConstSym) {
 			if b := types.BasicOf(want); b == nil || types.MayBeNull(want) {
 				c.errorf(diag.ETypeMismatch, d.Type.Span(), "constants must have a basic type, not %s", want)
 				want = types.Invalid
+			} else if orig := k.Decl; orig.Repeat != nil {
+				// A repeated entry: the value of its own iota must fit too.
+				sink := c.sink
+				c.sink = &diag.Sink{}
+				c.assign(x, want, "constant "+k.name)
+				errs := c.sink.All()
+				c.sink = sink
+				for _, e := range errs {
+					if e.Severity == diag.Error {
+						c.errorf(e.Code, orig.Name.S, "constant %s (%s with iota = %d): %s", orig.Name.Name, d.Value.Span().Short(), orig.Iota, e.Message)
+						break
+					}
+				}
+				x.val = c.convertConst(x.val, want)
 			} else {
 				c.assign(x, want, "constant "+k.name)
 				x.val = c.convertConst(x.val, want)
@@ -1817,6 +1896,28 @@ func (c *Checker) funcBody(sym *FuncSym) {
 	var params []string
 	for _, p := range d.Params {
 		params = append(params, p.Name.Name)
+	}
+	if d.Result != nil && d.Result.Names != nil && len(d.Result.Names) == len(sym.Sig.Results) {
+		// Named results are locals holding their zero values (ADR 0047).
+		fn.namedResults = true
+		for i, n := range d.Result.Names {
+			t := sym.Sig.Results[i]
+			if !types.Zeroable(t) && t != types.Invalid {
+				d := c.errorf(diag.ENoZeroValue, n.S, "the named result %s has no zero value: %s", n.Name, types.NoZeroReason(t))
+				if types.IsErrorType(t) {
+					d.WithHint("a function that can fail declares throws: drop %s and write ... throws", n.Name)
+				} else {
+					d.WithHint("declare it nullable (%s?), or leave the results unnamed", t)
+				}
+			}
+			rv := &VarSym{name: n.Name, Type: t, Mutable: true, Kind: LocalVar, Span: n.S, Used: true, owner: fn}
+			if n.Name != "_" {
+				c.declare(scope, rv, n.S)
+			}
+			c.info.Defs[n] = rv
+			info.Results = append(info.Results, rv)
+			params = append(params, n.Name)
+		}
 	}
 	if d.Body != nil {
 		fn.reassigned = reassignedNames(params, d.Body)
@@ -1997,8 +2098,8 @@ func zeroLiteral(e syntax.Expr) bool {
 		return !x.Value
 	case *syntax.BasicLit:
 		switch x.Kind {
-		case syntax.INT, syntax.FLOAT:
-			return strings.Trim(x.Raw, "0._xXoObB") == ""
+		case syntax.INT, syntax.FLOAT, syntax.IMAG:
+			return strings.Trim(x.Raw, "0._xXoObBi") == ""
 		case syntax.STRING, syntax.RAWSTRING:
 			return x.Value == ""
 		}

@@ -42,9 +42,10 @@ type parser struct {
 	lastErr  int // token index of the last reported error (cascade suppression)
 	noLambda int // >0 disables trailing lambdas (in a header: if, while, for, when)
 	damaged  []source.Span
-	// extraDecls are declarations parsed along with the last one: the
-	// entries of Go's var ( ... ) after the first.
+	// extraDecls are declarations parsed along with the last one, and
+	// extraStmts statements: the entries of a group after the first.
 	extraDecls []Decl
+	extraStmts []Stmt
 	// receiverType is set while parsing a method's receiver type, where
 	// []T.Map[T, R] puts the function's type parameters after a qualified
 	// name rather than type arguments.
@@ -173,7 +174,7 @@ func describe(t Token) string {
 		return "newline"
 	case EOF:
 		return "end of file"
-	case INT, FLOAT, RUNE, STRING, RAWSTRING, TEMPLATE_START:
+	case INT, FLOAT, IMAG, RUNE, STRING, RAWSTRING, TEMPLATE_START:
 		return t.Kind.String()
 	}
 	if t.Kind.IsKeyword() {
@@ -695,8 +696,7 @@ func (p *parser) parseDecl() (decl Decl) {
 		d := &TypeAliasDecl{Doc: doc}
 		d.Name = p.parseIdent("after 'typealias'")
 		if p.at(LBRACK) || p.at(LSS) {
-			p.errorf(diag.EUnsupportedSyntax, p.tok().Span, "generic type aliases are not supported yet")
-			p.parseTypeParams()
+			d.TypeParams = p.parseTypeParams()
 		}
 		p.expect(ASSIGN, "in type alias")
 		p.skipNL()
@@ -706,23 +706,15 @@ func (p *parser) parseDecl() (decl Decl) {
 		return d
 	case CONST:
 		if p.peek(1).Kind == LPAREN {
-			// Go's const ( ... ) group.
-			p.next()
-			open, openIdx := p.tok().Span, p.pos
-			p.skipBraces()
-			span := start.Join(p.toks[p.pos-1].Span)
-			first := "Name"
-			for i := openIdx + 1; i < len(p.toks) && p.toks[i].Kind != RPAREN; i++ {
-				if p.toks[i].Kind == IDENT {
-					first = p.toks[i].Text
-					break
-				}
-			}
-			p.errorf(diag.EUnsupportedSyntax, open, "Lyth has no const groups: declare each constant on its own line").
-				WithHint("write const %s = value (or const %s: Type = value) for each; Lyth has no iota: write the values, or declare an enum: enum Color { Red, Green }", first, first)
-			p.damaged = append(p.damaged, span)
+			cs := p.parseConstGroup(start, doc)
 			p.endDecl()
-			return nil
+			if len(cs) == 0 {
+				return nil
+			}
+			for _, c := range cs[1:] {
+				p.extraDecls = append(p.extraDecls, c)
+			}
+			return cs[0]
 		}
 		d := p.parseConst(start)
 		d.Doc = doc
@@ -759,15 +751,9 @@ func (p *parser) parseTypeDecl(start source.Span, doc string) Decl {
 	if p.at(ASSIGN) {
 		p.next()
 		p.skipNL()
-		d := &TypeAliasDecl{Doc: doc, Name: name}
+		d := &TypeAliasDecl{Doc: doc, Name: name, TypeParams: tps}
 		d.Type = p.parseType()
 		d.S = p.spanFrom(start)
-		if len(tps) > 0 {
-			// Without its parameters the aliased type would only add
-			// "undefined" errors, so the declaration is dropped.
-			p.errorf(diag.EUnsupportedSyntax, tps[0].S.Join(tps[len(tps)-1].S), "generic type aliases are not supported yet")
-			return &BadDecl{S: d.S}
-		}
 		return d
 	}
 	if p.at(STRUCT) || p.at(INTERFACE) {
@@ -904,21 +890,7 @@ func (p *parser) parseTypeParams() []*TypeParam {
 			tp.Constraint = c
 		}
 		if tp.Constraint != nil && p.at(OR) {
-			// Go's [T int | float64]: a type-set constraint, not supported
-			// yet. One error, and the list is read on after the union.
-			from := tp.Constraint.Span()
-			for depth := 0; !p.at(EOF) && !(depth == 0 && (p.at(COMMA) || p.at(RBRACK) || p.at(GTR))); p.next() {
-				switch p.tok().Kind {
-				case LBRACK, LPAREN:
-					depth++
-				case RBRACK, RPAREN:
-					depth--
-				}
-			}
-			union := source.Span{File: from.File, Start: from.Start, End: p.toks[p.pos-1].Span.End}
-			p.errorf(diag.EUnsupportedSyntax, union, "type-set constraints (%s) are not supported yet", union.Text()).
-				WithHint("use a constraint of a Go package, such as cmp.Ordered, or an interface whose methods the code calls")
-			tp.Constraint = &BadType{S: union}
+			tp.Constraint = p.unionRest(tp.Constraint) // [T: int | float64]
 		}
 		tp.S = p.spanFrom(start)
 		tps = append(tps, tp)
@@ -1673,10 +1645,10 @@ func (p *parser) parseResultType() *ResultType {
 	return &ResultType{Types: []TypeExpr{t}, S: t.Span()}
 }
 
-// namedResults reads Go's named results, (n: int, err: error) or
-// (n int, err error), which Lyth does not have: it reports them with an
-// edit to the bare types and returns those. It returns nil, consuming
-// nothing, for any other result and for a function type's parameters.
+// namedResults reads named results (ADR 0047): (n: int, err: error?), or
+// Go's (n int, err error) with the fix that adds the colons. It returns
+// nil, consuming nothing, for any other result and for a function type's
+// parameters.
 func (p *parser) namedResults() *ResultType {
 	if !p.at(LPAREN) {
 		return nil
@@ -1709,32 +1681,26 @@ func (p *parser) namedResults() *ResultType {
 		}
 	}
 	start := p.next().Span // (
-	var types []TypeExpr
-	var texts []string
+	r := &ResultType{}
 	for !p.at(RPAREN) && !p.at(EOF) {
-		if p.at(IDENT) && (p.peek(1).Kind == COLON || startsSliceElem(p.peek(1).Kind)) {
-			p.next()
-			p.accept(COLON)
+		name := p.parseIdent("for the result name")
+		if !p.accept(COLON) {
+			at := p.tok().Span
+			t := p.parseType()
+			p.errorf(diag.EUnsupportedSyntax, at.Join(t.Span()), "a named result's type follows a colon in Lyth").
+				WithFix(name.S.EndSpan(), ":", "write %s: %s", name.Name, t.Span().Text())
+			r.Names, r.Types = append(r.Names, name), append(r.Types, t)
+		} else {
+			r.Names, r.Types = append(r.Names, name), append(r.Types, p.parseType())
 		}
-		t := p.parseType()
-		types = append(types, t)
-		texts = append(texts, t.Span().Text())
 		if !p.accept(COMMA) {
 			break
 		}
 	}
 	p.expect(RPAREN, "to close the result list")
-	span := p.spanFrom(start)
-	repl := strings.Join(texts, ", ")
-	if len(texts) > 1 {
-		repl = "(" + repl + ")"
-	}
-	p.errorf(diag.EUnsupportedSyntax, span, "Lyth has no named results").
-		WithEdit(span, repl, "declare the result types, %s, and the names as locals in the body", repl)
-	if len(types) == 1 {
-		return &ResultType{Types: types, S: span}
-	}
-	return &ResultType{Types: types, Tuple: true, S: span}
+	r.S = p.spanFrom(start)
+	r.Tuple = len(r.Types) > 1
+	return r
 }
 
 func (p *parser) parseParenTypeList() []TypeExpr {
@@ -2082,7 +2048,12 @@ func (p *parser) parseInterfaceDecl(start source.Span, doc string) *InterfaceDec
 			m.S = p.spanFrom(mstart)
 			d.Methods = append(d.Methods, m)
 		} else {
-			d.Embeds = append(d.Embeds, p.parseType())
+			// An embedded interface, or a type set: ~int | ~float64.
+			e := p.parseType()
+			if p.at(OR) {
+				e = p.unionRest(e)
+			}
+			d.Embeds = append(d.Embeds, e)
 		}
 		if !p.at(NEWLINE) && !p.at(SEMI) && !p.at(RBRACE) {
 			p.errorf(diag.EUnexpectedToken, p.tok().Span, "expected newline in interface body, found %s", describe(p.tok()))
@@ -2110,6 +2081,26 @@ func (p *parser) parseType() TypeExpr {
 	return t
 }
 
+// unionRest reads the rest of a type set after its first term first, at a
+// '|': int | float64, ~int | ~uint.
+func (p *parser) unionRest(first TypeExpr) TypeExpr {
+	u := &UnionType{}
+	add := func(t TypeExpr) {
+		if inner, ok := t.(*UnionType); ok {
+			u.Terms = append(u.Terms, inner.Terms...)
+			return
+		}
+		u.Terms = append(u.Terms, &UnionTerm{Type: t, S: t.Span()})
+	}
+	add(first)
+	for p.accept(OR) {
+		p.skipNL()
+		add(p.parseType())
+	}
+	u.S = first.Span().Join(p.toks[p.pos-1].Span)
+	return u
+}
+
 func (p *parser) parsePrefixType() TypeExpr {
 	start := p.tok().Span
 	switch p.tok().Kind {
@@ -2117,6 +2108,12 @@ func (p *parser) parsePrefixType() TypeExpr {
 		if p.peek(1).Kind == LPAREN {
 			return p.goFuncType()
 		}
+	case TILDE:
+		// ~T: a term of a type set, for every type whose underlying type is T.
+		p.next()
+		t := p.parsePrefixType()
+		term := &UnionTerm{Tilde: true, Type: t, S: p.spanFrom(start)}
+		return &UnionType{Terms: []*UnionTerm{term}, S: term.S}
 	case MUL:
 		p.next()
 		elem := p.parsePrefixType()
@@ -2138,10 +2135,30 @@ func (p *parser) parsePrefixType() TypeExpr {
 		elem := p.parseType()
 		return &ArrayType{Len: n, Elem: elem, S: p.spanFrom(start)}
 	case LPAREN:
-		types := p.parseParenTypeList()
+		var names []*Ident
+		var types []TypeExpr
+		if p.peek(1).Kind == IDENT && p.peek(2).Kind == COLON {
+			// (name: string, depth: int) -> bool: names that document the
+			// parameters, as Go's func(name string, depth int) bool.
+			p.next()
+			for !p.at(RPAREN) && !p.at(EOF) {
+				names = append(names, p.parseIdent("for the parameter name"))
+				p.expect(COLON, "after the parameter name")
+				types = append(types, p.parseType())
+				if !p.accept(COMMA) {
+					break
+				}
+			}
+			p.expect(RPAREN, "to close the parameter list")
+			if !p.at(ARROW) {
+				p.errorf(diag.EUnexpectedToken, p.tok().Span, "expected -> after the parameters of a function type, found %s", describe(p.tok()))
+			}
+		} else {
+			types = p.parseParenTypeList()
+		}
 		if p.at(ARROW) {
 			p.next()
-			ft := &FuncType{Params: types}
+			ft := &FuncType{Params: types, ParamNames: names}
 			ft.Result = p.parseFuncResult()
 			if p.at(THROWS) {
 				p.next()
@@ -2413,6 +2430,8 @@ func (p *parser) parseStmtList() []Stmt {
 		if s != nil {
 			stmts = append(stmts, s)
 		}
+		stmts = append(stmts, p.extraStmts...) // the rest of a const ( ... ) group
+		p.extraStmts = nil
 		if !p.at(NEWLINE) && !p.at(SEMI) && !p.at(RBRACE) && !p.at(EOF) {
 			if !p.syntaxErrorSince(n) {
 				p.errorf(diag.EUnexpectedToken, p.tok().Span, "expected newline or ';' after statement, found %s", describe(p.tok()))
@@ -2483,9 +2502,16 @@ func (p *parser) parseStmt() Stmt {
 		p.next() // @
 		switch p.tok().Kind {
 		case FOR:
-			s := p.parseFor().(*ForStmt)
-			s.Label = label
-			return s
+			switch s := p.parseFor().(type) {
+			case *ForStmt:
+				s.Label = label
+				return s
+			case *ForClauseStmt:
+				s.Label = label
+				return s
+			default:
+				return s
+			}
 		case WHILE:
 			s := p.parseWhile().(*WhileStmt)
 			s.Label = label
@@ -2543,6 +2569,16 @@ func (p *parser) parseStmt() Stmt {
 		}
 		return p.parseOldLocalDecl()
 	case CONST:
+		if p.peek(1).Kind == LPAREN {
+			cs := p.parseConstGroup(t.Span, p.docFor(t.Span.Start))
+			if len(cs) == 0 {
+				return &BadStmt{S: p.spanFrom(t.Span)}
+			}
+			for _, c := range cs[1:] {
+				p.extraStmts = append(p.extraStmts, c)
+			}
+			return cs[0]
+		}
 		return p.parseConst(t.Span)
 	case STRUCT:
 		if p.peek(1).Kind == IDENT {
@@ -2740,60 +2776,119 @@ func (p *parser) parseOldLocalDecl() Stmt {
 	return ld
 }
 
-// parseVarGroup parses Go's var ( ... ) group into one PropDecl per entry,
-// reported with the fix to one var per line. It returns the first entry
-// and leaves the others in p.extraDecls.
-func (p *parser) parseVarGroup(start source.Span, doc string) Decl {
-	p.next() // var
-	open := p.next().Span
-	var decls []*PropDecl
-	var lines []string
-	p.skipNLSemi()
+// groupEntries parses the entries of a const or var group, one per line,
+// from after the ( to the ), calling entry for each with its start and doc.
+func (p *parser) groupEntries(what string, entry func(start source.Span, doc string)) {
 	for !p.at(RPAREN) && !p.at(EOF) {
-		d := &PropDecl{Doc: p.docFor(p.tok().Span.Start), Mutable: true}
-		entry := p.tok().Span
-		d.Name = p.parseIdent("in variable declaration")
-		if p.accept(COLON) || startsSliceElem(p.tok().Kind) && !p.at(LPAREN) {
-			d.Type = p.parseType() // name: T, or Go's name T
+		start, pos := p.tok().Span, p.pos
+		entry(start, p.docFor(start.Start))
+		if p.pos == pos {
+			p.next() // guarantee progress past a token no entry starts with
+			continue
 		}
-		if p.accept(ASSIGN) {
-			p.skipNL()
-			d.Value = p.parseExpr()
+		// Inside parentheses the lexer drops line breaks: a new line starts
+		// the next entry.
+		end := p.toks[p.pos-1].Span
+		if p.at(COMMA) {
+			p.errorf(diag.EUnsupportedSyntax, p.tok().Span, "a %s group declares one name per line", what)
+			for !p.at(RPAREN) && !p.at(EOF) && p.file.Position(p.tok().Span.Start).Line == p.file.Position(end.End).Line {
+				p.next()
+			}
+			continue
 		}
-		d.S = p.spanFrom(entry)
-		line := "var " + d.Name.Name
-		if d.Type != nil {
-			line += ": " + d.Type.Span().Text()
-		}
-		if d.Value != nil {
-			line += " = " + d.Value.Span().Text()
-		}
-		if d.Doc != "" {
-			line = d.Doc + "\n" + line
-		}
-		lines = append(lines, line)
-		decls = append(decls, d)
-		// Inside the parentheses the lexer drops line breaks: a new line
-		// starts the next entry.
-		sameLine := p.file.Position(p.tok().Span.Start).Line == p.file.Position(d.S.End).Line
-		if sameLine && !p.at(NEWLINE) && !p.at(SEMI) && !p.at(RPAREN) {
-			p.errorf(diag.EUnexpectedToken, p.tok().Span, "expected newline after a variable of the group, found %s", describe(p.tok()))
-			p.skipBraces()
-			return nil
+		if !p.at(SEMI) && !p.at(RPAREN) && !p.at(EOF) && p.file.Position(p.tok().Span.Start).Line == p.file.Position(end.End).Line {
+			p.errorf(diag.EUnexpectedToken, p.tok().Span, "expected a new line after an entry of the %s group, found %s", what, describe(p.tok()))
+			for !p.at(RPAREN) && !p.at(EOF) && p.file.Position(p.tok().Span.Start).Line == p.file.Position(end.End).Line {
+				p.next()
+			}
 		}
 		p.skipNLSemi()
 	}
-	p.expect(RPAREN, "to close the var group")
-	span := p.spanFrom(start)
-	d := p.errorf(diag.EUnsupportedSyntax, open, "Lyth has no var groups: declare each variable on its own line")
+	p.expect(RPAREN, "to close the "+what+" group")
+}
+
+// entryType reads an entry's type: name: Type, or Go's name Type with the
+// fix that adds the colon.
+func (p *parser) entryType(name *Ident, what string) TypeExpr {
+	if p.accept(COLON) {
+		return p.parseType()
+	}
+	if !p.at(ASSIGN) && startsSliceElem(p.tok().Kind) && !p.at(LPAREN) && p.file.Position(p.tok().Span.Start).Line == p.file.Position(name.S.End).Line {
+		t := p.parseType()
+		p.errorf(diag.EUnsupportedSyntax, t.Span(), "a %s's type follows a colon in Lyth", what).
+			WithFix(name.S.EndSpan(), ":", "write %s: %s", name.Name, t.Span().Text())
+		return t
+	}
+	return nil
+}
+
+// parseConstGroup parses Go's const ( ... ) group (ADR 0047): each entry is
+// name [: Type] = value, or a name alone, which repeats the type and
+// expression of the last entry with a value; iota is the entry's index.
+func (p *parser) parseConstGroup(start source.Span, doc string) []*ConstDecl {
+	p.next() // const
+	p.next() // (
+	group := &DeclGroup{Doc: doc}
+	var out []*ConstDecl
+	var last *ConstDecl // the last entry with a value
+	p.skipNLSemi()
+	p.groupEntries("const", func(entry source.Span, edoc string) {
+		d := &ConstDecl{Doc: edoc, Group: group, Iota: len(out)}
+		d.Name = p.parseIdent("in const declaration")
+		if p.at(COMMA) {
+			return // reported by groupEntries: one name per line
+		}
+		d.Type = p.entryType(d.Name, "const")
+		switch {
+		case p.accept(ASSIGN):
+			p.skipNL()
+			d.Value = p.parseExpr()
+			last = d
+		case d.Type != nil:
+			p.errorf(diag.EUnexpectedToken, d.Name.S, "the constant %s needs a value: %s: %s = ...", d.Name.Name, d.Name.Name, d.Type.Span().Text())
+		case last == nil:
+			p.errorf(diag.EUnexpectedToken, d.Name.S, "the first constant of a group needs a value: %s = ...", d.Name.Name)
+		default:
+			d.Repeat = last
+		}
+		d.S = p.spanFrom(entry)
+		out = append(out, d)
+	})
+	group.S = p.spanFrom(start)
+	return out
+}
+
+// parseVarGroup parses Go's var ( ... ) group at package level (ADR 0047)
+// into one PropDecl per entry. It returns the first entry and leaves the
+// others in p.extraDecls.
+func (p *parser) parseVarGroup(start source.Span, doc string) Decl {
+	if kw := p.next(); kw.Kind == VAL {
+		p.errorf(diag.EUnsupportedSyntax, kw.Span, "package-level variables are declared with var").
+			WithFix(kw.Span, "var", "write var")
+	}
+	p.next() // (
+	group := &DeclGroup{Doc: doc}
+	var decls []*PropDecl
+	p.skipNLSemi()
+	p.groupEntries("var", func(entry source.Span, edoc string) {
+		d := &PropDecl{Doc: edoc, Mutable: true, Group: group, Directives: p.directivesFor(entry.Start)}
+		p.placeDirectives(d.Directives)
+		d.Name = p.parseIdent("in variable declaration")
+		d.Type = p.entryType(d.Name, "variable")
+		if p.accept(ASSIGN) {
+			p.skipNL()
+			d.Value = p.parseExpr()
+		} else if d.Type == nil {
+			p.errorf(diag.EUnexpectedToken, d.Name.S, "a package-level var needs a type or an initializer").
+				WithHint("write %s: Type for its zero value, or %s = value", d.Name.Name, d.Name.Name)
+		}
+		d.S = p.spanFrom(entry)
+		decls = append(decls, d)
+	})
+	group.S = p.spanFrom(start)
 	p.endDecl()
 	if len(decls) == 0 {
 		return nil
-	}
-	d.WithFix(span, strings.Join(lines, "\n"), "write %s", strings.SplitN(lines[0], "\n", 2)[0]).
-		WithNote("a comment above the group becomes the doc of its first variable")
-	if decls[0].Doc == "" {
-		decls[0].Doc = doc
 	}
 	for _, d := range decls[1:] {
 		p.extraDecls = append(p.extraDecls, d)
@@ -2864,6 +2959,9 @@ func (p *parser) parseFor() Stmt {
 	if p.at(LPAREN) {
 		return p.parseOldFor(start, s)
 	}
+	if p.forClauseAhead() {
+		return p.parseForClause(start)
+	}
 	if p.at(THIS) {
 		p.parseIdent("") // reports self
 		s.Names = []*Ident{{Name: "_", S: p.toks[p.pos-1].Span}}
@@ -2930,33 +3028,9 @@ func (p *parser) parseFor() Stmt {
 			d.WithHint("for %s in %s binds elements; for the index of a slice write for %s, _ in %s, for the numbers 0 to n-1 write for %s in 0..<n", names[0], s.Iter.Span().Text(), names[0], s.Iter.Span().Text(), names[0])
 		}
 	default:
-		if rng, ok := p.goCountingFor(s, LBRACE); ok {
-			header := s.Names[0].S.Join(p.toks[p.pos-1].Span)
-			name, exact := p.countingRewrite(s, rng)
-			repl := name + " in " + rng
-			d := p.errorf(diag.EUnsupportedSyntax, header, "Lyth has no three-part for loop")
-			if exact {
-				d.WithFix(header, repl, "write for %s", repl)
-			} else {
-				d.WithEdit(header, repl, "write for %s if the body does not change the bound (the range is evaluated once), or use while", repl)
-			}
-			break
-		}
-		if init, cond, post, ok := p.threePartFor(s); ok {
-			// for i := 0; ; i++ (no counting range): a while loop.
-			if cond == "" {
-				cond = "true"
-			}
-			for !p.at(EOF) && !p.at(LBRACE) && !p.at(NEWLINE) {
-				p.next()
-			}
-			p.errorf(diag.EUnsupportedSyntax, s.Names[0].S.Join(p.toks[p.pos-1].Span), "Lyth has no three-part for loop").
-				WithHint("declare the variable before the loop and use while: %s, then while %s { ...; %s }", init, cond, post)
-			break
-		}
 		d := p.errorf(diag.EUnexpectedToken, p.tok().Span, "expected 'in' in for loop, found %s", describe(p.tok()))
 		if p.at(DEFINE) || p.at(ASSIGN) || p.at(SEMI) {
-			d.WithHint("counting loops are written for i in 0..<n { ... }; for another step, use while: i := 0; while i < n { ...; i += 2 }")
+			d.WithHint("counting loops are written for i in 0..<n { ... }, or as in Go: for i := 0; i < n; i += 2 { ... }")
 		} else {
 			d.WithHint("for iterates (for x in xs { ... }); a loop on a condition is while cond { ... }")
 		}
@@ -2992,14 +3066,89 @@ func (p *parser) kotlinRange(s *ForStmt) {
 		s.Iter = &RangeExpr{Lo: s.Iter, Hi: arg, Exclusive: true, S: span}
 		return
 	case "downTo":
-		d.WithHint("count down with while: i := %s; while i >= %s { ...; i-- }", s.Iter.Span().Text(), arg.Span().Text())
+		d.WithHint("count down as in Go: for i := %s; i >= %s; i-- { ... }", s.Iter.Span().Text(), arg.Span().Text())
 	default:
-		d.WithHint("for another step, use while: i := 0; while i <= n { ...; i += %s }", arg.Span().Text())
+		d.WithHint("for another step, write Go's loop: for i := 0; i <= n; i += %s { ... }", arg.Span().Text())
 	}
 	p.damaged = append(p.damaged, span)
 	for !p.at(LBRACE) && !p.at(NEWLINE) && !p.at(EOF) {
 		p.next()
 	}
+}
+
+// forClauseAhead reports whether the header after for is Go's three-part
+// clause: two semicolons before the body's { on the line.
+func (p *parser) forClauseAhead() bool {
+	semis, depth := 0, 0
+	for i := p.pos; i < len(p.toks); i++ {
+		switch p.toks[i].Kind {
+		case LPAREN, LBRACK:
+			depth++
+		case RPAREN, RBRACK:
+			depth--
+		case SEMI:
+			if depth == 0 {
+				semis++
+			}
+		case LBRACE:
+			if depth == 0 {
+				return semis == 2
+			}
+			depth++
+		case RBRACE:
+			depth--
+		case NEWLINE, EOF:
+			return semis == 2
+		}
+	}
+	return false
+}
+
+// parseForClause parses Go's for init; cond; post { body } (ADR 0047).
+func (p *parser) parseForClause(start source.Span) Stmt {
+	s := &ForClauseStmt{}
+	p.noLambda++
+	if !p.at(SEMI) {
+		s.Init = p.parseSimpleStmt("init")
+	}
+	p.expect(SEMI, "after the for loop's init statement")
+	if !p.at(SEMI) {
+		s.Cond = p.parseExpr()
+	}
+	p.expect(SEMI, "after the for loop's condition")
+	if !p.at(LBRACE) {
+		s.Post = p.parseSimpleStmt("post")
+	}
+	p.noLambda--
+	if s.Init == nil && s.Cond == nil && s.Post == nil {
+		p.errorf(diag.EUnsupportedSyntax, start.Join(p.toks[p.pos-1].Span), "a loop without a condition is written while true").
+			WithFix(start.Join(p.toks[p.pos-1].Span), "while true", "write while true { ... }")
+	}
+	s.Body = p.parseHeaderBody("for", s.Cond)
+	s.S = p.spanFrom(start)
+	return s
+}
+
+// parseSimpleStmt parses the init or post statement of a three-part for: a
+// declaration with :=, an assignment, or ++ and --.
+func (p *parser) parseSimpleStmt(part string) Stmt {
+	st := p.parseStmt()
+	switch x := st.(type) {
+	case *LocalDecl:
+		if part == "post" {
+			p.errorf(diag.EInvalidUse, x.S, "the post statement of a for loop cannot declare variables")
+		}
+	case *AssignStmt, *IncDecStmt, *BadStmt:
+	case *ExprStmt:
+		if _, ok := x.X.(*CallExpr); !ok {
+			p.errorf(diag.EInvalidUse, x.Span(), "the %s statement of a for loop must be a declaration, an assignment, ++, --, or a call", part)
+		}
+	default:
+		if st != nil {
+			p.errorf(diag.EInvalidUse, st.Span(), "the %s statement of a for loop must be a declaration, an assignment, ++, --, or a call", part)
+		}
+	}
+	return st
 }
 
 // goCountingFor recognizes Go's counting loop, for i := lo; i < hi; i++,
@@ -3810,7 +3959,7 @@ func (p *parser) parsePrimary() Expr {
 	case IDENT:
 		p.next()
 		return &Ident{Name: t.Text, S: t.Span}
-	case INT, FLOAT, RUNE, STRING, RAWSTRING:
+	case INT, FLOAT, IMAG, RUNE, STRING, RAWSTRING:
 		p.next()
 		return &BasicLit{Kind: t.Kind, Raw: t.Text, Value: t.Value, S: t.Span}
 	case TEMPLATE_START:
@@ -4188,35 +4337,6 @@ func (p *parser) lambdaAhead() bool {
 // goCommaOkAssert matches Go's v, ok := x.(T).
 var goCommaOkAssert = regexp.MustCompile(`^(\w+), (\w+) := (.+)\.\(([^()]+)\)$`)
 
-// threePartFor returns the parts of Go's for init; cond; post header that
-// starts with the loop's first name, without consuming anything.
-func (p *parser) threePartFor(s *ForStmt) (init, cond, post string, ok bool) {
-	if len(s.Names) == 0 || !p.at(DEFINE) {
-		return "", "", "", false
-	}
-	var semis []int
-	end := -1
-	for i := p.pos; i < len(p.toks) && end < 0; i++ {
-		switch p.toks[i].Kind {
-		case SEMI:
-			semis = append(semis, i)
-		case LBRACE, NEWLINE, EOF:
-			end = i
-		}
-	}
-	if len(semis) != 2 || end < 0 {
-		return "", "", "", false
-	}
-	text := func(a, b int) string { // tokens a..b-1
-		if a >= b {
-			return ""
-		}
-		return p.toks[a].Span.Join(p.toks[b-1].Span).Text()
-	}
-	start := p.pos - 1 // the name before :=
-	return text(start, semis[0]), text(semis[0]+1, semis[1]), text(semis[1]+1, end), true
-}
-
 func (p *parser) parseIf() Expr {
 	start := p.next().Span // if
 	e := &IfExpr{}
@@ -4238,11 +4358,11 @@ func (p *parser) parseIf() Expr {
 			if m[1] != "_" {
 				d.WithNote("in the if, %s is smart-cast to %s: use it where Go used %s (when %s is a parameter or local)", m[3], m[4], m[1], m[3])
 			}
+			defer func() { p.damaged = append(p.damaged, e.S) }()
 		} else {
-			p.errorf(diag.EUnsupportedSyntax, start.Join(semi.Span), "if has no initializer statement in Lyth").
-				WithEdit(start.Join(semi.Span), init.Span().Text()+"\n"+indent+"if", "declare it on the line before: %s, then if ...", init.Span().Text())
+			e.Init = init // Go's if init; cond (ADR 0047)
 		}
-		defer func() { p.damaged = append(p.damaged, e.S) }()
+		_, _ = semi, indent
 	} else {
 		e.Cond = p.parseCondition()
 	}

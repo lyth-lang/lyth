@@ -211,7 +211,9 @@ type FuncInfo struct {
 	Sym    *FuncSym
 	Recv   *VarSym
 	Params []*VarSym
-	Unused []*VarSym
+	// Results are the named results, locals of the body (ADR 0047).
+	Results []*VarSym
+	Unused  []*VarSym
 	// DeferErr says a deferred call or block of the function may fail it
 	// (defer f.Close()?, throw in defer { }): Go names its error result.
 	DeferErr bool

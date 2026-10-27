@@ -848,6 +848,8 @@ func constRank(t types.Type) int {
 			return 2
 		case types.UntypedFloatKind:
 			return 3
+		case types.UntypedComplexKind:
+			return 4
 		}
 	}
 	return 0

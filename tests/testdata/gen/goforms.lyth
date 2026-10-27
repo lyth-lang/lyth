@@ -1,0 +1,53 @@
+// Go's forms, lowered to themselves (ADR 0047).
+import "errors"
+
+// Formatting can be controlled with these flags.
+const (
+    // FilterHTML skips html tags.
+    FilterHTML: uint = 1 << iota
+    StripEscape // strip escape characters
+    AlignRight
+)
+
+// Errors of the reader.
+var (
+    ErrQuote = errors.New("quote")
+    counter: int
+)
+
+interface Number {
+    ~int | ~int64 | ~float64
+}
+
+func Sum[T: Number](xs: []T): T {
+    total: T
+    for i := 0; i < len(xs); i++ {
+        total += xs[i]
+    }
+    return total
+}
+
+struct Writer {
+    buf: []byte
+}
+
+// Write appends p and reports the bytes consumed before a failure.
+func *Writer.Write(p: []byte): (n: int) throws {
+    defer {
+        if r := recover(); r != null {
+            throw errors.New("write failed")
+        }
+    }
+    for i, b in p {
+        self.buf = append(self.buf, b)
+        n = i + 1
+    }
+    return
+}
+
+func lookup(m: map[string]int, k: string): (v: int, ok: bool) {
+    if x, found := m[k]; found {
+        return x, true
+    }
+    return
+}

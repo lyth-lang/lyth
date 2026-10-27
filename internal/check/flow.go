@@ -156,6 +156,11 @@ func (f *flowScan) walk(n syntax.Node) {
 		f.walk(x.Body)
 		f.pop()
 		return
+	case *syntax.ForClauseStmt:
+		f.push() // the init's variables belong to the loop
+		syntax.Children(n, f.walk)
+		f.pop()
+		return
 	case *syntax.SelectCase:
 		if x.Op != nil {
 			f.walk(x.Op)

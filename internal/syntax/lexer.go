@@ -227,6 +227,18 @@ func (l *lexer) scanNumber() {
 			}
 		}
 	}
+	// An imaginary literal, 2i or 1.5i, as in Go.
+	if l.off < len(l.src) && l.src[l.off] == 'i' && (l.off+1 >= len(l.src) || !isLetter(rune(l.src[l.off+1])) && !isDigit(l.src[l.off+1])) {
+		l.off++
+		text := string(l.src[start:l.off])
+		if !validNumber(text[:len(text)-1], kind) {
+			l.errorf(diag.EInvalidNumber, start, l.off, "invalid number literal %s", text)
+			l.emit(ILLEGAL, start, l.off, text)
+			return
+		}
+		l.emit(IMAG, start, l.off, text)
+		return
+	}
 	// Trailing letters or digits make the literal invalid ("12abc", "0x").
 	bad := false
 	for l.off < len(l.src) {
@@ -584,6 +596,8 @@ func (l *lexer) scanOperator(start int) {
 		default:
 			one(OR)
 		}
+	case '~':
+		one(TILDE)
 	case '^':
 		if n1 == '=' {
 			two(XOR_ASSIGN)

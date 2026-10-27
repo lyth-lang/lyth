@@ -130,6 +130,7 @@ type Param struct {
 // ResultType is a function result: one type or a parenthesized tuple.
 type ResultType struct {
 	Types []TypeExpr
+	Names []*Ident // named results, (n: int, ok: bool) (ADR 0047); nil if unnamed
 	Tuple bool
 	S     source.Span
 }
@@ -200,7 +201,15 @@ type PropDecl struct {
 	Name       *Ident
 	Type       TypeExpr // may be nil
 	Value      Expr     // nil for `var x: T`, the zero value
+	Group      *DeclGroup
 	S          source.Span
+}
+
+// DeclGroup is Go's parenthesized group, const ( ... ) or var ( ... )
+// (ADR 0047). Its entries are ordinary declarations that point at it.
+type DeclGroup struct {
+	Doc string // the comment above the group
+	S   source.Span
 }
 
 // ConstDecl is a `const`, at package level or in a function body.
@@ -208,17 +217,24 @@ type ConstDecl struct {
 	Doc   string
 	Name  *Ident
 	Type  TypeExpr // may be nil
-	Value Expr
-	S     source.Span
+	Value Expr     // nil for an entry of a group that repeats an earlier one
+	Group *DeclGroup
+	// Iota is the entry's index in its group, the value of iota (0 outside
+	// a group). Repeat is the entry whose type and expression an entry
+	// without a value repeats, as in Go.
+	Iota   int
+	Repeat *ConstDecl
+	S      source.Span
 }
 
 // TypeAliasDecl is `type Name = Type` (spelled `typealias Name = Type`
 // before ADR 0037).
 type TypeAliasDecl struct {
-	Doc  string
-	Name *Ident
-	Type TypeExpr
-	S    source.Span
+	Doc        string
+	Name       *Ident
+	TypeParams []*TypeParam // type Set[T: comparable] = map[T]bool, Go 1.24
+	Type       TypeExpr
+	S          source.Span
 }
 
 // TypeDefDecl is `type Name[T] Underlying`, a Go defined type whose
@@ -324,10 +340,26 @@ type ChanType struct {
 
 // FuncType is `(A, B) -> R [throws]`.
 type FuncType struct {
-	Params []TypeExpr
-	Result *ResultType // nil means Unit
-	Throws bool
-	S      source.Span
+	Params     []TypeExpr
+	ParamNames []*Ident    // (name: string, depth: int) -> bool; nil when unnamed
+	Result     *ResultType // nil means Unit
+	Throws     bool
+	S          source.Span
+}
+
+// UnionType is a type set, Go's ~int | ~float64 (ADR 0047): a constraint, or
+// an element of an interface.
+type UnionType struct {
+	Terms []*UnionTerm
+	S     source.Span
+}
+
+// UnionTerm is one term of a type set: T, or ~T for every type whose
+// underlying type is T.
+type UnionTerm struct {
+	Tilde bool
+	Type  TypeExpr
+	S     source.Span
 }
 
 // BadType is a type that could not be parsed.
@@ -342,6 +374,7 @@ func (t *ChanType) Span() source.Span     { return t.S }
 func (t *ArrayType) Span() source.Span    { return t.S }
 func (t *FuncType) Span() source.Span     { return t.S }
 func (t *BadType) Span() source.Span      { return t.S }
+func (t *UnionType) Span() source.Span    { return t.S }
 
 func (*NamedType) typeNode()    {}
 func (*PointerType) typeNode()  {}
@@ -352,6 +385,7 @@ func (*ChanType) typeNode()     {}
 func (*ArrayType) typeNode()    {}
 func (*FuncType) typeNode()     {}
 func (*BadType) typeNode()      {}
+func (*UnionType) typeNode()    {}
 
 // ---------------------------------------------------------------------------
 // Statements
@@ -405,6 +439,17 @@ type ForStmt struct {
 	S     source.Span
 }
 
+// ForClauseStmt is Go's three-part loop, for init; cond; post { body }
+// (ADR 0047). Each part may be nil.
+type ForClauseStmt struct {
+	Label *Ident // `outer@ for ...`; nil if unlabeled
+	Init  Stmt
+	Cond  Expr
+	Post  Stmt
+	Body  *Block
+	S     source.Span
+}
+
 // WhileStmt is `while (cond) body`.
 type WhileStmt struct {
 	Label *Ident // `outer@ while ...`; nil if unlabeled
@@ -449,30 +494,32 @@ type GoStmt struct {
 // BadStmt is a statement that could not be parsed.
 type BadStmt struct{ S source.Span }
 
-func (s *Block) Span() source.Span      { return s.S }
-func (s *LocalDecl) Span() source.Span  { return s.S }
-func (s *AssignStmt) Span() source.Span { return s.S }
-func (s *IncDecStmt) Span() source.Span { return s.S }
-func (s *ExprStmt) Span() source.Span   { return s.X.Span() }
-func (s *ForStmt) Span() source.Span    { return s.S }
-func (s *WhileStmt) Span() source.Span  { return s.S }
-func (s *SelectStmt) Span() source.Span { return s.S }
-func (s *SelectCase) Span() source.Span { return s.S }
-func (s *DeferStmt) Span() source.Span  { return s.S }
-func (s *GoStmt) Span() source.Span     { return s.S }
-func (s *BadStmt) Span() source.Span    { return s.S }
+func (s *Block) Span() source.Span         { return s.S }
+func (s *LocalDecl) Span() source.Span     { return s.S }
+func (s *AssignStmt) Span() source.Span    { return s.S }
+func (s *IncDecStmt) Span() source.Span    { return s.S }
+func (s *ExprStmt) Span() source.Span      { return s.X.Span() }
+func (s *ForStmt) Span() source.Span       { return s.S }
+func (s *WhileStmt) Span() source.Span     { return s.S }
+func (s *ForClauseStmt) Span() source.Span { return s.S }
+func (s *SelectStmt) Span() source.Span    { return s.S }
+func (s *SelectCase) Span() source.Span    { return s.S }
+func (s *DeferStmt) Span() source.Span     { return s.S }
+func (s *GoStmt) Span() source.Span        { return s.S }
+func (s *BadStmt) Span() source.Span       { return s.S }
 
-func (*Block) stmtNode()      {}
-func (*LocalDecl) stmtNode()  {}
-func (*AssignStmt) stmtNode() {}
-func (*IncDecStmt) stmtNode() {}
-func (*ExprStmt) stmtNode()   {}
-func (*ForStmt) stmtNode()    {}
-func (*WhileStmt) stmtNode()  {}
-func (*SelectStmt) stmtNode() {}
-func (*DeferStmt) stmtNode()  {}
-func (*GoStmt) stmtNode()     {}
-func (*BadStmt) stmtNode()    {}
+func (*Block) stmtNode()         {}
+func (*LocalDecl) stmtNode()     {}
+func (*AssignStmt) stmtNode()    {}
+func (*IncDecStmt) stmtNode()    {}
+func (*ExprStmt) stmtNode()      {}
+func (*ForStmt) stmtNode()       {}
+func (*WhileStmt) stmtNode()     {}
+func (*ForClauseStmt) stmtNode() {}
+func (*SelectStmt) stmtNode()    {}
+func (*DeferStmt) stmtNode()     {}
+func (*GoStmt) stmtNode()        {}
+func (*BadStmt) stmtNode()       {}
 
 // ---------------------------------------------------------------------------
 // Expressions
@@ -650,6 +697,7 @@ type CatchExpr struct {
 // IfExpr is `if (cond) then [else else]`. Branches are always blocks; a
 // single-statement branch is wrapped in a synthetic block.
 type IfExpr struct {
+	Init Stmt // Go's if v := f(); cond (ADR 0047); nil if absent
 	Cond Expr
 	Then *Block
 	Else *Block // nil if absent; an `else if` is a block holding one IfExpr

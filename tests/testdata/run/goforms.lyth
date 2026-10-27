@@ -1,0 +1,161 @@
+// Go's forms Lyth adopted (ADR 0047): three-part for, const and var groups
+// with iota, named results, if with an init statement, and type sets.
+import "errors"
+import "fmt"
+import "strconv"
+
+// Formatting can be controlled with these flags.
+const (
+    FilterHTML: uint = 1 << iota
+    StripEscape // strip escape characters
+    AlignRight
+)
+
+type ErrorHandling int
+
+const (
+    ContinueOnError: ErrorHandling = iota
+    ExitOnError
+    PanicOnError
+)
+
+var (
+    ErrQuote = errors.New("quote")
+    counter: int
+)
+
+func sizes(): (int, int) {
+    const (
+        _ = iota
+        KB = 1 << (10 * iota)
+        MB
+    )
+    return KB, MB
+}
+
+func split(n: int): (q: int, r: int) {
+    q = n / 2
+    r = n % 2
+    return
+}
+
+struct Writer {
+    buf: []byte
+}
+
+// Write keeps the bytes before a failure, as tabwriter's Write reports them.
+func *Writer.Write(p: []byte): (n: int) throws {
+    defer {
+        if r := recover(); r != null {
+            throw errors.New("write failed after ${n} bytes")
+        }
+    }
+    for i, b in p {
+        if b == '!' {
+            panic("bang")
+        }
+        self.buf = append(self.buf, b)
+        n = i + 1
+    }
+    return
+}
+
+func classify(m: map[string]int, k: string): string {
+    if v, ok := m[k]; ok {
+        return "found ${v}"
+    } else if n, err := strconv.Atoi(k); err == null {
+        return "number ${n}"
+    }
+    return "missing"
+}
+
+interface Number {
+    ~int | ~int64 | ~float64
+}
+
+type Celsius float64
+
+func Sum[T: Number](xs: []T): T {
+    total: T
+    for x in xs {
+        total += x
+    }
+    return total
+}
+
+func Max[T: int | float64](a: T, b: T): T {
+    if a > b {
+        return a
+    }
+    return b
+}
+
+func main() {
+    seen: []int = []
+    for i := 0; i < 3; i++ {
+        seen = append(seen, i)
+    }
+    fmt.Println(seen)
+    pairs: []string = []
+    for i, j := 0, 4; i < j; i, j = i + 1, j - 1 {
+        pairs = append(pairs, "${i}-${j}")
+    }
+    fmt.Println(pairs)
+    n := 0
+    for i := 10; i > 0; i -= 3 {
+        if i == 7 {
+            continue // the post statement still runs
+        }
+        n += i
+    }
+    println(n)
+    funcs: [](() -> int) = []
+    for i := 0; i < 3; i++ {
+        funcs = append(funcs, { i }) // each iteration has its own i
+    }
+    got: []int = []
+    for f in funcs {
+        got = append(got, f())
+    }
+    fmt.Println(got)
+    k := 0
+    outer@ for ; k < 10; k++ {
+        for j := 0; ; j++ {
+            if j > 2 {
+                continue@outer
+            }
+            if k == 5 {
+                break@outer
+            }
+        }
+    }
+    println(k)
+
+    fmt.Println(FilterHTML, StripEscape, AlignRight, ContinueOnError, ExitOnError, PanicOnError)
+    kb, mb := sizes()
+    println(kb, mb, ErrQuote.Error(), counter)
+    q, r := split(7)
+    println(q, r)
+    w := &Writer()
+    w.Write([]byte("ab!c")) catch (e) {
+        println(e.Error())
+    }
+    println(string(w.buf))
+    m := ["a": 1]
+    println(classify(m, "a"), classify(m, "7"), classify(m, "z"))
+    println(Sum([1, 2, 3]), Sum([]Celsius{1.5, 2.5}), Max(3, 7), Max(2.5, 1.5))
+}
+
+// Output:
+// [0 1 2]
+// [0-4 1-3]
+// 15
+// [0 1 2]
+// 5
+// 1 2 4 0 1 2
+// 1024 1048576 quote 0
+// 3 1
+// write failed after 2 bytes
+// ab
+// found 1 number 7 missing
+// 6 4 7 2.5

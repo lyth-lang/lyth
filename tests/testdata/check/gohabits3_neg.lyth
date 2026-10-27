@@ -3,15 +3,15 @@
 import "fmt"
 import "errors"
 
-var ( // ERROR E0008 "Lyth has no var groups"
+var ( // a group (ADR 0047)
     ErrQuote = errors.New("quote")
     ErrCount = errors.New("count")
 )
 
 type ErrorHandling int
 
-const ( // ERROR E0008 "write const ContinueOnError = value"
-    ContinueOnError ErrorHandling = iota
+const (
+    ContinueOnError ErrorHandling = iota // ERROR E0008 "a const's type follows a colon in Lyth"
     ExitOnError
 )
 
@@ -21,7 +21,7 @@ type Value interface { // ERROR E0008 "an interface is declared interface Value"
 
 type funcValue func(string) error // ERROR E0008 "Lyth writes a function type as (A) -> R"
 
-func split(n: int): (q: int, r: int) { // ERROR E0008 "Lyth has no named results"
+func split(n: int): (q int, r: int) { // ERROR E0008 "a named result's type follows a colon in Lyth"
     return n / 2, n % 2
 }
 
@@ -54,7 +54,7 @@ parseField: // ERROR E0008 "labels are written parseField@ before the loop"
             break@parseField
         }
     }
-    for i := 0; ; i++ { // ERROR E0008 "while true { ...; i++ }"
+    for i := 0; ; i++ { // Go's loop (ADR 0047)
         if i > 2 {
             break
         }

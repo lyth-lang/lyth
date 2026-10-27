@@ -62,6 +62,17 @@ func Children(n Node, f func(Node)) {
 	case *WhileStmt:
 		visit(x.Cond)
 		visit(x.Body)
+	case *ForClauseStmt:
+		if x.Init != nil {
+			visit(x.Init)
+		}
+		if x.Cond != nil {
+			visit(x.Cond)
+		}
+		if x.Post != nil {
+			visit(x.Post)
+		}
+		visit(x.Body)
 	case *SelectStmt:
 		for _, sc := range x.Cases {
 			visit(sc)
@@ -153,6 +164,9 @@ func Children(n Node, f func(Node)) {
 		}
 		visit(x.Body)
 	case *IfExpr:
+		if x.Init != nil {
+			visit(x.Init)
+		}
 		visit(x.Cond)
 		visit(x.Then)
 		if x.Else != nil {

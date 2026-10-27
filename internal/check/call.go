@@ -171,8 +171,9 @@ func hasDefaults(fs *FuncSym) bool {
 // parameter; parameters left out take their default values. Arguments are
 // evaluated in the order written, then the defaults.
 func (c *Checker) boundCall(e *syntax.CallExpr, sig *types.Signature, args []*syntax.Arg, info *CallInfo, callee *FuncSym) *operand {
-	if len(sig.TypeParams) > 0 {
-		c.errorf(diag.EUnsupported, e.S, "named arguments and default values are not supported for generic functions yet").
+	generic := sig
+	if len(sig.TypeParams) > 0 && sig.Variadic {
+		c.errorf(diag.EUnsupported, e.S, "named arguments and default values are not supported for variadic generic functions yet").
 			WithHint("pass every argument positionally")
 		for _, a := range args {
 			c.value(a.Value, nil)
@@ -267,6 +268,24 @@ func (c *Checker) boundCall(e *syntax.CallExpr, sig *types.Signature, args []*sy
 			WithNote("signature: %s", sig)
 		ok = false
 	}
+	if len(generic.TypeParams) > 0 {
+		// Infer from the arguments given, in their parameters' places, then
+		// instantiate the whole signature: defaults are constants, which
+		// take the type the other arguments give their parameter.
+		inst, targs := c.inferBound(e, generic, args, argParams, info)
+		if inst == nil {
+			return invalid(e)
+		}
+		sig = inst
+		info.TypeArgs = targs
+		info.ExplicitTypeArgs = generic.GoSig != nil && !goInfers(generic.GoSig)
+		for _, d := range info.Defaults {
+			if tv, ok := d.Info.Types[d.Expr]; ok && tv.Value != nil && hasTypeParams(generic.Params[d.Param]) {
+				// The constant must fit the type this call gives T.
+				c.assign(&operand{mode: ModeValue, typ: untypedOf(tv.Value), val: tv.Value, expr: e}, sig.Params[d.Param], "default value of "+paramName(sig, d.Param))
+			}
+		}
+	}
 	info.Sig = sig
 	for _, a := range args {
 		info.Args = append(info.Args, a.Value)
@@ -285,15 +304,61 @@ func (c *Checker) boundCall(e *syntax.CallExpr, sig *types.Signature, args []*sy
 				pt = sl.Elem
 			}
 		}
-		x := c.value(a.Value, pt)
+		x := c.argValue(a.Value, pt) // inferBound checked some already
 		if !c.assign(x, pt, argContext(e, p, sig)) {
 			ok = false
 		}
 	}
+	c.preArgs = nil
 	if !ok {
 		return invalid(e)
 	}
 	return c.callResult(sig, info, e.S)
+}
+
+// untypedOf is the untyped constant type of a constant's kind.
+func untypedOf(v constant.Value) types.Type {
+	switch v.Kind() {
+	case constant.Bool:
+		return types.UntypedBool
+	case constant.String:
+		return types.UntypedString
+	case constant.Float:
+		return types.UntypedFloat
+	case constant.Complex:
+		return types.UntypedComplex
+	}
+	return types.UntypedInt
+}
+
+// inferBound infers the type arguments of a generic Lyth function called
+// with named arguments or defaults: the arguments given are unified with
+// their parameters, through a signature holding just those parameters.
+func (c *Checker) inferBound(e *syntax.CallExpr, sig *types.Signature, args []*syntax.Arg, argParams []int, info *CallInfo) (*types.Signature, []types.Type) {
+	given := *sig
+	given.Params, given.ParamNames = nil, nil
+	var ordered []*syntax.Arg
+	for i, a := range args {
+		if p := argParams[i]; p >= 0 {
+			given.Params = append(given.Params, sig.Params[p])
+			ordered = append(ordered, &syntax.Arg{Value: a.Value, Spread: a.Spread, S: a.S})
+		}
+	}
+	var pre bindings
+	if info.Ext != nil {
+		pre = info.Ext.Bind
+	}
+	inst, targs := c.inferCall(e, &given, ordered, nil, pre)
+	if inst == nil {
+		return nil, nil
+	}
+	bind := bindings{}
+	for i, tp := range sig.TypeParams {
+		bind[tp.Go] = targs[i]
+	}
+	full := substSig(sig, bind)
+	full.GoSig = inst.GoSig
+	return full, targs
 }
 
 func paramName(sig *types.Signature, p int) string {
@@ -1138,7 +1203,9 @@ func (c *Checker) builtinCall(e *syntax.CallExpr, k BuiltinKind, args []*syntax.
 		if t == nil {
 			return invalid(e)
 		}
-		ordered := types.TermsAll(t, func(term types.Type) bool { return types.IsNumeric(term) || types.IsString(term) })
+		ordered := types.TermsAll(t, func(term types.Type) bool {
+			return types.IsNumeric(term) && !types.IsComplex(term) || types.IsString(term)
+		})
 		if !ordered {
 			// A type parameter is ordered when every type its constraint
 			// allows is (T: cmp.Ordered).
@@ -1146,6 +1213,65 @@ func (c *Checker) builtinCall(e *syntax.CallExpr, k BuiltinKind, args []*syntax.
 			return invalid(e)
 		}
 		return &operand{mode: ModeValue, typ: t}
+	case BuiltinComplex:
+		// complex(re, im), as in Go: float64 parts make a complex128.
+		if !nargs(2, 2) {
+			return invalid(e)
+		}
+		ops := []*operand{c.value(args[0].Value, nil), c.value(args[1].Value, nil)}
+		if ops[0].mode == ModeInvalid || ops[1].mode == ModeInvalid {
+			return invalid(e)
+		}
+		if ops[0].val != nil && ops[1].val != nil && types.IsUntyped(ops[0].typ) && types.IsUntyped(ops[1].typ) {
+			if !types.IsNumeric(ops[0].typ) || !types.IsNumeric(ops[1].typ) || types.IsComplex(ops[0].typ) || types.IsComplex(ops[1].typ) {
+				c.errorf(diag.EInvalidOp, e.S, "complex takes two real numbers")
+				return invalid(e)
+			}
+			v := constant.BinaryOp(constant.ToFloat(ops[0].val), token.ADD, constant.MakeImag(constant.ToFloat(ops[1].val)))
+			return &operand{mode: ModeValue, typ: types.UntypedComplex, val: v}
+		}
+		t := c.commonType(ops, "complex argument")
+		if t == nil {
+			return invalid(e)
+		}
+		var res types.Type
+		switch b := types.BasicOf(t); {
+		case b != nil && b.Kind == types.Float32Kind:
+			res = types.Complex64
+		case b != nil && (b.Kind == types.Float64Kind || b.Kind == types.UntypedFloatKind || b.Kind == types.UntypedIntKind || b.Kind == types.UntypedRuneKind):
+			res = types.Complex128
+		default:
+			c.errorf(diag.EInvalidOp, e.S, "complex takes two float32 or float64 parts, not %s", t)
+			return invalid(e)
+		}
+		for i, x := range ops {
+			c.assign(x, t, "complex argument")
+			_ = i
+		}
+		return &operand{mode: ModeValue, typ: res}
+	case BuiltinReal, BuiltinImag:
+		if !nargs(1, 1) {
+			return invalid(e)
+		}
+		x := c.value(args[0].Value, nil)
+		if x.mode == ModeInvalid {
+			return invalid(e)
+		}
+		if x.val != nil && types.IsUntyped(x.typ) && types.IsNumeric(x.typ) {
+			v := constant.ToComplex(x.val)
+			if k == BuiltinReal {
+				return &operand{mode: ModeValue, typ: types.UntypedFloat, val: constant.Real(v)}
+			}
+			return &operand{mode: ModeValue, typ: types.UntypedFloat, val: constant.Imag(v)}
+		}
+		switch b := types.BasicOf(x.typ); {
+		case b != nil && b.Kind == types.Complex64Kind:
+			return &operand{mode: ModeValue, typ: types.Float32}
+		case b != nil && b.Kind == types.Complex128Kind:
+			return &operand{mode: ModeValue, typ: types.Float64}
+		}
+		c.errorf(diag.EInvalidOp, e.S, "%s takes a complex number, not %s", name, x.typ)
+		return invalid(e)
 	case BuiltinClear:
 		if !nargs(1, 1) {
 			return invalid(e)

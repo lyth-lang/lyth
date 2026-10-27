@@ -5,7 +5,7 @@ type ctxKey int
 
 const userKey ctxKey = 1 // ERROR E0008 "a const's type follows a colon in Lyth"
 
-func sum[T: int | float64](xs: []T): T { // ERROR E0008 "type-set constraints (int | float64) are not supported yet"
+func sum[T: int | float64](xs: []T): T { // a type set (ADR 0047)
     s: T
     for x in xs {
         s += x

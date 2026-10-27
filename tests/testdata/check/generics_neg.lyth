@@ -4,7 +4,7 @@ func unordered[T](a: T, b: T): bool = a < b // ERROR E0209 "operator < is not de
 
 func nullable[T](x: T?) {} // ERROR E0407 "nullable type parameters"
 
-func withDefault[T](x: T, n: int = 1) {} // ERROR E0601 "generic functions cannot have default values"
+func withDefault[T](x: T, n: int = 1) {} // defaults on generic functions (ADR 0047)
 
 func indexOf[T: comparable](xs: []T, x: T): int = 0
 

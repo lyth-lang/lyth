@@ -1,9 +1,11 @@
 // Go spellings from real packages (flag, encoding/csv) that lyth fix rewrites.
 import "errors"
 
-// ErrQuote reports a bad quote.
-var ErrQuote = errors.New("quote")
-var ErrCount = errors.New("count")
+var (
+    // ErrQuote reports a bad quote.
+    ErrQuote = errors.New("quote")
+    ErrCount = errors.New("count")
+)
 
 interface Value {
     String(): string

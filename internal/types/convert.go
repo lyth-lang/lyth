@@ -251,6 +251,8 @@ func GoBasic(b *Basic) *gotypes.Basic {
 		return gotypes.Typ[gotypes.UntypedFloat]
 	case UntypedStringKind:
 		return gotypes.Typ[gotypes.UntypedString]
+	case UntypedComplexKind:
+		return gotypes.Typ[gotypes.UntypedComplex]
 	}
 	return gotypes.Typ[gotypes.Invalid]
 }

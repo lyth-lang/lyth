@@ -312,6 +312,14 @@ func (c *Checker) ident(e *syntax.Ident) *operand {
 	} else {
 		sym = c.lookup(e.Name)
 	}
+	if sym == nil && e.Name == "iota" && c.iota != nil {
+		// iota in a constant: the index of the entry in its group (ADR 0047).
+		return &operand{mode: ModeValue, typ: types.UntypedInt, val: constant.MakeInt64(int64(*c.iota))}
+	}
+	if sym == nil && e.Name == "iota" {
+		c.errorf(diag.EUndefined, e.S, "iota is only defined in constant declarations")
+		return invalid(e)
+	}
 	if sym == nil && e.Name == "this" && c.fn != nil && c.fn.recv != nil {
 		// this is an ordinary name; undeclared in a method, it is Kotlin's receiver.
 		c.errorf(diag.EUnsupportedSyntax, e.S, "the receiver is called self").
@@ -326,8 +334,6 @@ func (c *Checker) ident(e *syntax.Ident) *operand {
 			d.WithFix(e.S, t, "Lyth uses Go's type names: %s", t)
 		} else if h, ok := kotlinBuilders[e.Name]; ok {
 			d.WithHint("%s", h)
-		} else if e.Name == "complex" || e.Name == "real" || e.Name == "imag" {
-			d.WithNote("complex numbers (complex, real, imag, and literals like 2i) are not supported in Lyth yet")
 		} else if s := c.suggest(e.Name); s != "" {
 			d.WithHint("did you mean %s?", s)
 		}
@@ -468,6 +474,13 @@ func (c *Checker) basicLit(e *syntax.BasicLit) *operand {
 			return invalid(e)
 		}
 		return &operand{mode: ModeValue, typ: types.UntypedFloat, val: v}
+	case syntax.IMAG:
+		v := constant.MakeFromLiteral(strings.ReplaceAll(e.Raw, "_", ""), token.IMAG, 0)
+		if v.Kind() == constant.Unknown {
+			c.errorf(diag.EInvalidNumber, e.S, "invalid imaginary literal %s", e.Raw)
+			return invalid(e)
+		}
+		return &operand{mode: ModeValue, typ: types.UntypedComplex, val: v}
 	case syntax.RUNE:
 		r := []rune(e.Value)
 		if len(r) != 1 {
@@ -853,6 +866,8 @@ func untypedOfKind(k types.BasicKind) types.Type {
 		return types.UntypedRune
 	case types.UntypedFloatKind:
 		return types.UntypedFloat
+	case types.UntypedComplexKind:
+		return types.UntypedComplex
 	}
 	return types.UntypedString
 }
@@ -2474,7 +2489,7 @@ func (c *Checker) returnValues(e *syntax.JumpExpr) {
 		return
 	}
 	if len(e.Values) == 0 {
-		if len(results) > 0 {
+		if len(results) > 0 && !fn.namedResults {
 			c.errorf(diag.EReturnMismatch, e.S, "missing return value; %s returns %s", fn.name, resultString(fn.sig))
 		}
 		return

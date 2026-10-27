@@ -57,7 +57,10 @@ type fnLower struct {
 	// code may set it (defer f()?, throw in defer { }); inDefer marks the
 	// lowerer of a deferred block, where ? and throw set it.
 	deferErr string
-	inDefer  bool
+	// namedResults: the function's results are named (ADR 0047), so a bare
+	// return is Go's bare return.
+	namedResults bool
+	inDefer      bool
 }
 
 // breakCtx is an enclosing Go statement that an unlabeled break exits.
@@ -577,6 +580,8 @@ func (fl *fnLower) stmt(s syntax.Stmt) {
 		fl.forStmt(s)
 	case *syntax.WhileStmt:
 		fl.whileStmt(s)
+	case *syntax.ForClauseStmt:
+		fl.forClauseStmt(s)
 	case *syntax.SelectStmt:
 		fl.selectStmt(s)
 	case *syntax.DeferStmt:
@@ -1154,6 +1159,10 @@ func (fl *fnLower) failResults(err ast.Expr) []ast.Expr {
 }
 
 func (fl *fnLower) returnStmt(values []syntax.Expr, span source.Span) {
+	if len(values) == 0 && fl.namedResults {
+		fl.emit(&ast.ReturnStmt{Return: fl.l.pos(span)}, span)
+		return
+	}
 	if len(values) == 1 && fl.info.PassThrough[values[0]] {
 		// return f(): the call's results, error included, as they are; so
 		// is return f()? where f's success values are the function's.
@@ -1224,6 +1233,28 @@ func (fl *fnLower) returnStmt(values []syntax.Expr, span source.Span) {
 		results = append(results, ast.NewIdent("nil"))
 	}
 	fl.emit(&ast.ReturnStmt{Return: fl.l.pos(span), Results: results}, span)
+}
+
+// ifWithInit lowers if init; cond (ADR 0047). The init goes into the Go
+// if's header when the if lowers to one if statement of its own; otherwise
+// the init and what the if lowers to share a block.
+func (fl *fnLower) ifWithInit(e *syntax.IfExpr, target ast.Expr, targetType types.Type) {
+	if fl.l.initsDone == nil {
+		fl.l.initsDone = map[*syntax.IfExpr]bool{}
+	}
+	fl.l.initsDone[e] = true
+	sub, init := fl.sub()
+	sub.stmt(e.Init)
+	sub, out := fl.sub()
+	sub.ifStmt(e, target, targetType)
+	if len(*init) == 1 && len(*out) == 1 {
+		if is, ok := (*out)[0].(*ast.IfStmt); ok && is.Init == nil {
+			is.Init = (*init)[0]
+			*fl.stmts = append(*fl.stmts, is)
+			return
+		}
+	}
+	fl.emit(&ast.BlockStmt{List: append(*init, *out...)}, e.S)
 }
 
 // elvisReturn lowers return a ?: b, where a is a plain read or call, to an
@@ -1302,6 +1333,10 @@ func (fl *fnLower) successResults(v ast.Expr) []ast.Expr {
 // ifStmt lowers an if. When target is non-nil, each branch assigns its value
 // to target instead of discarding it.
 func (fl *fnLower) ifStmt(e *syntax.IfExpr, target ast.Expr, targetType types.Type) {
+	if e.Init != nil && !fl.l.initsDone[e] {
+		fl.ifWithInit(e, target, targetType)
+		return
+	}
 	if is, ok := syntax.Unparen(e.Cond).(*syntax.IsExpr); ok && fl.info.TypeTests[is] != nil {
 		fl.ifTypeTest(e, is, target, targetType)
 		return
@@ -1735,6 +1770,62 @@ func constKindType(v constant.Value) gotypes.Type {
 	return gotypes.Typ[gotypes.Invalid]
 }
 
+// forClauseStmt lowers Go's three-part loop to itself (ADR 0047). A part
+// whose Lyth needs statements of its own keeps Go's meaning: the init's
+// statements go before the loop in a block of their own, the condition is
+// tested at the top of the body (continue still runs the post statement),
+// and a post statement becomes a call of a function literal.
+func (fl *fnLower) forClauseStmt(s *syntax.ForClauseStmt) {
+	lowered := func(st syntax.Stmt) []ast.Stmt {
+		sub, stmts := fl.sub()
+		sub.stmt(st)
+		return *stmts
+	}
+	fs := &ast.ForStmt{For: fl.l.pos(s.S)}
+	var pre []ast.Stmt // the init's statements when it needs more than one
+	if s.Init != nil {
+		if init := lowered(s.Init); len(init) == 1 {
+			fs.Init = init[0]
+		} else {
+			pre = init
+		}
+	}
+	var test []ast.Stmt // the condition's statements, at the top of the body
+	if s.Cond != nil {
+		sub, stmts := fl.sub()
+		cond := sub.expr(s.Cond)
+		if len(*stmts) == 0 {
+			fs.Cond = cond
+		} else {
+			brk := &ast.IfStmt{Cond: &ast.UnaryExpr{Op: token.NOT, X: cond}, Body: &ast.BlockStmt{List: []ast.Stmt{&ast.BranchStmt{Tok: token.BREAK}}}}
+			markTree(fl.l, brk, s.Cond.Span())
+			test = append(*stmts, brk)
+		}
+	}
+	body, ctx := fl.loopBody(s.Label, s.Body)
+	if s.Post != nil {
+		if post := lowered(s.Post); len(post) == 1 {
+			fs.Post = post[0]
+		} else {
+			fn := &ast.CallExpr{Fun: &ast.FuncLit{Type: &ast.FuncType{Params: &ast.FieldList{}}, Body: &ast.BlockStmt{List: post}}}
+			fs.Post = &ast.ExprStmt{X: fn}
+			markTree(fl.l, fs.Post, s.Post.Span())
+		}
+	}
+	if len(test) > 0 {
+		body = &ast.BlockStmt{List: append(test, body.List...), Lbrace: body.Lbrace, Rbrace: body.Rbrace}
+	}
+	fs.Body = body
+	if len(pre) == 0 {
+		fl.emitLoop(fs, ctx, s.S)
+		return
+	}
+	sub, stmts := fl.sub()
+	*stmts = append(*stmts, pre...)
+	sub.emitLoop(fs, ctx, s.S)
+	fl.emit(&ast.BlockStmt{List: *stmts}, s.S)
+}
+
 func (fl *fnLower) whileStmt(s *syntax.WhileStmt) {
 	sub, stmts := fl.sub()
 	cond := sub.expr(s.Cond)
@@ -2127,10 +2218,15 @@ func (fl *fnLower) localConst(d *syntax.ConstDecl) {
 	if !ok || k.Val == nil {
 		return
 	}
-	spec := &ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(k.GoName)}, Values: []ast.Expr{fl.expr(d.Value)}}
-	fl.l.mark(spec.Names[0], d.Name.S)
-	if d.Type != nil {
-		spec.Type = fl.l.typeExpr(k.Type)
+	spec := fl.constSpec(d, k)
+	if d.Group != nil {
+		fl.l.inFunc = true
+		gd := fl.l.groupSpec(d.Group, token.CONST, spec, d.Doc, d.S)
+		fl.l.inFunc = false
+		if gd != nil {
+			fl.emit(&ast.DeclStmt{Decl: gd}, d.Group.S)
+		}
+		return
 	}
 	fl.emit(&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.CONST, TokPos: fl.l.pos(d.S), Specs: []ast.Spec{spec}}}, d.S)
 }

@@ -32,6 +32,9 @@ type Config struct {
 
 // Checker holds the state of checking one package.
 type Checker struct {
+	// iota is the value of iota while a constant's initializer is checked,
+	// nil elsewhere (ADR 0047).
+	iota *int
 	gens int // generations handed out, for smart casts of reassigned locals (flow.go)
 	// badConstraint holds the type parameters whose constraint was
 	// reported as invalid, whose operations go unreported.
@@ -89,24 +92,25 @@ type Checker struct {
 
 // funcCtx describes the function or lambda whose body is being checked.
 type funcCtx struct {
-	sig        *types.Signature
-	fallible   bool // `?` and `throw` allowed
-	rawTuple   bool // results end in Error (not declared throws)
-	isLambda   bool
-	infer      bool         // lambda result type is inferred
-	inferred   []types.Type // collected return types for inference
-	recv       *VarSym
-	recvDecl   *types.TypeDecl
-	loopDepth  int
-	labels     []*syntax.Ident // labels of the enclosing loops, innermost last
-	isMain     bool
-	name       string
-	declSpan   source.Span
-	result     *syntax.ResultType // the declared result, for hints; nil for lambdas
-	noExpected bool               // a lambda with no expected type (f := { ... })
-	locals     []*VarSym
-	throwsSpan source.Span
-	noJumps    bool // defer/go blocks
+	sig          *types.Signature
+	namedResults bool // a bare return returns the named results
+	fallible     bool // `?` and `throw` allowed
+	rawTuple     bool // results end in Error (not declared throws)
+	isLambda     bool
+	infer        bool         // lambda result type is inferred
+	inferred     []types.Type // collected return types for inference
+	recv         *VarSym
+	recvDecl     *types.TypeDecl
+	loopDepth    int
+	labels       []*syntax.Ident // labels of the enclosing loops, innermost last
+	isMain       bool
+	name         string
+	declSpan     source.Span
+	result       *syntax.ResultType // the declared result, for hints; nil for lambdas
+	noExpected   bool               // a lambda with no expected type (f := { ... })
+	locals       []*VarSym
+	throwsSpan   source.Span
+	noJumps      bool // defer/go blocks
 	// deferOf is the function whose error a deferred block's ? and throw
 	// set (when it has none yet), and deferStmt that defer statement.
 	deferOf   *funcCtx
@@ -565,6 +569,7 @@ var builtinNames = map[string]BuiltinKind{
 	"delete": BuiltinDelete, "make": BuiltinMake, "new": BuiltinNew, "panic": BuiltinPanic,
 	"recover": BuiltinRecover, "min": BuiltinMin, "max": BuiltinMax, "clear": BuiltinClear,
 	"close": BuiltinClose, "print": BuiltinPrint, "println": BuiltinPrintln,
+	"complex": BuiltinComplex, "real": BuiltinReal, "imag": BuiltinImag,
 }
 
 func universe() *Scope {

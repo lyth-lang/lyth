@@ -499,7 +499,7 @@ func scopeSpans(f *syntax.File) []source.Span {
 	for _, d := range f.Decls {
 		syntax.Walk(d, func(n syntax.Node) {
 			switch n.(type) {
-			case *syntax.Block, *syntax.FunDecl, *syntax.LambdaExpr, *syntax.ForStmt, *syntax.CatchExpr, *syntax.WhenExpr, *syntax.SelectCase:
+			case *syntax.Block, *syntax.FunDecl, *syntax.LambdaExpr, *syntax.ForStmt, *syntax.ForClauseStmt, *syntax.CatchExpr, *syntax.WhenExpr, *syntax.SelectCase:
 				out = append(out, n.Span())
 			}
 		})

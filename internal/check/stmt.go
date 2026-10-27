@@ -139,6 +139,8 @@ func (c *Checker) stmt(s syntax.Stmt) bool {
 		c.forStmt(s)
 	case *syntax.WhileStmt:
 		return c.whileStmt(s)
+	case *syntax.ForClauseStmt:
+		return c.forClauseStmt(s)
 	case *syntax.SelectStmt:
 		return c.selectStmt(s)
 	case *syntax.DeferStmt:
@@ -831,6 +833,19 @@ type ifResult struct {
 }
 
 func (c *Checker) ifExpr(e *syntax.IfExpr, want types.Type, needValue bool) ifResult {
+	if e.Init == nil {
+		return c.ifBranches(e, want, needValue)
+	}
+	// if v := f(); cond: the init's names are in scope in every branch.
+	var res ifResult
+	c.withScope(newScope(c.scope, BlockScope), func() {
+		c.stmt(e.Init)
+		res = c.ifBranches(e, want, needValue)
+	})
+	return res
+}
+
+func (c *Checker) ifBranches(e *syntax.IfExpr, want types.Type, needValue bool) ifResult {
 	_, nt, nf := c.cond(e.Cond)
 	var tr, er blockResult
 	bf := c.startBranches()
@@ -1376,6 +1391,35 @@ func (c *Checker) loop(label *syntax.Ident, body func()) {
 	c.fn.loopDepth--
 }
 
+// forClauseStmt checks Go's three-part loop (ADR 0047): init in the loop's
+// scope, the condition before every iteration, the post statement after the
+// body. Like while true, a loop without a condition terminates unless it
+// breaks.
+func (c *Checker) forClauseStmt(s *syntax.ForClauseStmt) bool {
+	terminates := false
+	c.withScope(newScope(c.scope, BlockScope), func() {
+		if s.Init != nil {
+			c.stmt(s.Init)
+		}
+		c.forgetLoopAssigned(s) // the condition runs again after the body and post
+		var nt narrowing
+		if s.Cond != nil {
+			_, nt, _ = c.cond(s.Cond)
+		}
+		breaks := c.countBreaks(s.Body, s.Label)
+		c.withScope(c.narrowedScope(nt), func() {
+			c.loop(s.Label, func() {
+				c.block(s.Body)
+				if s.Post != nil {
+					c.stmt(s.Post)
+				}
+			})
+		})
+		terminates = s.Cond == nil && breaks == 0
+	})
+	return terminates
+}
+
 func (c *Checker) whileStmt(s *syntax.WhileStmt) bool {
 	c.forgetLoopAssigned(s.Body) // the condition runs again after the body
 	cond, nt, _ := c.cond(s.Cond)
@@ -1470,7 +1514,7 @@ func (c *Checker) countBreaks(b *syntax.Block, label *syntax.Ident) int {
 		switch x := nd.(type) {
 		case *syntax.LambdaExpr:
 			return // a break cannot leave a lambda
-		case *syntax.ForStmt, *syntax.WhileStmt:
+		case *syntax.ForStmt, *syntax.WhileStmt, *syntax.ForClauseStmt:
 			// Nested loops have their own unlabeled breaks; break@label
 			// still exits this loop.
 			nested = true

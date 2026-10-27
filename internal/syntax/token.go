@@ -16,6 +16,7 @@ const (
 	IDENT
 	INT
 	FLOAT
+	IMAG // 2i, 1.5i
 	RUNE
 	STRING    // "..." without templates; Value holds the decoded text
 	RAWSTRING // `...`; Value holds the text
@@ -27,16 +28,17 @@ const (
 	TEMPLATE_END        // closing quote
 
 	operatorBegin
-	ADD // +
-	SUB // -
-	MUL // *
-	QUO // /
-	REM // %
-	AND // &
-	OR  // |
-	XOR // ^
-	SHL // <<
-	SHR // >>
+	ADD   // +
+	SUB   // -
+	MUL   // *
+	QUO   // /
+	REM   // %
+	AND   // &
+	OR    // |
+	XOR   // ^
+	TILDE // ~, in type sets
+	SHL   // <<
+	SHR   // >>
 
 	LAND // &&
 	LOR  // ||
@@ -132,11 +134,11 @@ const (
 
 var kindNames = map[Kind]string{
 	ILLEGAL: "illegal token", EOF: "end of file", NEWLINE: "newline",
-	IDENT: "identifier", INT: "integer literal", FLOAT: "float literal", RUNE: "rune literal",
+	IDENT: "identifier", INT: "integer literal", FLOAT: "float literal", IMAG: "imaginary literal", RUNE: "rune literal",
 	STRING: "string literal", RAWSTRING: "raw string literal",
 	TEMPLATE_START: "string literal", TEMPLATE_TEXT: "string text", TEMPLATE_EXPR_START: "${",
 	TEMPLATE_EXPR_END: "}", TEMPLATE_END: "end of string",
-	ADD: "+", SUB: "-", MUL: "*", QUO: "/", REM: "%", AND: "&", OR: "|", XOR: "^", SHL: "<<", SHR: ">>",
+	ADD: "+", SUB: "-", MUL: "*", QUO: "/", REM: "%", AND: "&", OR: "|", XOR: "^", TILDE: "~", SHL: "<<", SHR: ">>",
 	LAND: "&&", LOR: "||", NOT: "!", EQL: "==", NEQ: "!=", LSS: "<", LEQ: "<=", GTR: ">", GEQ: ">=",
 	ASSIGN: "=", ADD_ASSIGN: "+=", SUB_ASSIGN: "-=", MUL_ASSIGN: "*=", QUO_ASSIGN: "/=", REM_ASSIGN: "%=",
 	AND_ASSIGN: "&=", OR_ASSIGN: "|=", XOR_ASSIGN: "^=", SHL_ASSIGN: "<<=", SHR_ASSIGN: ">>=",

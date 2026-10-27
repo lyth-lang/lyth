@@ -148,6 +148,9 @@ type fileLowerer struct {
 	decls        []ast.Decl
 	runName      string
 	bodyComments []BodyComment
+	groups       map[*syntax.DeclGroup]*ast.GenDecl // const and var groups, by their first entry
+	inFunc       bool                               // lowering a function body
+	initsDone    map[*syntax.IfExpr]bool            // ifs whose init statement is lowered
 	recvNames    map[*types.TypeDecl]string
 }
 
@@ -313,6 +316,29 @@ func (l *fileLowerer) typeExpr(t types.Type) ast.Expr {
 // type aliases it names (mws: []Middleware is []Middleware in Go too, not the
 // function type), which the resolved type no longer records.
 func (l *fileLowerer) declTypeExpr(te syntax.TypeExpr, t types.Type) ast.Expr {
+	if ft, ok := te.(*syntax.FuncType); ok && len(ft.ParamNames) > 0 {
+		// A function type written with parameter names keeps them in Go.
+		if x, ok := l.typeExpr(t).(*ast.FuncType); ok && len(x.Params.List) == len(ft.ParamNames) {
+			for i, n := range ft.ParamNames {
+				x.Params.List[i].Names = []*ast.Ident{ast.NewIdent(check.MemberGoName(n.Name))}
+			}
+			return x
+		}
+	}
+	if at, ok := te.(*syntax.ArrayType); ok && at.Len != nil {
+		// [poolSize]byte keeps the length as written, not the number.
+		if a, ok := types.Base(t).(*types.Array); ok {
+			if _, lit := syntax.Unparen(at.Len).(*syntax.BasicLit); !lit {
+				fl := newFnLower(l, &types.Signature{}, false)
+				fl.initializer = true
+				var stmts []ast.Stmt
+				fl.stmts = &stmts
+				if n := fl.expr(at.Len); len(stmts) == 0 {
+					return &ast.ArrayType{Len: n, Elt: l.declTypeExpr(at.Elem, a.Elem)}
+				}
+			}
+		}
+	}
 	if te == nil || !l.namesAlias(te) {
 		return l.typeExpr(t)
 	}
@@ -322,10 +348,22 @@ func (l *fileLowerer) declTypeExpr(te syntax.TypeExpr, t types.Type) ast.Expr {
 		if ts == nil || ts.Alias == nil || ts.Pkg == nil {
 			break
 		}
-		if ts.Pkg.Path == l.pkg.Path {
-			return ast.NewIdent(ts.GoName)
+		var name ast.Expr = ast.NewIdent(ts.GoName)
+		if ts.Pkg.Path != l.pkg.Path {
+			name = sel(l.useImport(ts.Pkg.Path, ts.Pkg.Name), ts.GoName)
 		}
-		return sel(l.useImport(ts.Pkg.Path, ts.Pkg.Name), ts.GoName)
+		if len(x.Args) == 0 {
+			return name
+		}
+		// Set[string]: a generic alias keeps its type arguments.
+		var args []ast.Expr
+		for _, a := range x.Args {
+			args = append(args, l.declTypeExpr(a, l.info.TypeExprs[a]))
+		}
+		if len(args) == 1 {
+			return &ast.IndexExpr{X: name, Index: args[0]}
+		}
+		return &ast.IndexListExpr{X: name, Indices: args}
 	case *syntax.NullableType:
 		base := types.Base(t)
 		if types.IsNilable(base) {
@@ -407,9 +445,27 @@ func (l *fileLowerer) goTypeExpr(t gotypes.Type) ast.Expr {
 		return &ast.ChanType{Dir: dir, Value: l.goTypeExpr(t.Elem()), Begin: 1, Arrow: 1}
 	case *gotypes.Signature:
 		return l.goFuncType(t)
+	case *gotypes.Union:
+		// A type set: ~int | ~float64 (ADR 0047).
+		var x ast.Expr
+		for i := 0; i < t.Len(); i++ {
+			var term ast.Expr = l.goTypeExpr(t.Term(i).Type())
+			if t.Term(i).Tilde() {
+				term = &ast.UnaryExpr{Op: token.TILDE, X: term}
+			}
+			if x == nil {
+				x = term
+			} else {
+				x = &ast.BinaryExpr{X: x, Op: token.OR, Y: term}
+			}
+		}
+		return x
 	case *gotypes.Interface:
 		if t.Empty() {
 			return ast.NewIdent("any")
+		}
+		if t.IsImplicit() && t.NumEmbeddeds() == 1 {
+			return l.goTypeExpr(t.EmbeddedType(0)) // [T ~int | ~float64]
 		}
 		it := &ast.InterfaceType{Methods: &ast.FieldList{}}
 		for i := 0; i < t.NumExplicitMethods(); i++ {
@@ -633,7 +689,7 @@ func (l *fileLowerer) definedDecl(d *syntax.TypeDefDecl) {
 	if ts == nil || ts.Decl == nil || ts.Decl.Underlying == nil {
 		return
 	}
-	spec := &ast.TypeSpec{Name: ast.NewIdent(ts.Decl.GoName), Type: l.typeExpr(ts.Decl.Underlying)}
+	spec := &ast.TypeSpec{Name: ast.NewIdent(ts.Decl.GoName), Type: l.declTypeExpr(d.Type, ts.Decl.Underlying)}
 	if len(ts.Decl.TypeParams) > 0 {
 		spec.TypeParams = l.typeParamList(ts.Decl.TypeParams)
 	}
@@ -648,7 +704,10 @@ func (l *fileLowerer) aliasDecl(d *syntax.TypeAliasDecl) {
 	if ts == nil || ts.Type == nil {
 		return
 	}
-	spec := &ast.TypeSpec{Name: ast.NewIdent(ts.GoName), Assign: 1, Type: l.typeExpr(ts.Type)}
+	spec := &ast.TypeSpec{Name: ast.NewIdent(ts.GoName), Assign: 1, Type: l.declTypeExpr(d.Type, ts.Type)}
+	if len(ts.AliasParams) > 0 {
+		spec.TypeParams = l.typeParamList(ts.AliasParams) // Go 1.24's generic aliases
+	}
 	l.mark(spec.Name, d.Name.S)
 	gd := &ast.GenDecl{Doc: docGroup(d.Doc), Tok: token.TYPE, TokPos: l.pos(d.S), Specs: []ast.Spec{spec}}
 	l.mark(gd, d.S)
@@ -1169,6 +1228,19 @@ func (l *fileLowerer) funcType(sig *types.Signature, names []string) *ast.FuncTy
 			ft.Results.List = append(ft.Results.List, &ast.Field{Type: r})
 		}
 	}
+	if n := len(sig.Results); n > 0 && len(sig.ResultNames) == n {
+		// Named results (ADR 0047); a throws function's error is err.
+		errName := "err"
+		for i, name := range sig.ResultNames {
+			ft.Results.List[i].Names = []*ast.Ident{ast.NewIdent(check.MemberGoName(name))}
+			if name == "err" {
+				errName = "retErr"
+			}
+		}
+		if sig.Throws {
+			ft.Results.List[n].Names = []*ast.Ident{ast.NewIdent(errName)}
+		}
+	}
 	return ft
 }
 
@@ -1226,7 +1298,23 @@ func (l *fileLowerer) funDecl(d *syntax.FunDecl) {
 	ft := l.funcType(sym.Sig, names)
 	ft.Func = l.pos(d.S)
 	l.declAliases(ft, sym.Sig, d)
-	if fi.DeferErr && d.Body != nil && ft.Results != nil {
+	if len(fi.Results) > 0 && ft.Results != nil {
+		// Named results (ADR 0047): the Go results are the body's locals; a
+		// throws function names its error result too.
+		fl.namedResults = true
+		for i, rv := range fi.Results {
+			if i < len(ft.Results.List) {
+				ft.Results.List[i].Names = []*ast.Ident{ast.NewIdent(fl.declareLocal(rv))}
+			}
+		}
+		if sym.Sig.Throws && d.Body != nil {
+			fl.deferErr = fl.deferResultName(d)
+			ft.Results.List[len(ft.Results.List)-1].Names = []*ast.Ident{ast.NewIdent(fl.deferErr)}
+			if !fi.DeferErr {
+				fl.deferErr = "" // only named: ? and throw return as usual
+			}
+		}
+	} else if fi.DeferErr && d.Body != nil && ft.Results != nil {
 		// Deferred code sets the error result, which Go lets only a named
 		// result do: func f() (_ T, err error).
 		fl.deferErr = fl.deferResultName(d)
@@ -1378,6 +1466,12 @@ func startAt(e ast.Expr, pos token.Pos) {
 		startAt(e.X, pos)
 	case *ast.IndexListExpr:
 		startAt(e.X, pos)
+	case *ast.UnaryExpr: // ~int
+		e.OpPos = pos
+	case *ast.BinaryExpr: // ~int | ~float64
+		startAt(e.X, pos)
+		e.OpPos = pos
+		startAt(e.Y, pos)
 	}
 }
 
@@ -1539,10 +1633,57 @@ func (l *fileLowerer) propDecl(d *syntax.PropDecl) {
 			l.useEmbed()
 		}
 	}
+	if d.Group != nil {
+		doc := d.Doc
+		for _, dir := range d.Directives {
+			doc = strings.TrimPrefix(doc+"\n"+dir.Text, "\n")
+		}
+		l.groupSpec(d.Group, token.VAR, spec, doc, d.S)
+		return
+	}
 	l.keepLineComment(d.S)
 	gd := &ast.GenDecl{Doc: docWithDirectives(d.Doc, d.Directives), Tok: token.VAR, TokPos: l.pos(d.S), Specs: []ast.Spec{spec}}
 	l.mark(gd, d.S)
 	l.decls = append(l.decls, gd)
+}
+
+// groupSpec adds the spec of a group entry (ADR 0047) to the Go group,
+// declaring the group at its first entry. The entry keeps its doc and its
+// trailing comment at their Lyth lines. fl is set for a group in a function.
+func (l *fileLowerer) groupSpec(g *syntax.DeclGroup, tok token.Token, spec *ast.ValueSpec, doc string, at source.Span) *ast.GenDecl {
+	spec.Doc = l.memberDoc(doc, at)
+	spec.Names[0].NamePos = l.pos(at)
+	spec.Comment = l.lineComment(at)
+	if gd := l.groups[g]; gd != nil {
+		gd.Specs = append(gd.Specs, spec)
+		return nil
+	}
+	gd := &ast.GenDecl{Doc: l.memberDoc(g.Doc, g.S), Tok: tok, TokPos: l.pos(g.S), Lparen: l.pos(g.S) + 1, Rparen: l.endPos(g.S), Specs: []ast.Spec{spec}}
+	l.mark(gd, g.S)
+	if l.groups == nil {
+		l.groups = map[*syntax.DeclGroup]*ast.GenDecl{}
+	}
+	l.groups[g] = gd
+	if tok == token.CONST && l.inFunc {
+		return gd // the caller emits it as a statement
+	}
+	l.decls = append(l.decls, gd)
+	return gd
+}
+
+// constSpec lowers a constant's name, type, and value; an entry repeating
+// an earlier one of its group is the name alone, as in Go.
+func (fl *fnLower) constSpec(d *syntax.ConstDecl, k *check.ConstSym) *ast.ValueSpec {
+	spec := &ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(k.GoName)}}
+	fl.l.mark(spec.Names[0], d.Name.S)
+	if d.Repeat != nil {
+		return spec
+	}
+	spec.Values = []ast.Expr{fl.expr(d.Value)}
+	if d.Type != nil {
+		spec.Type = fl.l.typeExpr(k.Type)
+	}
+	return spec
 }
 
 func (l *fileLowerer) constDecl(d *syntax.ConstDecl) {
@@ -1554,10 +1695,10 @@ func (l *fileLowerer) constDecl(d *syntax.ConstDecl) {
 	fl.initializer = true
 	var stmts []ast.Stmt
 	fl.stmts = &stmts
-	spec := &ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(k.GoName)}, Values: []ast.Expr{fl.expr(d.Value)}}
-	l.mark(spec.Names[0], d.Name.S)
-	if d.Type != nil {
-		spec.Type = l.typeExpr(k.Type)
+	spec := fl.constSpec(d, k)
+	if d.Group != nil {
+		l.groupSpec(d.Group, token.CONST, spec, d.Doc, d.S)
+		return
 	}
 	l.keepLineComment(d.S)
 	gd := &ast.GenDecl{Doc: docGroup(d.Doc), Tok: token.CONST, TokPos: l.pos(d.S), Specs: []ast.Spec{spec}}
@@ -1640,6 +1781,8 @@ func sourceConstType(info *check.Info, e syntax.Expr) gotypes.Type {
 			return gotypes.Typ[gotypes.UntypedInt]
 		case syntax.FLOAT:
 			return gotypes.Typ[gotypes.UntypedFloat]
+		case syntax.IMAG:
+			return gotypes.Typ[gotypes.UntypedComplex]
 		case syntax.RUNE:
 			return gotypes.Typ[gotypes.UntypedRune]
 		case syntax.STRING, syntax.RAWSTRING:

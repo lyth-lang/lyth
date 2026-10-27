@@ -381,7 +381,7 @@ func (fl *fnLower) builtin(e *syntax.CallExpr, ci *check.CallInfo) ast.Expr {
 		check.BuiltinLen: "len", check.BuiltinCap: "cap", check.BuiltinAppend: "append", check.BuiltinCopy: "copy",
 		check.BuiltinDelete: "delete", check.BuiltinMake: "make", check.BuiltinNew: "new", check.BuiltinPanic: "panic",
 		check.BuiltinRecover: "recover", check.BuiltinMin: "min", check.BuiltinMax: "max", check.BuiltinClear: "clear",
-		check.BuiltinClose: "close",
+		check.BuiltinClose: "close", check.BuiltinComplex: "complex", check.BuiltinReal: "real", check.BuiltinImag: "imag",
 	}[ci.Builtin]
 	var fun ast.Expr = ast.NewIdent(name)
 	switch ci.Builtin {

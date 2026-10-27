@@ -238,11 +238,18 @@ func IsFloat(t Type) bool {
 
 // IsComplex reports whether t is a complex type.
 func IsComplex(t Type) bool {
-	return kindIs(t, func(k BasicKind) bool { return k == Complex64Kind || k == Complex128Kind })
+	return kindIs(t, func(k BasicKind) bool { return k == Complex64Kind || k == Complex128Kind || k == UntypedComplexKind })
 }
 
 // IsNumeric reports whether t is a numeric type.
-func IsNumeric(t Type) bool { return IsInteger(t) || IsFloat(t) || IsComplex(t) }
+func IsNumeric(t Type) bool {
+	if _, ok := Base(t).(*TypeParam); ok {
+		// int | float64: every type the parameter allows is numeric, though
+		// not all are integers or all floats.
+		return TermsAll(t, IsNumeric)
+	}
+	return IsInteger(t) || IsFloat(t) || IsComplex(t)
+}
 
 // IsString reports whether t is a string type.
 func IsString(t Type) bool {
@@ -269,6 +276,8 @@ func DefaultType(t Type) Type {
 		return Rune
 	case UntypedFloatKind:
 		return Float64
+	case UntypedComplexKind:
+		return Complex128
 	case UntypedStringKind:
 		return String
 	}

@@ -578,6 +578,8 @@ func (fl *fnLower) basicLit(e *syntax.BasicLit) ast.Expr {
 		return &ast.BasicLit{Kind: token.INT, Value: e.Raw}
 	case syntax.FLOAT:
 		return &ast.BasicLit{Kind: token.FLOAT, Value: e.Raw}
+	case syntax.IMAG:
+		return &ast.BasicLit{Kind: token.IMAG, Value: e.Raw}
 	case syntax.RUNE:
 		r, _ := utf8.DecodeRuneInString(e.Value)
 		// Keep the source spelling ('\xff', '\v') when Go reads it as the same rune.

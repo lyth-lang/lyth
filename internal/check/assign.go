@@ -37,8 +37,10 @@ func (c *Checker) assign(x *operand, target types.Type, context string) bool {
 		if nb, ok := tb.(*types.Nullable); ok {
 			tb = nb.Elem
 		}
-		if types.IsInterface(tb) {
-			// Constants assigned to interfaces take their default type.
+		_, isTypeParam := tb.(*types.TypeParam)
+		if types.IsInterface(tb) && !isTypeParam {
+			// Constants assigned to interfaces take their default type; one
+			// assigned to a type parameter must fit every type it allows.
 			def := types.DefaultType(x.typ)
 			x.typ = def
 			c.record(x)

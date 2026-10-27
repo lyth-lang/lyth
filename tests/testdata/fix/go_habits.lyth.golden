@@ -44,7 +44,7 @@ func main() {
         done.send(true)
     }
     done.receive()
-    for i in 0..<2 {
+    for i := 0; i < 2; i++ {
         fmt.Println(i)
     }
     for x in []int{1, 2} {

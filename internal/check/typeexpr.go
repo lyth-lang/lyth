@@ -26,12 +26,143 @@ func (c *Checker) resolveType(te syntax.TypeExpr) types.Type {
 // constraintOnly reports whether t is an interface Go allows only as a
 // constraint: Comparable, or one with a type set such as cmp.Ordered.
 func constraintOnly(t types.Type) bool {
-	n, ok := types.Base(t).(*types.Named)
-	if !ok || n.Go == nil {
-		return false
+	switch b := types.Base(t).(type) {
+	case *types.GoType:
+		iface, ok := b.T.Underlying().(*gotypes.Interface)
+		return ok && hasTypeTerms(iface)
+	case *types.Named:
+		if b.Decl != nil {
+			// A Lyth interface with a type set (ADR 0047), directly or
+			// through an embedded interface.
+			if b.Decl.Kind != types.InterfaceDecl {
+				return false
+			}
+			for _, e := range b.Decl.Embeds {
+				if constraintOnly(e) {
+					return true
+				}
+			}
+			return false
+		}
+		if b.Go == nil {
+			return false
+		}
+		iface, ok := b.Go.Underlying().(*gotypes.Interface)
+		return ok && !iface.IsMethodSet()
 	}
-	iface, ok := n.Go.Underlying().(*gotypes.Interface)
-	return ok && !iface.IsMethodSet()
+	return false
+}
+
+// hasTypeTerms reports whether a Go interface holds a type set, looking at
+// its embedded elements only, so that an interface still being declared is
+// never completed.
+func hasTypeTerms(iface *gotypes.Interface) bool {
+	for i := 0; i < iface.NumEmbeddeds(); i++ {
+		switch e := iface.EmbeddedType(i).(type) {
+		case *gotypes.Union:
+			return true
+		case *gotypes.Interface:
+			if hasTypeTerms(e) {
+				return true
+			}
+		default:
+			if u, ok := e.Underlying().(*gotypes.Interface); ok {
+				if hasTypeTerms(u) {
+					return true
+				}
+			} else if e.Underlying() != nil {
+				return true // interface { int }
+			}
+		}
+	}
+	return false
+}
+
+// unionType resolves a type set, ~int | ~float64 (ADR 0047), to the implicit
+// Go interface holding the union, as Go reads [T ~int | ~float64].
+func (c *Checker) unionType(u *syntax.UnionType) types.Type {
+	save := c.inConstraint
+	c.inConstraint = true
+	defer func() { c.inConstraint = save }()
+	var terms []*gotypes.Term
+	for _, tm := range u.Terms {
+		t := c.resolveType(tm.Type)
+		if t == types.Invalid {
+			return types.Invalid
+		}
+		if types.IsNullable(t) {
+			c.errorf(diag.ETypeMismatch, tm.S, "a type set cannot hold the nullable %s", t)
+			return types.Invalid
+		}
+		if _, ok := types.Base(t).(*types.TypeParam); ok {
+			c.errorf(diag.EInvalidUse, tm.S, "a type set cannot hold the type parameter %s", t)
+			return types.Invalid
+		}
+		g := types.Lower(t)
+		if g == nil || g.Underlying() == nil {
+			return types.Invalid // a type still being declared, reported elsewhere
+		}
+		if iface, ok := g.Underlying().(*gotypes.Interface); ok && iface.NumExplicitMethods() > 0 {
+			c.errorf(diag.EInvalidUse, tm.S, "a type set cannot hold %s, an interface with methods", t)
+			return types.Invalid
+		}
+		if tm.Tilde && !gotypes.Identical(g, g.Underlying()) {
+			c.errorf(diag.EInvalidUse, tm.S, "~%s: the type after ~ must be its own underlying type", t).
+				WithHint("write ~%s", types.Lift(g.Underlying()))
+			return types.Invalid
+		}
+		terms = append(terms, gotypes.NewTerm(tm.Tilde, g))
+	}
+	iface := gotypes.NewInterfaceType(nil, []gotypes.Type{gotypes.NewUnion(terms)})
+	iface.MarkImplicit() // completed by go/types when first used
+	return &types.GoType{T: iface}
+}
+
+// aliasArgs instantiates a generic alias with the type arguments of te,
+// Set[string] for type Set[T: comparable] = map[T]bool, and reports type
+// arguments given to an alias that takes none.
+func (c *Checker) aliasArgs(ts *TypeSym, t types.Type, te *syntax.NamedType) types.Type {
+	if len(ts.AliasParams) == 0 {
+		if len(te.Args) > 0 {
+			c.errorf(diag.ETypeArgs, te.S, "type alias %s does not take type arguments", te.Name.Name)
+		}
+		return t
+	}
+	if len(te.Args) != len(ts.AliasParams) {
+		c.errorf(diag.ETypeArgs, te.S, "%s takes %s, but %d given", te.Name.Name, plural(len(ts.AliasParams), "type argument"), len(te.Args)).
+			WithHint("write %s[%s]", te.Name.Name, typeParamNamesOf(ts.AliasParams))
+		return types.Invalid
+	}
+	bind := bindings{}
+	for i, tp := range ts.AliasParams {
+		a := c.resolveType(te.Args[i])
+		if a == types.Invalid {
+			return types.Invalid
+		}
+		if tp.Constraint != nil && !c.satisfies(a, tp) {
+			c.errorf(diag.ETypeArgs, te.Args[i].Span(), "%s does not satisfy the constraint %s of %s", a, tp.Constraint, tp.Name)
+			return types.Invalid
+		}
+		bind[tp.Go] = a
+	}
+	return subst(t, bind)
+}
+
+// satisfies reports whether t meets the constraint of tp, by go/types.
+func (c *Checker) satisfies(t types.Type, tp *types.TypeParam) bool {
+	iface, ok := tp.Go.Constraint().Underlying().(*gotypes.Interface)
+	if !ok {
+		return true
+	}
+	return gotypes.Satisfies(types.Lower(t), iface)
+}
+
+func typeParamNamesOf(tps []*types.TypeParam) string {
+	var names []string
+	for _, tp := range tps {
+		names = append(names, tp.Name)
+	}
+	return strings.Join(names, ", ")
 }
 
 // EmptyStruct is Go's struct{}.
@@ -39,6 +170,8 @@ var EmptyStruct = &types.GoType{T: gotypes.NewStruct(nil, nil)}
 
 func (c *Checker) resolveType0(te syntax.TypeExpr) types.Type {
 	switch te := te.(type) {
+	case *syntax.UnionType:
+		return c.unionType(te)
 	case *syntax.EmptyStructType:
 		return EmptyStruct
 	case *syntax.NamedType:
@@ -80,10 +213,8 @@ func (c *Checker) resolveType0(te syntax.TypeExpr) types.Type {
 		}
 		c.info.Uses[te.Name] = ts
 		if ts.Alias != nil {
-			if len(te.Args) > 0 {
-				c.errorf(diag.ETypeArgs, te.S, "type alias %s does not take type arguments", te.Name.Name)
-			}
-			return c.aliasType(ts)
+			t := c.aliasType(ts)
+			return c.aliasArgs(ts, t, te)
 		}
 		if ts.Generic != "" {
 			return c.builtinGeneric(ts.Generic, te)
@@ -189,6 +320,9 @@ func (c *Checker) resolveType0(te syntax.TypeExpr) types.Type {
 		sig := &types.Signature{Throws: te.Throws}
 		for _, p := range te.Params {
 			sig.Params = append(sig.Params, c.resolveType(p))
+		}
+		for _, n := range te.ParamNames {
+			sig.ParamNames = append(sig.ParamNames, n.Name)
 		}
 		if te.Result != nil {
 			for _, r := range te.Result.Types {

@@ -13,7 +13,7 @@ type Anything any // ERROR E0601 "a defined type cannot be an interface"
 type Maybe int? // ERROR E0216 "a defined type cannot be nullable"
 type Shape Item // ERROR E0601 "a defined type cannot be a struct"
 typealias Old = int // ERROR E0008 "type aliases are declared with type Name = Type"
-type Pairs[K: comparable] = map[K]K // ERROR E0008 "generic type aliases are not supported yet"
+type Pairs[K: comparable] = map[K]K // a generic alias (ADR 0047)
 
 struct Item {
     N: int

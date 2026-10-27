@@ -146,6 +146,9 @@ type TypeSym struct {
 	GoName    string
 	aliasBusy bool
 	tscope    *Scope // the type parameters of a generic type
+	// AliasParams are a generic alias's type parameters (ADR 0047): its Type
+	// mentions them, and each use substitutes its arguments.
+	AliasParams []*types.TypeParam
 }
 
 func (t *TypeSym) Name() string          { return t.name }
@@ -191,6 +194,9 @@ const (
 	BuiltinClose
 	BuiltinPrint
 	BuiltinPrintln
+	BuiltinComplex
+	BuiltinReal
+	BuiltinImag
 )
 
 // BuiltinSym is a builtin function.

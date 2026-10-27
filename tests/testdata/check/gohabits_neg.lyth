@@ -13,7 +13,7 @@ func f(): int = 3
 func main() {
     x := &T(N = 1)
     x.Inc()
-    if v := f(); v > 0 { // ERROR E0008 "if has no initializer statement in Lyth"
+    if v := f(); v > 0 { // Go's if init; cond (ADR 0047)
         println(v)
     }
     switch x.N { // ERROR E0008 "Lyth has no switch: use when"
@@ -25,13 +25,13 @@ func main() {
     }()
     var n int // ERROR E0008 "local variables are declared with :="
     when := 3 // ERROR E0003 "when is a keyword and cannot be a variable name"
-    for i := 0; i < n; i++ { // ERROR E0008 "Lyth has no three-part for loop"
+    for i := 0; i < n; i++ { // Go's three-part loop (ADR 0047)
         println(i)
     }
-    for k := 0; k < n; k++ { // ERROR E0008 "Lyth has no three-part for loop"
+    for k := 0; k < n; k++ {
         n = 0
     }
-    for j := 0; j < n; j += 2 { // ERROR E0008 "Lyth has no three-part for loop"
+    for j := 0; j < n; j += 2 {
         println(j)
     }
 }

@@ -97,8 +97,9 @@ func TestFixSkipsRecovery(t *testing.T) {
 	src := `func f(): int = 1
 
 func main() {
-    if v := f(); v > 0 {
-        println(v)
+    switch f() {
+    case 1:
+        println("one")
     }
 }
 `
@@ -112,7 +113,7 @@ func main() {
 		t.Errorf("lyth fix changed %v:\n%s", changed, got)
 	}
 	if !s.Sink.HasErrors() {
-		t.Error("the Go if statement should still be reported")
+		t.Error("the Go switch should still be reported")
 	}
 }
 
@@ -230,58 +231,5 @@ func main() {
 	if msgs := render(s.Sink.All()); !strings.Contains(msgs, "expected '}' to close the interface body before this declaration") ||
 		!strings.Contains(msgs, "expected '}' to close the struct body before this declaration") || strings.Contains(msgs, "undefined") {
 		t.Errorf("unexpected diagnostics:\n%s", msgs)
-	}
-}
-
-// TestFixLeavesChangingBounds checks that a Go counting loop whose bound may
-// change while it runs stays a hint: a range reads the bound once, Go's
-// condition on every iteration. Here a call grows a package-level slice,
-// and a lambda assigns a local.
-func TestFixLeavesChangingBounds(t *testing.T) {
-	src := `var queue: []int = [1]
-
-func step() {
-    if len(queue) < 4 {
-        queue = append(queue, 0)
-    }
-}
-
-func drain(): int {
-    total := 0
-    for i := 0; i < len(queue); i++ {
-        step()
-        total += 1
-    }
-    return total
-}
-
-func local(): int {
-    m := 2
-    grow := { m = m + 1 }
-    c := 0
-    for j := 0; j < m; j++ {
-        if j < 5 {
-            grow()
-        }
-        c += 1
-    }
-    return c
-}
-
-func main() {
-    println(drain(), local())
-}
-`
-	root := writeModule(t, "bounds", map[string]string{"main.lyth": src})
-	changed, s, err := build.Fix(&build.Config{WorkDir: root, Stdout: os.Stdout, Stderr: os.Stderr}, build.Target{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, _ := os.ReadFile(filepath.Join(root, "main.lyth"))
-	if len(changed) != 0 || string(got) != src {
-		t.Errorf("lyth fix changed %v:\n%s", changed, got)
-	}
-	if n := strings.Count(render(s.Sink.All()), "Lyth has no three-part for loop"); n != 2 {
-		t.Errorf("want both loops reported, got %d:\n%s", n, render(s.Sink.All()))
 	}
 }

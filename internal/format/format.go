@@ -254,7 +254,7 @@ func isCloser(k syntax.Kind) bool {
 // a following - or * is binary.
 func endsOperand(k syntax.Kind) bool {
 	switch k {
-	case syntax.IDENT, syntax.INT, syntax.FLOAT, syntax.RUNE, syntax.STRING, syntax.RAWSTRING,
+	case syntax.IDENT, syntax.INT, syntax.FLOAT, syntax.IMAG, syntax.RUNE, syntax.STRING, syntax.RAWSTRING,
 		syntax.RPAREN, syntax.RBRACK, syntax.RBRACE, syntax.THIS, syntax.NULL, syntax.TRUE, syntax.FALSE,
 		syntax.NOT_NOT, syntax.QUESTION, syntax.INC, syntax.DEC:
 		return true
@@ -825,7 +825,7 @@ func isUnary(units []unit, i int) bool {
 
 func isOperator(k syntax.Kind) bool {
 	return k > syntax.ILLEGAL && k.String() != "token" && !k.IsKeyword() && k != syntax.IDENT &&
-		k != syntax.INT && k != syntax.FLOAT && k != syntax.RUNE && k != syntax.STRING && k != syntax.RAWSTRING
+		k != syntax.INT && k != syntax.FLOAT && k != syntax.IMAG && k != syntax.RUNE && k != syntax.STRING && k != syntax.RAWSTRING
 }
 
 // startsType reports whether k can start a type written directly after ]:

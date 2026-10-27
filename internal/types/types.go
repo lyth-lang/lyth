@@ -52,6 +52,7 @@ const (
 	UntypedRuneKind
 	UntypedFloatKind
 	UntypedStringKind
+	UntypedComplexKind
 )
 
 // Basic is a predeclared basic type.
@@ -85,11 +86,12 @@ var (
 	Byte          = &Basic{UInt8Kind, "byte"}
 	Rune          = &Basic{Int32Kind, "rune"}
 
-	UntypedBool   = &Basic{UntypedBoolKind, "untyped bool"}
-	UntypedInt    = &Basic{UntypedIntKind, "untyped int"}
-	UntypedRune   = &Basic{UntypedRuneKind, "untyped rune"}
-	UntypedFloat  = &Basic{UntypedFloatKind, "untyped float"}
-	UntypedString = &Basic{UntypedStringKind, "untyped string"}
+	UntypedBool    = &Basic{UntypedBoolKind, "untyped bool"}
+	UntypedInt     = &Basic{UntypedIntKind, "untyped int"}
+	UntypedRune    = &Basic{UntypedRuneKind, "untyped rune"}
+	UntypedFloat   = &Basic{UntypedFloatKind, "untyped float"}
+	UntypedString  = &Basic{UntypedStringKind, "untyped string"}
+	UntypedComplex = &Basic{UntypedComplexKind, "untyped complex"}
 )
 
 // BasicTypes lists the basic types visible in Lyth's universe scope by name.
@@ -372,11 +374,14 @@ type Chan struct {
 type Signature struct {
 	Params     []Type
 	ParamNames []string
-	Variadic   bool // the last parameter is a Slice holding the variadic args
-	Results    []Type
-	Throws     bool
-	TypeParams []*TypeParam       // non-empty for uninstantiated generic Go functions
-	GoSig      *gotypes.Signature // original Go signature (for generic instantiation)
+	// ResultNames names the results, Go's named results (ADR 0047); nil
+	// when they are unnamed. A throws function's error result is not in it.
+	ResultNames []string
+	Variadic    bool // the last parameter is a Slice holding the variadic args
+	Results     []Type
+	Throws      bool
+	TypeParams  []*TypeParam       // non-empty for uninstantiated generic Go functions
+	GoSig       *gotypes.Signature // original Go signature (for generic instantiation)
 }
 
 // Tuple is a multi-value result. It is not a first-class type.

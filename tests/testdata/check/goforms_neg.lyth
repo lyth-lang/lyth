@@ -1,0 +1,52 @@
+// Errors of the Go forms of ADR 0047.
+struct User {
+    name: string
+}
+
+interface Number {
+    ~int | ~float64
+}
+
+type Celsius float64
+
+const (
+    A // ERROR E0003 "the first constant of a group needs a value: A = ..."
+    B = 1
+)
+
+const (
+    small: uint8 = 1 << (iota * 4)
+    middle
+    big // ERROR E0215 "constant big (1 << (iota * 4) with iota = 2)"
+)
+
+const (
+    C, D = 1, 2 // ERROR E0008 "a const group declares one name per line"
+)
+
+var outside = iota // ERROR E0101 "iota is only defined in constant declarations"
+
+func find(): (u: *User) { // ERROR E0405 "the named result u has no zero value"
+    return &User(name = "x")
+}
+
+func plain(): int {
+    return // ERROR E0207 "missing return value"
+}
+
+func value(n: Number) { // ERROR E0216 "Number can only be used as the constraint of a type parameter"
+}
+
+func under[T: ~Celsius](x: T): T = x // ERROR E0216 "the type after ~ must be its own underlying type"
+
+func nullable[T: int? | string](x: T): T = x // ERROR E0201 "a type set cannot hold the nullable int?"
+
+func main() {
+    for i := 0; i < 3; j := 1 { // ERROR E0216 "the post statement of a for loop cannot declare variables"
+        println(i)
+    }
+    for ; ; { // ERROR E0008 "a loop without a condition is written while true"
+        break
+    }
+    println(find(), plain(), outside, small, middle)
+}
