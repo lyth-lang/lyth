@@ -77,15 +77,13 @@ exec "{lyth}" "$@"
 # Go and Kotlin written where Lyth has its own form; counted, not failed. Matched in code
 # without comments and strings.
 FOREIGN = {
-    # Go habits
+    # Go habits (Go's three-part for and if with an init statement are Lyth too: ADR 0047)
     "func (r T)": r"\bfunc\s*\(\s*\w+\s+\*?\w+(?:\[[^\]]*\])?\s*\)",
     "range": r"\brange\b",
     "<- operator": r"<-(?!\s*chan\b)",
     "nil": r"\bnil\b",
     "if err != nil": r"\bif\s+err\s*!=\s*(?:nil|null)\b",
     "T{F: v}": r"\b[A-Z]\w*\{\s*[A-Z]\w*\s*:",
-    "for ;;": r"\bfor\s+[^{\n]*;",
-    "if init;": r"\bif\s+[^{\n]*:=[^{\n]*;",
     "[T C]": r"\[\s*[A-Z]\w*\s+(?:any|comparable|\w+\.\w+)\s*\]",
     # Kotlin habits
     "fun": r"\bfun\b",
