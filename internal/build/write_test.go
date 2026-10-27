@@ -38,6 +38,9 @@ func TestWriteAtomic(t *testing.T) {
 		default:
 		}
 		data, err := os.ReadFile(path)
+		if busyOnWindows(err) {
+			continue // Windows refuses to open a file while it is replaced
+		}
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	gobuild "go/build"
 	"go/build/constraint"
@@ -18,6 +19,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"golang.org/x/mod/modfile"
@@ -1054,12 +1056,30 @@ func writeAtomic(path string, data []byte) error {
 		err = os.Chmod(tmp, 0o644)
 	}
 	if err == nil {
-		err = os.Rename(tmp, path)
+		err = rename(tmp, path)
 	}
 	if err != nil {
 		os.Remove(tmp)
 	}
 	return err
+}
+
+// rename replaces to with from. On Windows a file another process has open
+// cannot be replaced: as the go command does, it tries again for a while.
+func rename(from, to string) error {
+	err := os.Rename(from, to)
+	for wait := time.Millisecond; err != nil && busyOnWindows(err) && wait <= time.Second; wait *= 2 {
+		time.Sleep(wait)
+		err = os.Rename(from, to)
+	}
+	return err
+}
+
+// busyOnWindows reports whether err is Windows refusing access to a file
+// that another process holds: ERROR_ACCESS_DENIED or ERROR_SHARING_VIOLATION.
+func busyOnWindows(err error) bool {
+	var errno syscall.Errno
+	return runtime.GOOS == "windows" && errors.As(err, &errno) && (errno == 5 || errno == 32)
 }
 
 // cleanStale removes generated files that the current build did not
