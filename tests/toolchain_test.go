@@ -528,6 +528,57 @@ func TestFromGo(t *testing.T) {
 	compileModule(t, root, false)
 }
 
+// TestExternalTestPackage covers package x_test in _test.lyth files: the
+// tests import the package under test, see only its exported names, and run
+// beside its internal tests and examples.
+func TestExternalTestPackage(t *testing.T) {
+	root := writeModule(t, "xtest", map[string]string{
+		"calc/calc.lyth": "package calc\n\n" + calcLyth + "\nfunc secret(): int = 7\n",
+		"calc/calc_test.lyth": `package calc_test
+
+import "fmt"
+import "testing"
+import "xtest/calc"
+
+func TestAdd(t: *testing.T) {
+    if calc.Add(2, 3) != 5 {
+        t.Fatal("Add")
+    }
+}
+
+func ExampleParse() {
+    fmt.Println(calc.Parse("42") catch { -1 })
+    // Output: 42
+}
+`,
+		"calc/internal_test.lyth": `package calc
+
+import "testing"
+
+func TestSecret(t: *testing.T) {
+    if secret() != 7 {
+        t.Fatal("secret")
+    }
+}
+`,
+	})
+	code, out := testModule(t, root, "-v")
+	if code != 0 {
+		t.Fatalf("go test failed (exit %d):\n%s", code, out)
+	}
+	for _, want := range []string{"--- PASS: TestAdd", "--- PASS: TestSecret", "--- PASS: ExampleParse"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	// The external package sees only what calc exports.
+	os.WriteFile(filepath.Join(root, "calc", "calc_test.lyth"), []byte("package calc_test\n\nimport \"testing\"\nimport \"xtest/calc\"\n\nfunc TestSecret2(t: *testing.T) {\n    println(calc.secret())\n}\n"), 0o644)
+	s, _ := build.Compile(&build.Config{WorkDir: root, Tests: true, Stdout: io.Discard, Stderr: io.Discard}, build.Target{Patterns: []string{"./..."}})
+	if msgs := render(s.Sink.All()); !strings.Contains(msgs, "secret") || !s.Sink.HasErrors() {
+		t.Errorf("an unexported name should be reported:\n%s", msgs)
+	}
+}
+
 // TestLythTestFailuresPointAtLythLines checks that t.Errorf and a thrown
 // error report .lyth file lines.
 func TestLythTestFailuresPointAtLythLines(t *testing.T) {
@@ -578,7 +629,7 @@ func testHelper(x: int): int = x
 		"TestNoParam is run by go test, so it must be declared func TestNoParam(t: *testing.T)",
 		"BenchmarkWrong is run by go test, so it must be declared func BenchmarkWrong(b: *testing.B)",
 		"ExampleThrows is run by go test, so it must be declared func ExampleThrows()",
-		"external test packages (package calc_test) are not supported yet",
+		"TestExt is run by go test, so it must be declared func TestExt(t: *testing.T)", // in an external test package
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("diagnostics lack %q:\n%s", want, got)
@@ -1709,6 +1760,44 @@ func main() {
 	out, err := exec.Command(bin).CombinedOutput()
 	if err != nil || strings.TrimSpace(string(out)) != "[4 6]" {
 		t.Fatalf("got %q, %v", out, err)
+	}
+}
+
+// TestWorkspaceLythPackages checks that a Lyth program imports a Lyth package
+// of another module of its workspace: lyth compiles it into the program's
+// .lyth/gen and leaves that module's directory as it is.
+func TestWorkspaceLythPackages(t *testing.T) {
+	ws := t.TempDir()
+	if real, err := filepath.EvalSymlinks(ws); err == nil {
+		ws = real
+	}
+	files := map[string]string{
+		"go.work":               "go 1.26\n\nuse (\n\t./app\n\t./shared\n)\n",
+		"app/go.mod":            "module example.com/app\n\ngo 1.26\n\nrequire example.com/shared v0.0.0\n",
+		"shared/go.mod":         "module example.com/shared\n\ngo 1.26\n",
+		"shared/geom/geom.lyth": "package geom\n\nfunc Area(w: int, h: int): int = w * h\n",
+		"app/main.lyth":         "import \"example.com/shared/geom\"\n\nfunc main() {\n    println(geom.Area(3, 4))\n}\n",
+	}
+	for name, content := range files {
+		p := filepath.Join(ws, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := compileModule(t, filepath.Join(ws, "app"), false)
+	bin := filepath.Join(t.TempDir(), "app.bin")
+	if ok, err := s.GoBuild(bin, []string{"example.com/app"}, nil); err != nil || !ok {
+		t.Fatalf("build failed: %v\n%s", err, render(s.Sink.All()))
+	}
+	out, err := exec.Command(bin).CombinedOutput()
+	if err != nil || strings.TrimSpace(string(out)) != "12" {
+		t.Fatalf("got %q, %v", out, err)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(ws, "shared", "geom")); len(entries) != 1 {
+		t.Errorf("lyth wrote into the other module: %v", entries)
 	}
 }
 

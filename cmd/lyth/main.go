@@ -91,6 +91,7 @@ type common struct {
 	tags     string
 	tests    bool // include _test.lyth files (check, vet, gen, test)
 	fixing   bool // lyth fix: don't suggest lyth fix
+	onlyFile bool // lyth run file.lyth: the file alone, as go run file.go
 }
 
 func (c *common) register(fs *flag.FlagSet) {
@@ -110,7 +111,7 @@ func (c *common) parseDiag(fs *flag.FlagSet) {
 
 func (c *common) config(stdout, stderr io.Writer) *build.Config {
 	wd, _ := os.Getwd()
-	cfg := &build.Config{WorkDir: wd, Verbose: c.verbose, NoLineDirectives: c.noLines, Timings: c.timings, Tests: c.tests, Stdout: stdout, Stderr: stderr}
+	cfg := &build.Config{WorkDir: wd, Verbose: c.verbose, NoLineDirectives: c.noLines, Timings: c.timings, Tests: c.tests, OnlyFile: c.onlyFile, Stdout: stdout, Stderr: stderr}
 	if c.tags != "" {
 		cfg.Tags = strings.Split(c.tags, ",")
 	}
@@ -401,8 +402,12 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 	if len(progArgs) > 0 && progArgs[0] == "--" {
 		progArgs = progArgs[1:]
 	}
+	c.onlyFile = len(tgt) == 1 && strings.HasSuffix(tgt[0], ".lyth")
 	s, ok := compile(&c, tgt, stdout, stderr)
 	if !ok {
+		if c.onlyFile && s != nil && len(s.Targets) == 1 && s.Targets[0].Dir.Others > 0 {
+			fmt.Fprintf(stderr, "note: lyth run %s builds that file alone, as go run does; to run its package, write lyth run %s\n", tgt[0], "./"+filepath.ToSlash(filepath.Dir(tgt[0])))
+		}
 		return 1
 	}
 	mains := s.MainPackages()

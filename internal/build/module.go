@@ -120,6 +120,9 @@ type pkgDir struct {
 	Files      []string // absolute paths of .lyth files, sorted (tests excluded)
 	TestFiles  []string // _test.lyth files, compiled only for tests
 	GoFiles    []string // hand-written .go files (mixed packages are not supported yet)
+	// Others counts the files of the package left out of a build of one of
+	// them (lyth run file.lyth).
+	Others int
 	// Std marks a package of Lyth's standard library (lyth/coll), compiled
 	// from the sources in the lyth binary.
 	Std bool

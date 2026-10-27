@@ -12,11 +12,14 @@ import (
 	gotypes "go/types"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
 	"time"
+
+	"golang.org/x/mod/modfile"
 
 	"github.com/lyth-lang/lyth/internal/check"
 	"github.com/lyth-lang/lyth/internal/diag"
@@ -40,6 +43,9 @@ type Config struct {
 	Verbose          bool
 	NoLineDirectives bool
 	InTree           bool // generate for in-tree output (bare file names in //line)
+	// OnlyFile builds a file target alone, without the other files of its
+	// package, as go run file.go does (lyth run file.lyth).
+	OnlyFile bool
 	// SparseLineDirectives emits //line only before lines that can fail at
 	// run time (lyth gen: output meant for reading). Builds put one wherever
 	// the Lyth line changes; in-tree output is always sparse.
@@ -218,6 +224,10 @@ func (s *Session) setup(t Target) error {
 				return err
 			}
 			p = s.editorFiles(mod, filepath.Dir(abs), p)
+			if s.cfg.OnlyFile {
+				p.Others = len(p.Files) - 1
+				p.Files, p.TestFiles = []string{abs}, nil
+			}
 			// Other Lyth packages of the module are available as imports.
 			all, err := discover(mod)
 			if err != nil {
@@ -230,7 +240,7 @@ func (s *Session) setup(t Target) error {
 					all = append(all, s.editorFiles(mod, d, nil))
 				}
 			}
-			s.makeAvailable(all)
+			s.makeAvailable(append(all, s.workspacePackages(mod)...))
 			s.Targets = append(s.Targets, s.addPkg(p))
 			return nil
 		}
@@ -290,7 +300,7 @@ func (s *Session) setup(t Target) error {
 			return fmt.Errorf("no Lyth package in %s", pat)
 		}
 	}
-	s.makeAvailable(all)
+	s.makeAvailable(append(all, s.workspacePackages(mod)...))
 	var testOnly []string
 	for _, p := range all {
 		if len(t.Patterns) == 0 || selected[p.Dir] {
@@ -369,6 +379,45 @@ func patternDir(pat, wd string, mod *Module) string {
 		return filepath.Join(mod.Root, filepath.FromSlash(strings.TrimPrefix(pat, mod.Path+"/")))
 	}
 	return filepath.Join(wd, pat)
+}
+
+// workspacePackages returns the Lyth packages of the other modules of the
+// workspace mod is in (go.work), which its code may import. They are
+// generated under .lyth/gen/_ws/<module path>/, and the overlay points the
+// go command at them in their own directories.
+func (s *Session) workspacePackages(mod *Module) []*pkgDir {
+	work := s.workspace()
+	if work == "" {
+		return nil
+	}
+	data, err := os.ReadFile(work)
+	if err != nil {
+		return nil
+	}
+	wf, err := modfile.ParseWork(work, data, nil)
+	if err != nil {
+		return nil
+	}
+	var out []*pkgDir
+	for _, u := range wf.Use {
+		dir := u.Path
+		if !filepath.IsAbs(dir) {
+			dir = filepath.Join(filepath.Dir(work), dir)
+		}
+		other, err := FindModule(dir)
+		if err != nil || other.Root == mod.Root {
+			continue
+		}
+		pkgs, err := discover(other)
+		if err != nil {
+			continue
+		}
+		for _, p := range pkgs {
+			p.Rel = path.Join("_ws", strings.ReplaceAll(other.Path, "/", "_"), p.Rel)
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func (s *Session) makeAvailable(all []*pkgDir) {
@@ -461,13 +510,14 @@ func (s *Session) parse() {
 			if !s.buildsFile(path, sf) {
 				continue // another platform's file, or excluded by //go:build
 			}
-			if sf.Package != nil && strings.HasSuffix(sf.Package.Name, "_test") {
-				s.Sink.Errorf(diag.EUnsupported, sf.Package.S, "external test packages (package %s) are not supported yet", sf.Package.Name).
-					WithHint("write the test in the package itself (omit the package clause), or as a Go _test.go file")
-				continue
+			into := p
+			if sf.Package != nil && strings.HasSuffix(sf.Package.Name, "_test") && strings.HasSuffix(path, "_test.lyth") {
+				// An external test package, as Go's: the tests import the
+				// package under test like any other importer would.
+				into = s.externalTests(p)
 			}
-			p.Files = append(p.Files, f)
-			p.Syntax = append(p.Syntax, sf)
+			into.Files = append(into.Files, f)
+			into.Syntax = append(into.Syntax, sf)
 			for _, imp := range sf.Imports {
 				if _, ok := s.available[imp.Path]; !ok {
 					if dep := s.stdPackage(imp.Path); dep != nil {
@@ -488,6 +538,21 @@ func (s *Session) parse() {
 				WithHint("move the Go code into its own package and import it from Lyth")
 		}
 	}
+}
+
+// externalTests returns the external test package (package x_test) of the
+// directory of p, adding it to the session after p.
+func (s *Session) externalTests(p *Package) *Package {
+	path := p.Dir.ImportPath + "_test"
+	if xp := s.byPath[path]; xp != nil {
+		return xp
+	}
+	dir := *p.Dir
+	dir.ImportPath, dir.Files, dir.TestFiles, dir.GoFiles, dir.GoTestFiles = path, nil, nil, nil, nil
+	xp := &Package{Dir: &dir}
+	s.byPath[path] = xp
+	s.Packages = append(s.Packages, xp)
+	return xp
 }
 
 // embedOutsideModule reports //go:embed in a file built outside a module:
