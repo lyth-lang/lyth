@@ -166,7 +166,12 @@ raw_string = "`" { any char except "`" } "`" .
   (`println(r)` prints its number, as Go does). Collections print as `fmt`
   prints them, so a `[]int?` shows its elements' pointers.
 - **Raw strings** use backticks, exactly as in Go: no escapes, no templates, may
-  span lines. They are also the syntax for struct tags.
+  span lines. They are also the syntax for struct tags. A `${name}` in one,
+  where `name` (or the first name of `${u.Name}`) is a variable, parameter,
+  or constant in scope, draws warning W0012, since TypeScript's template
+  literals and Kotlin's raw strings would interpolate it
+  ([ADR 0048](../adr/0048-templates-in-raw-strings.md)). Other `${...}` text,
+  such as a shell script's `${HOME}`, stays quiet.
 - Integer and float literals are *untyped constants* (Go semantics).
 - `true`, `false`, and `null` are keywords.
 

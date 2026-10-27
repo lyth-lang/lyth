@@ -1,0 +1,23 @@
+// ${name} in a raw string prints literally. It warns when name is a variable,
+// parameter, or constant in scope, the habit of TypeScript's template literals
+// and Kotlin's raw strings, which interpolate it. Other ${...} text is quiet.
+const table = "orders"
+
+var region = "eu"
+
+struct User {
+    Name: string
+}
+
+func User.Where(): string = `name = '${self.Name}'` // WARN W0012 "${self.Name} prints literally: raw strings do not interpolate"
+
+func query(id: int): string = `SELECT * FROM ${table} WHERE id = ${ id }` // WARN W0012 "${table} prints literally" // WARN W0012 "in which ${id} interpolates (with \n for line breaks)"
+
+func main() {
+    u := User(Name = "ada")
+    report := `user: ${u.Name}, region: ${region}` // WARN W0012 "${u.Name} prints literally" // WARN W0012 "${region} prints literally"
+    each := { item: string -> `<li>${item}</li>` } // WARN W0012 "${item} prints literally"
+    shell := `export PATH=${PATH}:/bin; echo ${HOME:-/tmp} ${#u} ${len(report)} ${missing}`
+    escaped := `\${table} $${table} $table ${ }`
+    println(query(1), u.Where(), report, each("x"), shell, escaped, "${table}")
+}

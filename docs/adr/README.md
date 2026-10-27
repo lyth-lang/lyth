@@ -46,9 +46,10 @@ Accepted ADRs are immutable; a superseding ADR links back.
 | [0039](0039-rebinding-parameters.md) | `:=` may replace a parameter with a value derived from it | Accepted (amends 0007, 0031) |
 | [0040](0040-optionals-into-any.md) | Optional values passed to Go `any` parameters are unboxed | Accepted (amends 0017, extends 0026) |
 | [0041](0041-type-tests-on-errors.md) | Type tests on errors stay dynamic, and warn | Accepted (confirms 0016, 0018) |
-| [0042](0042-dollar-names-in-strings.md) | `$name` in a string is literal unless it names a variable | Accepted (amends 0012) |
+| [0042](0042-dollar-names-in-strings.md) | `$name` in a string is literal unless it names a variable | Accepted (amends 0012; extended by 0048) |
 | [0043](0043-struct-embedding.md) | Struct embedding | Accepted |
 | [0044](0044-remaining-spellings.md) | Remaining spellings: `null`, import aliases, and `in` as a name | Accepted (amends 0031) |
 | [0045](0045-go-evaluation-order.md) | Go's evaluation order, with and without hoisting | Accepted (replaces language.md §6's rule) |
 | [0046](0046-smart-casts-between-assignments.md) | Smart casts between assignments | Accepted (amends 0031) |
 | [0047](0047-go-constructs-lyth-lacked.md) | The Go constructs Lyth lacked: three-part `for`, `if` init, groups with `iota`, named results, type sets, complex numbers, generic aliases | Accepted (amends 0012, 0031) |
+| [0048](0048-templates-in-raw-strings.md) | `${name}` in a raw string warns when it names a variable | Accepted (extends 0042) |

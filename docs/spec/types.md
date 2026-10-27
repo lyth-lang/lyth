@@ -110,7 +110,10 @@ functions, channels, slices, and maps. Lyth applies nullability to the first fou
   produce non-nil maps.) Go named slice and map types (`http.Header`,
   `json.RawMessage`) follow the same rule. `xs == null` tests for the nil
   slice or map, and `xs ?: fallback` uses the fallback when it is nil:
-  `m[k] ?: ["default"]`.
+  `m[k] ?: ["default"]`. A nil and an empty slice still differ where Go code
+  looks: `encoding/json` encodes the zero value of a slice (`xs: []int`, a
+  field left out at construction) as `null` and a literal `[]` as `[]`, and
+  `xs ?: fallback` keeps an empty `xs`.
 - Value types (numbers, `string`, `bool`, structs, arrays) have optional forms
   `T?` represented as `*T`: see §5.6.
 
@@ -276,11 +279,19 @@ Rules that follow:
   value on error, so non-zeroable value types become nullable there
   ([errors.md §5](errors.md#5-raw-access-destructuring)).
 
-One gap remains: Go lets `s[lo:hi]` extend a slice up to its capacity, and the
+Two gaps remain. Go lets `s[lo:hi]` extend a slice up to its capacity, and the
 elements past its length are zero values. For a slice of non-zeroable
 elements (`make([]*User, 0, 8)[:2]`) those are nils that the type says cannot
 exist. Lyth does not check `hi` against `len(s)` at run time; grow such slices
 with `append`.
+
+Reflection is the other gap. Go code that fills a struct through reflection
+(`encoding/json`, `database/sql` and pgx scanning, YAML and form decoders)
+sets fields without Lyth's checks: a JSON `null`, a NULL column, or a key
+missing from an object the decoder creates itself (an element of a
+`[]Customer`) leaves nil in a non-null `*T` or interface field, and the use of
+the field panics as it would in Go. Fields that decoded input may leave empty
+are declared nullable (`Address: *Address?`).
 
 ## 7. Mutability
 

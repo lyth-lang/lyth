@@ -156,6 +156,9 @@ func (c *Checker) reportMismatchReason(x *operand, target types.Type, context, r
 
 // mismatchHints adds conversion suggestions for common mismatches.
 func (c *Checker) mismatchHints(d *diag.Diagnostic, x *operand, target types.Type) {
+	if c.optionalToPointer(d, x, target) {
+		return
+	}
 	src, dst := types.Base(x.typ), types.Base(target)
 	text := x.expr.Span().Short()
 	switch {
@@ -637,14 +640,67 @@ func (c *Checker) optionalValue(e syntax.Expr, member, verb string) bool {
 	if c.info.Implicit[e] != ConvUnbox {
 		return false
 	}
-	name := e.Span().Short()
+	name, back := e.Span().Short(), c.storeBack(e)
 	if verb == "call" {
-		c.errorf(diag.EPtrMethodVal, e.Span(), "cannot call %s on %s: the method modifies its receiver, and %s is an optional value, which copies share", member, name, name).
-			WithHint("call it on a copy and store that back: v := %s; v.%s(...); %s = v", name, member, name)
+		d := c.errorf(diag.EPtrMethodVal, e.Span(), "cannot call %s on %s: the method modifies its receiver, and %s is an optional value, which copies share", member, name, name).
+			WithHint("call it on a copy: v := %s; v.%s(...)%s", name, member, back)
+		sharedPointerHint(d, c.info.TypeOf(e))
 		return true
 	}
-	c.errorf(diag.EMutateVal, e.Span(), "cannot %s %s.%s: %s is an optional value, which copies share", verb, name, member, name).
-		WithHint("change a copy and store it back: v := %s; v.%s = ...; %s = v", name, member, name)
+	d := c.errorf(diag.EMutateVal, e.Span(), "cannot %s %s.%s: %s is an optional value, which copies share", verb, name, member, name).
+		WithHint("change a copy: v := %s; v.%s = ...%s", name, member, back)
+	sharedPointerHint(d, c.info.TypeOf(e))
+	return true
+}
+
+// storeBack ends a copy-and-change hint for the optional value e with
+// "; o = v" when o is a local that can be assigned; a parameter, loop
+// variable, or catch binding is read-only, so the hint stops at the copy.
+func (c *Checker) storeBack(e syntax.Expr) string {
+	if id, ok := syntax.Unparen(e).(*syntax.Ident); ok {
+		if v, ok := c.info.Uses[id].(*VarSym); ok && v.Mutable {
+			return "; " + id.Name + " = v"
+		}
+	}
+	return ""
+}
+
+// sharedPointerHint gives the other way to a change that an optional value
+// T? refuses: a nullable pointer *T?, through which code may change the one
+// T that all its holders see.
+func sharedPointerHint(d *diag.Diagnostic, t types.Type) {
+	if t == nil || t == types.Invalid {
+		return
+	}
+	elem := types.Base(t)
+	d.WithHint("to change one %s that every holder sees, use a nullable pointer, *%s?, instead of %s?", elem, elem, elem)
+}
+
+// optionalToPointer explains why an optional value T?, or one smart-cast to
+// T, does not become a *T or *T?: the pointer could change the box that
+// copies of the optional share (types.md §5.6).
+func (c *Checker) optionalToPointer(d *diag.Diagnostic, x *operand, target types.Type) bool {
+	if x.expr == nil {
+		return false
+	}
+	elem, unboxed := x.typ, c.info.Implicit[x.expr] == ConvUnbox
+	if n, ok := x.typ.(*types.Nullable); ok && !types.IsNilable(n.Elem) {
+		elem = n.Elem
+	} else if !unboxed {
+		return false
+	}
+	p, ok := types.Base(target).(*types.Pointer)
+	if !ok || !types.Identical(p.Elem, elem) {
+		return false
+	}
+	text := x.expr.Span().Short()
+	d.WithNote("an optional value never becomes a pointer: its copies share one box, which code could change through the pointer")
+	if unboxed {
+		d.WithHint("for a pointer to a copy, write new(%s)", text)
+	} else {
+		d.WithHint("for a pointer to a copy, write new(%s!!), after checking that %s is not null", text, text)
+	}
+	sharedPointerHint(d, elem)
 	return true
 }
 

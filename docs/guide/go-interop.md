@@ -247,6 +247,15 @@ checks: a nil dereference panics as it would in Go, with the `.lyth` line in the
 stack trace. Declare a local of type `T?` for a Go result (`u: *url.URL? = f()`)
 when you want Lyth to make you check it.
 
+Go code that fills a struct through reflection (`encoding/json`,
+`database/sql` and pgx scanning, YAML and form decoders) writes its fields
+directly and knows nothing of Lyth's nullability. A JSON `null`, a NULL
+column, or a key missing from an object the decoder creates itself (each
+element of a `[]Customer`) leaves nil in a field Lyth types as non-null (`*T`,
+an interface), and the use of that field panics, on a line without `!!`, as it
+would in Go. Declare the fields that decoded input may leave empty as nullable
+(`Address: *Address?`, `Note: string?`), and Lyth makes you check them.
+
 In the other direction, a nullable Lyth value may be passed to a Go parameter.
 To an interface parameter (`any`, `...any`, `fmt.Stringer`) it goes in the way
 Lyth converts to its own interfaces: null as a nil interface, never Go's

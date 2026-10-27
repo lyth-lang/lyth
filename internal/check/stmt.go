@@ -264,6 +264,9 @@ func (c *Checker) localDecl(s *syntax.LocalDecl) bool {
 		}
 	}
 	v := c.newLocal(name, t)
+	if want == nil && s.Value != nil {
+		v.zeroRead = c.zeroReadNote(name.Name, s.Value)
+	}
 	if !redeclared {
 		c.declareLocal(v, name)
 		c.castByValue(v, init) // x: T? = nonNull
@@ -383,7 +386,8 @@ func (c *Checker) declareLocal(v *VarSym, id *syntax.Ident) {
 
 func (c *Checker) destructure(s *syntax.LocalDecl) bool {
 	vars := make([]*VarSym, len(s.Names))
-	var rawNull []bool // the values null when the destructured call fails
+	var rawNull []bool       // the values null when the destructured call fails
+	var zeroRead syntax.Expr // v, ok := m[k] or ch.receive() of a type without a zero value
 	// As in Go, a, b := e declares the names not yet declared in this scope
 	// and assigns the others; at least one must be new.
 	declareAll := func(ts []types.Type) {
@@ -424,6 +428,9 @@ func (c *Checker) destructure(s *syntax.LocalDecl) bool {
 			v := c.newLocal(id, t)
 			if i < len(rawNull) && rawNull[i] {
 				v.rawCall = s.Value.Span().Short()
+			}
+			if i == 0 && zeroRead != nil {
+				v.zeroRead = c.zeroReadNote(id.Name, zeroRead)
 			}
 			c.declareLocal(v, id)
 			vars[i] = v
@@ -502,6 +509,7 @@ func (c *Checker) destructure(s *syntax.LocalDecl) bool {
 		declareAll(nil)
 		return false
 	}
+	zeroRead = s.Value
 	declareAll(elems)
 	return false
 }
@@ -1497,6 +1505,9 @@ func (c *Checker) selectOp(sc *syntax.SelectCase) {
 			t = elems[i]
 		}
 		v := c.newLocal(id, t)
+		if i == 0 && prelude == PreludeReceive {
+			v.zeroRead = c.zeroReadNote(id.Name, sc.Op)
+		}
 		c.declareLocal(v, id)
 		if id.Name != "_" {
 			vars[i] = v

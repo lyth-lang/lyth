@@ -83,4 +83,5 @@ const (
 	WJSONKeyChange Code = "W0009"
 	WFormatString  Code = "W0010"
 	WBuiltinMember Code = "W0011"
+	WRawTemplate   Code = "W0012"
 )

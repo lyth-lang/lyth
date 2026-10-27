@@ -67,6 +67,10 @@ type VarSym struct {
 	// rawCall is the fallible call a value was destructured from, which
 	// makes the value null when the call fails; "" otherwise.
 	rawCall string
+	// zeroRead is E0401's note for a local declared from a map read or
+	// channel receive whose element type has no zero value, which is what
+	// makes the local nullable (zeroReadNote); "" otherwise.
+	zeroRead string
 }
 
 func (v *VarSym) Name() string          { return v.name }

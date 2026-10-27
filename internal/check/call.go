@@ -386,7 +386,12 @@ func (c *Checker) ptrMethodReceiver(s *syntax.SelectorExpr) {
 	}
 	if t := c.info.TypeOf(s.X); s.Safe && t != nil && types.IsNullable(t) && !types.IsNilable(t) {
 		// o?.Inc() on a P?: the box is shared like a smart-cast o's.
-		c.errorf(diag.EPtrMethodVal, s.Sel.S, "cannot call %s on %s: the method modifies its receiver, and %s is an optional value, which copies share", s.Sel.Name, s.X.Span().Short(), s.X.Span().Short())
+		name := s.X.Span().Short()
+		d := c.errorf(diag.EPtrMethodVal, s.Sel.S, "cannot call %s on %s: the method modifies its receiver, and %s is an optional value, which copies share", s.Sel.Name, name, name)
+		if _, isIdent := syntax.Unparen(s.X).(*syntax.Ident); isIdent {
+			d.WithHint("check %s, then call it on a copy: if %s != null { v := %s; v.%s(...)%s }", name, name, name, s.Sel.Name, c.storeBack(s.X))
+		}
+		sharedPointerHint(d, t)
 		return
 	}
 	inner := syntax.Unparen(s.X)

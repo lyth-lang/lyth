@@ -435,14 +435,7 @@ func (c *Checker) dollarNames(span source.Span) {
 		if escapes%2 == 1 {
 			continue // \$name keeps the dollar
 		}
-		end := i + 1
-		for end < len(src) {
-			r, size := utf8.DecodeRune(src[end:])
-			if !(r == '_' || unicode.IsLetter(r) || end > i+1 && unicode.IsDigit(r)) {
-				break
-			}
-			end += size
-		}
+		end := identEnd(src, i+1)
 		if end == i+1 {
 			continue // $1, $$, a lone $
 		}
@@ -455,6 +448,76 @@ func (c *Checker) dollarNames(span source.Span) {
 				WithHint("write ${%s} to interpolate it, or \\$%s to keep the dollar sign", name, name)
 		}
 		i = end - 1
+	}
+}
+
+// identEnd returns the end of the identifier that starts at at in src, or at
+// when none does: the names that $name and ${name} in string text refer to.
+func identEnd(src []byte, at int) int {
+	end := at
+	for end < len(src) {
+		r, size := utf8.DecodeRune(src[end:])
+		if !(r == '_' || unicode.IsLetter(r) || end > at && unicode.IsDigit(r)) {
+			break
+		}
+		end += size
+	}
+	return end
+}
+
+// rawTemplates warns about ${name} in a raw string when name is a variable
+// or constant in scope: raw strings never interpolate, while TypeScript's
+// template literals and Kotlin's raw strings do. Only a name or a selector
+// path (${user.Name}) counts, so shell text such as ${HOME:-/tmp} stays
+// quiet, and so does an escaped \${name} or $${name}, written for another
+// template engine. A raw string has no escape that would keep the text, so
+// this is a warning, not E0006's error.
+func (c *Checker) rawTemplates(span source.Span) {
+	if span.File == nil || span.End > len(span.File.Content) {
+		return
+	}
+	src := span.File.Content[span.Start:span.End]
+	for i := 0; i+1 < len(src); i++ {
+		if src[i] != '$' || src[i+1] != '{' || i > 0 && (src[i-1] == '\\' || src[i-1] == '$') {
+			continue
+		}
+		start := i + 2
+		for start < len(src) && src[start] == ' ' {
+			start++
+		}
+		nameEnd := identEnd(src, start)
+		if nameEnd == start {
+			continue
+		}
+		end := nameEnd
+		for end+1 < len(src) && src[end] == '.' {
+			next := identEnd(src, end+1)
+			if next == end+1 {
+				break
+			}
+			end = next
+		}
+		closing := end
+		for closing < len(src) && src[closing] == ' ' {
+			closing++
+		}
+		if closing >= len(src) || src[closing] != '}' {
+			continue
+		}
+		name, path := string(src[start:nameEnd]), string(src[start:end])
+		sym := c.lookupSkippingMembers(name)
+		switch sym.(type) {
+		case *VarSym, *ConstSym:
+		default:
+			continue
+		}
+		at := source.Span{File: span.File, Start: span.Start + i, End: span.Start + closing + 1}
+		d := c.warnf(diag.WRawTemplate, at, "%s prints literally: raw strings do not interpolate", at.Text())
+		if v, ok := sym.(*VarSym); !ok || !v.Implicit {
+			d.WithRelated(sym.DeclSpan(), "%s is declared here", name)
+		}
+		d.WithHint("to insert %s, use a \"...\" string, in which ${%s} interpolates (with \\n for line breaks), or concatenate: `...` + %s + `...`", path, path, path)
+		i = closing
 	}
 }
 
@@ -491,6 +554,7 @@ func (c *Checker) basicLit(e *syntax.BasicLit) *operand {
 		c.dollarNames(e.S)
 		return &operand{mode: ModeValue, typ: types.UntypedString, val: constant.MakeString(e.Value)}
 	case syntax.RAWSTRING:
+		c.rawTemplates(e.S)
 		return &operand{mode: ModeValue, typ: types.UntypedString, val: constant.MakeString(e.Value)}
 	}
 	return invalid(e)
@@ -1410,6 +1474,9 @@ func (c *Checker) smartCast(e syntax.Expr) *VarSym {
 func (c *Checker) nullableUse(x *operand, what string) {
 	text := x.expr.Span().Short()
 	d := c.errorf(diag.ENullable, x.expr.Span(), "cannot %s %s: it may be null (type %s)", what, text, x.typ)
+	if elem, when := c.zeroReadOf(x.expr); elem != nil {
+		d.WithNote("%s is null %s, because %s", text, when, types.NoZeroReason(elem))
+	}
 	switch e := syntax.Unparen(x.expr).(type) {
 	case *syntax.Ident:
 		v, ok := c.info.Uses[e].(*VarSym)
@@ -1429,6 +1496,9 @@ func (c *Checker) nullableUse(x *operand, what string) {
 				WithHint("handle the error with ? or catch instead of destructuring (%s := %s?), or check %s itself", v.name, v.rawCall, v.name)
 			return
 		}
+		if v.zeroRead != "" && v.NotReassigned {
+			d.WithNote("%s", v.zeroRead)
+		}
 	case *syntax.SelectorExpr:
 		// A check of a field does not smart-cast it, so suggest the copy
 		// that does instead of the check the user has likely written.
@@ -1445,6 +1515,40 @@ func (c *Checker) nullableUse(x *operand, what string) {
 		return
 	}
 	d.WithHint("check it first (if %s != null { ... }), provide a default with ?:, or assert with !!", text)
+}
+
+// zeroReadOf returns the element type of a map read or channel receive that
+// is nullable only because the type has no zero value (a struct holding a
+// non-null pointer or interface, types.md §6), and when the read is null.
+// Adding such a field to a struct changes every read of it, so E0401 names
+// the cause.
+func (c *Checker) zeroReadOf(e syntax.Expr) (types.Type, string) {
+	switch x := syntax.Unparen(e).(type) {
+	case *syntax.IndexExpr:
+		if m, ok := collectionOf(c.info.TypeOf(x.X)).(*types.Map); ok && Zeroless(m.Elem) {
+			return m.Elem, "for a missing key"
+		}
+	case *syntax.CallExpr:
+		ci := c.info.Calls[x]
+		sel, ok := syntax.Unparen(x.Fun).(*syntax.SelectorExpr)
+		if ci == nil || ci.Kind != CallPrelude || ci.Prelude != PreludeReceive || !ok {
+			break
+		}
+		if ch, ok := collectionOf(c.info.TypeOf(sel.X)).(*types.Chan); ok && Zeroless(ch.Elem) {
+			return ch.Elem, "once the channel is closed"
+		}
+	}
+	return nil, ""
+}
+
+// zeroReadNote is the E0401 note for a local named name declared from e,
+// when zeroReadOf explains why it is nullable; "" otherwise.
+func (c *Checker) zeroReadNote(name string, e syntax.Expr) string {
+	elem, when := c.zeroReadOf(e)
+	if elem == nil {
+		return ""
+	}
+	return name + " holds " + e.Span().Short() + ", which is null " + when + ", because " + types.NoZeroReason(elem)
 }
 
 // valName turns a field name into a local name: Email becomes email, ID id,

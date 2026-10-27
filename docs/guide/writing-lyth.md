@@ -193,10 +193,16 @@ func main() throws {
   `[]T`, `[N]T`, `map[K]V`, `chan T`, `*T`, and `struct{}` (value `struct{}{}`).
 - Function types are `(A, B) -> R`, `(A) -> unit`, and `(A) -> R throws` for one that can fail.
 - `T?` is nullable. `[]User?` is a slice of nullable users: `?` belongs to the element. Slices
-  and maps themselves are never nullable; an empty one is the absent value.
+  and maps themselves are never nullable (`([]T)?` is an error), but as in Go one that was never
+  assigned (`xs: []int`, a field left out at construction) is nil: it reads as empty,
+  `encoding/json` writes it as `null` where a literal `[]` gives `[]`, and writing to a nil map
+  panics (start with `[:]` or `make`). `xs == null` and `xs ?: fallback` see only the nil one.
 - Numbers never convert implicitly: `float64(n)`, `int64(x)`.
 - Literals take their type from context: `xs: []int = []`, `m: map[string]int = [:]`,
   `["a": 1]`. Go's typed literals work too: `[]int64{1, 2}`, `map[string]any{"ok": true}`.
+- Strings: `"Hi ${name}, ${n + 1}"` interpolates; a `"..."` string stays on one line (`\n` for
+  line breaks). Backtick strings are raw, as in Go: no escapes and no templates, so `${name}`
+  in one is plain text (warning W0012 when `name` is a variable). Concatenate to insert values.
 - `m[k]` and `ch.receive()` give the zero value when nothing is there, as in Go; when the value
   type has none (a struct with a non-null pointer field, a `*User`), they give a `T?` that is
   null then: `job := jobs.receive() ?: break`.
@@ -291,7 +297,6 @@ What Go programmers write by habit, and the Lyth for it:
 | `type tc struct { ... }` in a function | `struct tc { ... }` in the function |
 | `[]struct{ in string }{...}` | declare `struct tc { in: string }`, then `[tc(in = "a")]` |
 | `switch` | `when` |
-| `if v := f(); v > 0 { }` | `v := f()`, then `if v > 0 { }` |
 | `ctx, cancel := context.WithTimeout(ctx, d)` | the same: `:=` may replace a parameter with a value derived from it |
 | `r = r.WithContext(ctx)` (assigning a parameter) | `r := r.WithContext(ctx)` |
 | `strings.FieldsFunc(s, func(r rune) bool { ... })` | `strings.FieldsFunc(s) { r -> ... }` |
@@ -312,6 +317,7 @@ What Go programmers write by habit, and the Lyth for it:
 | `fun <T> f()`, `Box<T>` | `func f[T]()`, `Box[T]` |
 | `this` | `self` |
 | `"$name"` | `"${name}"` |
+| `"""Hi ${name}"""` | `"Hi ${name}"`; backtick strings are raw and do not interpolate |
 | `class User(val name: String)` | `struct User { Name: string }` |
 | methods inside the class | `func User.Greet()` at top level |
 | `companion object`, static methods | package functions (`NewUser`) |

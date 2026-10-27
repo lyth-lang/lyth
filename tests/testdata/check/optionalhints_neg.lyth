@@ -1,0 +1,59 @@
+// An optional value T? refuses changes and pointers because its copies share
+// one box; the errors name the copy that works and the nullable pointer *T?
+// for one value that every holder sees. A map read or channel receive of a
+// struct without a zero value is nullable, and E0401 names the field that
+// causes it.
+import "io"
+
+struct Counter {
+    N: int
+}
+
+func *Counter.Inc() {
+    self.N++
+}
+
+func maybe(): Counter? = null
+
+func optionals() {
+    o := maybe()
+    o?.Inc() // ERROR E0504 "check o, then call it on a copy: if o != null { v := o; v.Inc(...); o = v }"
+    if o != null {
+        o.N = 2 // ERROR E0502 "to change one Counter that every holder sees, use a nullable pointer, *Counter?, instead of Counter?"
+        o.Inc() // ERROR E0504 "call it on a copy: v := o; v.Inc(...); o = v"
+        q: *Counter? = o // ERROR E0201 "for a pointer to a copy, write new(o)"
+        println(q)
+    }
+    p: *Counter = o // ERROR E0201 "for a pointer to a copy, write new(o!!), after checking that o is not null"
+    println(p)
+}
+
+// A parameter cannot be assigned, so the copy is not stored back.
+func readOnly(c: Counter?) {
+    c?.Inc() // ERROR E0504 "check c, then call it on a copy: if c != null { v := c; v.Inc(...) }"
+    if c != null {
+        c.N = 2 // ERROR E0502 "change a copy: v := c; v.N = ... | to change one Counter"
+    }
+}
+
+struct Sink {
+    Count: int
+    Out: io.Writer
+}
+
+func reads(sinks: map[int]Sink, ch: chan Sink, counters: map[int]*Counter) {
+    s := sinks[1]
+    println(s.Count) // ERROR E0401 "s holds sinks[1], which is null for a missing key, because Sink has no zero value: its field Out has type io.Writer, a non-null interface"
+    println(sinks[2].Count) // ERROR E0401 "sinks[2] is null for a missing key, because Sink has no zero value"
+    v, ok := sinks[3]
+    println(v.Count, ok) // ERROR E0401 "v holds sinks[3], which is null for a missing key"
+    r := ch.receive()
+    println(r.Count) // ERROR E0401 "r holds ch.receive(), which is null once the channel is closed"
+    select {
+        t := ch.receive() -> println(t.Count) // ERROR E0401 "t holds ch.receive(), which is null once the channel is closed"
+    }
+    c := counters[1]
+    println(c.N) // ERROR E0401 "it may be null (type *Counter?)"
+}
+
+func main() {}

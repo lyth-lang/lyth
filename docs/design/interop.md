@@ -108,7 +108,7 @@ works, no heuristics that break on `URL`/`IPv4`/`MD5Sum`, and no collisions.
 | Interfaces | used directly. Lyth types implement Go interfaces structurally by declaring methods with the Go method names (`func *H.ServeHTTP(...)`). | |
 | Generic Go APIs | `slices.Contains(xs, x)`, `atomic.Pointer[Config]()` | Inference by unification; constraints checked by `go/types`. |
 | Struct tags | raw-string literal after a field: ``ID: int64 `db:"id"` `` | Emitted verbatim (plus the automatic `json` key, ADR 0013). |
-| Reflection-sensitive code | Capitalized Lyth fields are Go-exported under the same name, and tags are explicit or automatic (`json`) | `encoding/json`, `database/sql` scanning, and `text/template` work on Lyth structs. |
+| Reflection-sensitive code | Capitalized Lyth fields are Go-exported under the same name, and tags are explicit or automatic (`json`) | `encoding/json`, `database/sql` scanning, and `text/template` work on Lyth structs. A decoder can leave nil in a non-null `*T` or interface field (JSON `null`, a NULL column, a missing key in an element it creates), so such fields are declared `T?` (types.md §6). |
 | `context.Context` | ordinary interface value: `ctx: context.Context`; `context.WithTimeout(ctx, 5 * time.Second)` | Lyth adds no implicit context. |
 | Channels | `chan T`, `make(chan T, n)`, `for v in ch`, `ch.send(v)`, `ch.receive()`, `ch.close()`, `select` | Methods lower to `<-` and `close` (ADR 0024). |
 | Go function values | Lyth function types and lambdas *are* Go funcs; fallible lambdas fit `func(...) (..., error)` parameters | |

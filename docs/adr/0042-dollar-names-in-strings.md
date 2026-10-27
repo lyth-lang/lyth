@@ -1,7 +1,8 @@
 # ADR 0042: `$name` in a string is literal unless it names a variable
 
 **Status:** Accepted (2026-10-25). Amends the `$name` row of
-[0012](0012-rejected-features.md) and E0006.
+[0012](0012-rejected-features.md) and E0006. Extended to raw strings by
+[0048](0048-templates-in-raw-strings.md).
 Breaking in the permissive direction: strings that are errors today compile.
 The one breaking part is that `lyth fix` stops rewriting them.
 
