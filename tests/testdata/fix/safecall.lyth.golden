@@ -1,0 +1,28 @@
+// Before ADR 0050, ?. after a call that can fail propagated the error and
+// then selected; ?. is now only a safe call, and lyth fix writes the
+// propagation out as (f()?).name.
+import "errors"
+import "strconv"
+
+struct Cfg {
+    Port: int
+}
+
+func Cfg.Describe(): string = "port ${self.Port}"
+
+func load(s: string): Cfg throws {
+    if s == "" {
+        throw errors.New("empty")
+    }
+    return Cfg(Port = strconv.Atoi(s)?)
+}
+
+func port(s: string): int throws = (load(s)?).Port
+
+func describe(s: string): string throws {
+    return (load(s)?).Describe()
+}
+
+func main() {
+    println(port("80") catch { -1 }, port("") catch { -1 }, describe("8080") catch { "?" })
+}

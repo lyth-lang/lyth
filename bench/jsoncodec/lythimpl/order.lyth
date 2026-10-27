@@ -55,7 +55,7 @@ func Decode(data: []byte): Order throws {
 }
 
 // DecodeTotal decodes an order and returns its total.
-func DecodeTotal(data: []byte): int64 throws = Decode(data)?.Total()
+func DecodeTotal(data: []byte): int64 throws = (Decode(data)?).Total()
 
 // RoundTrip decodes, validates, and re-encodes an order.
 func RoundTrip(data: []byte): []byte throws = json.Marshal(Decode(data)?)?

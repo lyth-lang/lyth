@@ -104,7 +104,7 @@ func main() {
     println(up(9), count(3))
     println(describe(Flag(name = "v", on = true)), describe(Flag(name = "q")))
     four := 4
-    println(orZero(null), orZero(&four))
+    println(orZero(null), orZero(four))
     n := &Node()
     println(n.Next() == n)
 

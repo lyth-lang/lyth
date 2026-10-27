@@ -1,0 +1,54 @@
+// An optional value is a copy (ADR 0049): *p copies the User, so the
+// optional keeps its name when the pointer's User changes, and a Go *string
+// still reads as a string?. (f()?).x propagates an error and then selects,
+// and f()??.x propagates and then calls safely (ADR 0050). A catch (_)
+// handler of a fallible lambda returns success on purpose (ADR 0051).
+import "errors"
+import "flag"
+
+struct User {
+    Name: string
+}
+
+func load(name: string): User throws {
+    if name == "" {
+        throw errors.New("no name")
+    }
+    return User(Name = name)
+}
+
+func maybe(name: string): User? throws = if name == "-" { null } else { load(name)? }
+
+func nameOf(n: string): string throws = (load(n)?).Name
+
+func maybeName(n: string): string? throws = maybe(n)??.Name
+
+func inTx(work: () -> unit throws): string {
+    work() catch {
+        return "rolled back"
+    }
+    return "committed"
+}
+
+func main() {
+    p := &User(Name = "a")
+    o: User? = *p
+    p.Name = "b"
+    println(o.Name, p.Name)
+    fromGo: string? = flag.String("name", "dflt", "a Go *string")
+    println(fromGo)
+    println(nameOf("ann") catch { "?" }, nameOf("") catch (e) { "error: ${e}" })
+    println(maybeName("-") catch { "?" }, maybeName("bo") catch { "?" })
+    println(inTx {
+        load("") catch (_) {
+            return
+        }
+    }, inTx { load("")? })
+}
+
+// Output:
+// a b
+// dflt
+// ann error: no name
+// null bo
+// committed rolled back

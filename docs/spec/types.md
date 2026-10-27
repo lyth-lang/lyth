@@ -207,10 +207,14 @@ not an error. A function that can both fail and find nothing returns `T? throws`
 
 ### 5.6 Optional values (`int?`, `string?`, `User?`)
 
-For a value type `T`, `T?` is an *immutable optional value* represented as `*T`.
-This is the idiomatic Go representation for optional JSON fields (`*int` with
-`null`), nullable SQL columns (`database/sql` and pgx scan NULL into `*T`), and
-"maybe a struct" results (`(*User, error)`).
+For a value type `T`, `T?` is an *optional value*: a `T` or nothing, which
+never changes once made. It is represented as `*T`, the idiomatic Go
+representation for optional JSON fields (`*int` with `null`), nullable SQL
+columns (`database/sql` and pgx scan NULL into `*T`), and "maybe a struct"
+results (`(*User, error)`). It behaves as a value, not as a pointer: it is
+changed only by assigning a new one, compared by contents, and passed to
+`any` as its value. A nullable pointer, through which code changes one `T`
+that every holder sees, is `*T?`.
 
 - Boxing `T → T?` lowers to Go 1.26 `new(expr)`, which allocates unless escape
   analysis proves otherwise. Unboxing (a smart cast or `!!`) copies the value out
@@ -221,9 +225,15 @@ This is the idiomatic Go representation for optional JSON fields (`*int` with
   same reason a smart-cast optional stored as `T?` again (`return pct` in
   `if pct != null { ... }`) is the original pointer, not a new box.
 - `*T?` (nullable pointer) and `T?` (optional value) are different Lyth types
-  with the same Go type. `*T`/`*T?` converts implicitly to `T?`, which is a
-  read-only view and safe. The reverse is rejected (E0201): it would allow writes
-  into a shared box. Write `new(x!!)` for an explicit copy.
+  with the same Go type, and neither converts to the other implicitly
+  ([ADR 0049](../adr/0049-optional-values-are-copies.md)). A Lyth `*T` or `*T?`
+  could still change what an optional made from it holds, so the conversion
+  is a copy written out: `*p` for a `*T` (`users[i]` for `&users[i]`), and
+  `if p != null { *p } else { null }` for a `*T?` (E0201 otherwise, with that
+  edit as a hint). A Go pointer (`*T!`, such as a `*string` field of a Go
+  struct) still converts to `T?`, because Go code can change what it points
+  to anyway (§5.4). The reverse is rejected too (E0201): it would allow
+  writes into a shared box. Write `new(x!!)` for an explicit copy.
 - Equality `a == b` on two `T?` values compares contents with null handling, not
   pointer identity. Go would compare a struct or array that holds a `T?` by the
   boxes' addresses, so `==` and `in` on one is E0209: compare the fields you need.
@@ -366,7 +376,8 @@ A value of Lyth type `S` is assignable to Lyth type `D` if one of these holds:
    interface when null ([ADR 0040](../adr/0040-optionals-into-any.md));
    otherwise it goes in its Go representation, as a nullable pointer passed
    to a pointer parameter ([ADR 0017](../adr/0017-nullable-values-into-go.md)).
-7. `S` is `*T` or `*T?` and `D` is `T?` for a value type `T` (read-only view).
+7. `S` is a Go pointer `*T!` and `D` is `T?` for a value type `T`. A Lyth `*T`
+   or `*T?` converts only as a copy written out (§5.6).
 8. Nullability is compatible (non-null → anything, nullable → nullable only) and
    `lower(S)` is assignable to `lower(D)` under Go's rules, for example
    interface satisfaction or channel direction. Go's assignability is decided by

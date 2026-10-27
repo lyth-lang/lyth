@@ -43,8 +43,8 @@ has the exact rules.
 | `map[K]V`, `[4]int`, `*T`, `chan T`, `chan<- T`, `<-chan T` | the same |
 | `(A, B) -> R`, `(A) -> unit` | `func(A, B) R`, `func(A)` |
 | `(A) -> R throws` | `func(A) (R, error)` |
-| `User?` (nullable struct) | `*User` |
-| `*User?` (nullable pointer), `Shape?` | `*User`, `Shape` (nil allowed) |
+| `User?` (optional value: never changes, `==` by contents; `*p` copies a pointer into one) | `*User` |
+| `*User?` (nullable pointer: changes through it are shared), `Shape?` | `*User`, `Shape` (nil allowed) |
 | `T!` (in diagnostics) | a Go value of unknown nullability |
 
 ## Expressions

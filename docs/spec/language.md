@@ -1031,9 +1031,11 @@ addresses are taken automatically for pointer-receiver calls, as in Go, subject
 to mutability ([types.md §7](types.md#7-mutability)).
 
 `x?.name` is the **safe call**: when `x` is null the result is null, otherwise
-the member is accessed. When `x` is a *fallible result* (a call returning an
-error), `x?.name` means `(x?).name`: propagate the error, then access the
-member. See [errors.md §3.3](errors.md#33-chaining).
+the member is accessed. It is never anything else. To propagate the error of a
+call that can fail and then access a member, write `(f()?).name`; `f()??.name`
+propagates and then calls safely. `f()?.name` on such a call is E0008, whose
+fix writes `(f()?).name` ([errors.md §3.3](errors.md#33-chaining),
+[ADR 0050](../adr/0050-safe-call-only.md)).
 
 ### 5.5 Null-handling operators
 

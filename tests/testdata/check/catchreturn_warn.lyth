@@ -1,0 +1,59 @@
+// A bare return in a catch handler of a fallible lambda ends the lambda
+// successfully and drops the error, so a helper running it (a transaction)
+// carries on as if it had worked (ADR 0051). catch (_) says it on purpose;
+// returns elsewhere, and in lambdas that cannot fail, stay quiet.
+import "errors"
+
+func step(n: int) throws {
+    if n == 2 {
+        throw errors.New("step 2 failed")
+    }
+}
+
+func inTx(work: () -> unit throws) throws {
+    work()?
+}
+
+func each(xs: []int, f: (int) -> unit) {
+    for x in xs {
+        f(x)
+    }
+}
+
+func count(f: () -> int throws): int = f() catch { -1 }
+
+func save() throws {
+    step(1) catch {
+        return
+    }
+}
+
+func main() {
+    inTx {
+        step(1) catch (err) {
+            println(err)
+            return // WARN W0013 "return in this catch handler ends the lambda successfully, and the error is dropped"
+        }
+        step(2) catch {
+            if true {
+                return // WARN W0013 "to fail the lambda with the error, throw it"
+            }
+        }
+        step(3) catch (_) {
+            return
+        }
+        each([1, 2]) {
+            step(it) catch {
+                return
+            }
+        }
+        if false {
+            return
+        }
+        step(4)?
+    } catch (err) {
+        println("tx:", err)
+    }
+    println(count { step(2) catch { return 0 }; 1 })
+    save() catch {}
+}

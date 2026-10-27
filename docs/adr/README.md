@@ -13,7 +13,7 @@ Accepted ADRs are immutable; a superseding ADR links back.
 | [0006](0006-overlay-builds.md) | Overlay builds; in-tree generation on request | Accepted (coverage runs amended by 0034) |
 | [0007](0007-val-var-and-immutability.md) | `val`/`var` and value immutability | Superseded for locals by 0031; parameters amended by 0039 |
 | [0008](0008-error-handling.md) | Error handling: `throws`, `?`, `catch`, `throw` | Accepted |
-| [0009](0009-nullability.md) | Nullability with platform types and boxed optionals | Accepted (smart casts amended by 0031) |
+| [0009](0009-nullability.md) | Nullability with platform types and boxed optionals | Accepted (smart casts amended by 0031; optional values by 0049) |
 | [0010](0010-naming-and-visibility.md) | Verbatim Go names; `pub` and capitalization | Superseded by 0022 |
 | [0011](0011-type-syntax.md) | Type syntax: generics-style collections, loose `?` | Accepted (`List<T>` superseded by 0023; other type spellings by 0031) |
 | [0012](0012-rejected-features.md) | Features considered and rejected | Accepted (extended by 0031, which adopts `:=`; `$name` amended by 0042) |
@@ -53,3 +53,6 @@ Accepted ADRs are immutable; a superseding ADR links back.
 | [0046](0046-smart-casts-between-assignments.md) | Smart casts between assignments | Accepted (amends 0031) |
 | [0047](0047-go-constructs-lyth-lacked.md) | The Go constructs Lyth lacked: three-part `for`, `if` init, groups with `iota`, named results, type sets, complex numbers, generic aliases | Accepted (amends 0012, 0031) |
 | [0048](0048-templates-in-raw-strings.md) | `${name}` in a raw string warns when it names a variable | Accepted (extends 0042) |
+| [0049](0049-optional-values-are-copies.md) | Optional values are copies of a pointer's value: `*p`, no implicit `*T` to `T?` | Accepted (amends 0009) |
+| [0050](0050-safe-call-only.md) | `?.` is only the safe call; `(f()?).name` propagates | Accepted |
+| [0051](0051-returns-in-catch-handlers.md) | A bare `return` in a `catch` of a fallible lambda warns | Accepted |

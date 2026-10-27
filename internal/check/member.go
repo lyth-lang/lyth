@@ -87,12 +87,14 @@ func (c *Checker) selector(e *syntax.SelectorExpr, want types.Type) *operand {
 		if len(r.Success) == 0 {
 			// check()?.Error() on a func check(): error?: the call fails or
 			// gives nothing, so there is nothing to select on.
-			c.errorf(diag.EMultiValue, e.S, "%s returns only an error, which ?. would propagate: x?.%s means (x?).%s, and nothing is left to select .%s on",
-				callName(e.X), name, name, name).
+			c.errorf(diag.EMultiValue, e.S, "%s returns only an error, so there is nothing to select .%s on",
+				callName(e.X), name).
 				WithHint("to use the error as a value, store it first: e := %s, then e?.%s%s", e.X.Span().Short(), name, map[bool]string{true: "()"}[c.callee == syntax.Expr(e)])
 			return invalid(e)
 		}
-		// x?.name on a fallible x means (x?).name.
+		// ?. is only a safe call (ADR 0050): f()?.name on a call that can
+		// fail is the earlier spelling of (f()?).name, still checked as that
+		// so that one diagnostic reports it.
 		c.requireFallible(e.OpSpan, "?")
 		sel.TryFirst = true
 		c.info.Tries[e] = &TryInfo{Success: r.Success, Raw: r.Raw}
@@ -108,6 +110,9 @@ func (c *Checker) selector(e *syntax.SelectorExpr, want types.Type) *operand {
 				WithEdit(e.OpSpan, "??.", "propagate the error, then call safely: %s??.%s", e.X.Span().Short(), name)
 			return invalid(e)
 		}
+		call := e.X.Span()
+		c.errorf(diag.EUnsupportedSyntax, call.Join(e.OpSpan), "?. is a safe call, and %s can fail rather than be null", callName(e.X)).
+			WithFix(call.Join(e.OpSpan), "("+call.Text()+"?).", "to propagate the error and then select .%s, write (%s?).%s", name, call.Text(), name)
 	} else {
 		x = c.singleValue(x)
 		if x.mode == ModeInvalid {

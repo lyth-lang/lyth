@@ -121,12 +121,14 @@ non-nil value on success (`(nil, nil)` "not found" APIs exist).
 
 ### 3.3 Chaining
 
-`f()?` is a postfix expression and composes with member access: `f()?.name`,
-`load(path)?.Validate()?`. Since `?.` is lexed as one token, `x?.y` where `x` is
-a fallible result is defined as `(x?).y`. A fallible result is a tuple, never a
-nullable value, so the safe-call reading would be meaningless and no ambiguity
-exists. When the success value is itself nullable, write `x??.y`
-(propagate, then safe call). The checker's hint suggests this when needed.
+`f()?` is a postfix expression and composes with member access through
+parentheses: `(f()?).name`, `(load(path)?).Validate()?`. `?.` is lexed as one
+token and is always the safe call (language.md §5.4), so a reader sees every
+point where a function may return: a `?` that stands alone. When the success
+value is itself nullable, write `f()??.name`: `?` propagates, then `?.` calls
+safely. `f()?.name` on a call that can fail meant `(f()?).name` before
+[ADR 0050](../adr/0050-safe-call-only.md); it is E0008 now, and `lyth fix`
+rewrites it.
 
 ### 3.4 Errors versus null
 
@@ -324,7 +326,12 @@ and for porting Go code. Day-to-day code uses `?` and `catch`.
   `errgroup.Group.Go`, `fs.WalkDirFunc`). Go has no `throws`, so a trailing
   `error` is how a Go callback says it can fail. In a fallible lambda, `?` and
   `throw` work, the last expression or `return v` is the success value, and
-  reaching the end returns success.
+  reaching the end returns success. So does a bare `return`, also inside a
+  `catch` handler, where it drops the error: a helper that runs the lambda,
+  such as a transaction, goes on as if it had worked. When the lambda has no
+  results, such a `return` draws warning W0013, whose hints are `throw err`
+  to fail and `catch (_)` to succeed on purpose, which silences it
+  ([ADR 0051](../adr/0051-returns-in-catch-handlers.md)).
 - A function type written in Lyth with an `error` result is not fallible: the
   lambda returns the error as its value, as a `func` declared with that type
   does (`check: (int) -> error? = { validate(it) }`). `?` and `throw` are

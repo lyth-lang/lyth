@@ -1,0 +1,40 @@
+// An optional value T? never changes, so a Lyth *T or *T? becomes one only
+// as a copy, written *p (ADR 0049). Go pointers (*T!) still convert, and
+// ?. after a call that can fail is the old spelling of (f()?).name
+// (ADR 0050).
+import "errors"
+import "flag"
+
+struct User {
+    Name: string
+}
+
+func show(u: User?): string = u?.Name ?: "nobody"
+
+func find(users: []User, name: string): User? {
+    for i, u in users {
+        if u.Name == name {
+            return &users[i] // ERROR E0201 "copy the User: users[i]"
+        }
+    }
+    return null
+}
+
+func pass(q: *User?): string = show(q) // ERROR E0201 "copy it, after a null check: if q != null { *q } else { null }"
+
+func load(name: string): User throws {
+    if name == "" {
+        throw errors.New("no name")
+    }
+    return User(Name = name)
+}
+
+func nameOf(n: string): string throws = load(n)?.Name // ERROR E0008 "to propagate the error and then select .Name, write (load(n)?).Name"
+
+func main() {
+    p := &User(Name = "ada")
+    o: User? = p // ERROR E0201 "User? is an optional value, which never changes; p points to a User that code may change"
+    copied: User? = *p
+    fromGo: string? = flag.String("name", "x", "a Go *string converts")
+    println(show(copied), o, fromGo, find([User(Name = "a")], "a"), pass(null), nameOf("b") catch { "?" })
+}

@@ -84,4 +84,5 @@ const (
 	WFormatString  Code = "W0010"
 	WBuiltinMember Code = "W0011"
 	WRawTemplate   Code = "W0012"
+	WCatchReturn   Code = "W0013"
 )

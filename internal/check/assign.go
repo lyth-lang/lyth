@@ -156,7 +156,7 @@ func (c *Checker) reportMismatchReason(x *operand, target types.Type, context, r
 
 // mismatchHints adds conversion suggestions for common mismatches.
 func (c *Checker) mismatchHints(d *diag.Diagnostic, x *operand, target types.Type) {
-	if c.optionalToPointer(d, x, target) {
+	if c.optionalToPointer(d, x, target) || c.pointerToOptional(d, x, target) {
 		return
 	}
 	src, dst := types.Base(x.typ), types.Base(target)
@@ -222,9 +222,12 @@ func (c *Checker) assignable(src, dst types.Type) (bool, ConversionKind, string)
 			}
 			return true, conv, reason
 		}
-		// *T and *T? are read-only views of T? for value types.
-		if !types.IsNilable(dn.Elem) {
-			if p, ok := types.Base(src).(*types.Pointer); ok && types.Identical(types.Base(p.Elem), types.Base(dn.Elem)) {
+		// A Go pointer (*T!) still reads as T? for a value type: Go code may
+		// change what it points to anyway, as with any platform value. A Lyth
+		// *T or *T? is copied explicitly (*p), so that an optional value
+		// never changes under the code that holds it (ADR 0049).
+		if pl, ok := src.(*types.Platform); ok && !types.IsNilable(dn.Elem) {
+			if p, ok := pl.Elem.(*types.Pointer); ok && types.Identical(types.Base(p.Elem), types.Base(dn.Elem)) {
 				return true, ConvNone, ""
 			}
 		}
@@ -650,6 +653,38 @@ func (c *Checker) optionalValue(e syntax.Expr, member, verb string) bool {
 	d := c.errorf(diag.EMutateVal, e.Span(), "cannot %s %s.%s: %s is an optional value, which copies share", verb, name, member, name).
 		WithHint("change a copy: v := %s; v.%s = ...%s", name, member, back)
 	sharedPointerHint(d, c.info.TypeOf(e))
+	return true
+}
+
+// pointerToOptional explains why a Lyth *T or *T? does not become the
+// optional value T?: the pointer's T may still change, and an optional value
+// never does, so the conversion is a copy written *p (ADR 0049).
+func (c *Checker) pointerToOptional(d *diag.Diagnostic, x *operand, target types.Type) bool {
+	dn, ok := target.(*types.Nullable)
+	if !ok || x.expr == nil || types.IsNilable(dn.Elem) || types.IsPlatform(x.typ) {
+		return false
+	}
+	p, ok := types.Base(x.typ).(*types.Pointer)
+	if !ok || !types.Identical(types.Base(p.Elem), types.Base(dn.Elem)) {
+		return false
+	}
+	text := x.expr.Span().Short()
+	d.WithNote("%s is an optional value, which never changes; %s points to a %s that code may change", target, text, dn.Elem)
+	if types.IsNullable(x.typ) {
+		d.WithHint("copy it, after a null check: if %s != null { *%s } else { null }", text, text)
+		return true
+	}
+	copied := "*" + x.expr.Span().Text()
+	switch e := syntax.Unparen(x.expr).(type) {
+	case *syntax.UnaryExpr:
+		if e.Op == syntax.AND {
+			copied = e.X.Span().Text() // &users[i] copies as users[i]
+		}
+	case *syntax.Ident, *syntax.SelectorExpr, *syntax.IndexExpr, *syntax.CallExpr:
+	default:
+		copied = "*(" + x.expr.Span().Text() + ")"
+	}
+	d.WithEdit(x.expr.Span(), copied, "copy the %s: %s", dn.Elem, copied)
 	return true
 }
 

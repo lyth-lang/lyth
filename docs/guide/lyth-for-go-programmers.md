@@ -141,6 +141,12 @@ as idiomatic Go APIs do it. The difference is that Lyth checks it: `user.Name`
 does not compile until `user` is known to be non-null, while Go compiles a
 missing nil check and panics at run time.
 
+In Lyth a `User?` is an optional *value*, not a pointer to share: it never
+changes once made, so assigning `user.Name` is an error, `==` compares
+contents, and a `*User` becomes one only as a copy, `*p`. When code should
+change one `User` that every holder sees, declare a nullable pointer,
+`*User?`: it behaves exactly as Go's `*User`, with the nil check added.
+
 ## Null-safe chains
 
 ```kotlin

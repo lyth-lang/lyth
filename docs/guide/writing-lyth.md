@@ -216,6 +216,9 @@ func main() throws {
   wraps it with context.
 - `f() catch { fallback }`, or `f() catch (err) { ...; fallback }`, handles it in place.
   `f() catch {}` ignores it explicitly.
+- In a lambda that can fail (a callback such as `g.Go { }` or a transaction function), a bare
+  `return` means success, also inside `catch`, where it drops the error (warning W0013). Write
+  `throw err` to fail, or `catch (_) { return }` to succeed on purpose.
 - `f() catch (e: *NotFound) { ... }` handles one error type (through wrapping); it must end with
   `?` or a final `catch` for the other errors. For an error already in a variable, use
   `nf, ok := errors.AsType[*NotFound](err)`: `err is *NotFound` sees only the outermost error and
@@ -230,7 +233,12 @@ func main() throws {
 ## Null safety
 
 - A `T?` needs a check before member access: `if u != null { u.Name }` (a smart cast), or
-  `u?.Name`, `u?.Name ?: "anon"`, `u!!` (panics on null).
+  `u?.Name`, `u?.Name ?: "anon"`, `u!!` (panics on null). `?.` is only this safe call: to
+  propagate an error and then select, write `(f()?).Name`, or `f()??.Name` when the result may
+  also be null.
+- `User?` is an optional value: it never changes, so `u.Name = x` is an error, and `==` compares
+  contents. A `*User` becomes one only as a copy, `*p` (`users[i]` for `&users[i]`). To change
+  one `User` that others see, use a nullable pointer, `*User?`.
 - `x := f() ?: return` exits early on null.
 - Smart casts apply to parameters, `self`, and locals. A reassigned local stays smart-cast until
   its next assignment (`node = node.Next` inside `while node != null` works, and so does
@@ -385,6 +393,8 @@ The table lists older Lyth forms and the Go and Kotlin habits the compiler recog
 | `lyth run main.lyth` inside a module ran the file's whole package | it runs that file alone, as `go run main.go` does; `lyth run .` runs the package | no: a command to change |
 | `json:""` on a field kept an empty tag | the Go field is untagged, so encoding/json uses the field name | no: a wire change only where the tag was written |
 | a field or method `len`, `init`, ... was `len_`, `init_` in Go | it keeps its name; Go code of the package uses `x.len` | no: Go code to change |
+| `f()?.name` on a call that can fail (propagate, then select) | `(f()?).name`; `?.` is only the safe call | yes |
+| a `*T` or `*T?` passed or assigned where `T?` is expected | a copy: `*p` (`users[i]` for `&users[i]`), or `if p != null { *p } else { null }` | no: the copy no longer follows changes to `*p`; a hint gives the edit |
 
 ## Topics
 

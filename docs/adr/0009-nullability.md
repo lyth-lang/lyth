@@ -1,6 +1,6 @@
 # ADR 0009: Nullability with platform types and boxed optionals
 
-**Status:** Accepted; smart casts of locals amended by [0031](0031-go-spelling.md) (locals that are never reassigned)
+**Status:** Accepted; smart casts of locals amended by [0031](0031-go-spelling.md) (locals that are never reassigned); optional values amended by [0049](0049-optional-values-are-copies.md)
 
 ## Context
 Nil dereference is Go's most common panic. Kotlin-style null safety helps, but

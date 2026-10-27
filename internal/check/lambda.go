@@ -241,6 +241,9 @@ func (c *Checker) lambda(e *syntax.LambdaExpr, want types.Type) *operand {
 	}
 	info.Unused = c.finishLocals(fn)
 	c.scope, c.fn = saveScope, saveFn
+	if fn.fallible && !fn.rawTuple && len(sig.Results) == 0 {
+		c.bareCatchReturns(e.Body)
+	}
 	info.Sig = sig
 	c.info.Lambdas[e] = info
 	if badResult {
@@ -252,6 +255,34 @@ func (c *Checker) lambda(e *syntax.LambdaExpr, want types.Type) *operand {
 		return &operand{mode: ModeValue, typ: types.Base(want)}
 	}
 	return &operand{mode: ModeValue, typ: sig}
+}
+
+// bareCatchReturns warns about a bare return in a catch handler of a fallible
+// lambda without results: it ends the lambda successfully and drops the
+// error, so a helper running the lambda (a transaction) goes on as if it
+// had worked, where Go makes the author write return nil or return err
+// (ADR 0051). A handler that names the error _ discards it on purpose.
+// Nested lambdas and go and defer blocks have returns of their own.
+func (c *Checker) bareCatchReturns(body *syntax.Block) {
+	var visit func(n syntax.Node, handler bool)
+	visit = func(n syntax.Node, handler bool) {
+		switch x := n.(type) {
+		case *syntax.LambdaExpr, *syntax.GoStmt, *syntax.DeferStmt:
+			return
+		case *syntax.CatchExpr:
+			visit(x.X, handler)
+			visit(x.Body, x.Binder == nil || x.Binder.Name != "_")
+			return
+		case *syntax.JumpExpr:
+			if handler && x.Kind == syntax.JumpReturn && len(x.Values) == 0 {
+				c.warnf(diag.WCatchReturn, x.S, "return in this catch handler ends the lambda successfully, and the error is dropped").
+					WithHint("to fail the lambda with the error, throw it: catch (err) { ...; throw err }").
+					WithHint("to succeed on purpose, discard the error by name: catch (_) { ... }")
+			}
+		}
+		syntax.Children(n, func(ch syntax.Node) { visit(ch, handler) })
+	}
+	visit(body, false)
 }
 
 // statementLike reports whether e, the last statement of a lambda whose
