@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("struct T Node[T ]\ninterface Node[A 0000[T{00000000000")

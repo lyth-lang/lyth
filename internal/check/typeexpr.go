@@ -25,7 +25,11 @@ func (c *Checker) resolveType(te syntax.TypeExpr) types.Type {
 
 // constraintOnly reports whether t is an interface Go allows only as a
 // constraint: Comparable, or one with a type set such as cmp.Ordered.
-func constraintOnly(t types.Type) bool {
+func constraintOnly(t types.Type) bool { return constraintOnlyIn(t, map[*types.TypeDecl]bool{}) }
+
+// constraintOnlyIn is constraintOnly, visiting each Lyth interface once: an
+// interface embedding itself (interface E { E }) is reported elsewhere.
+func constraintOnlyIn(t types.Type, seen map[*types.TypeDecl]bool) bool {
 	switch b := types.Base(t).(type) {
 	case *types.GoType:
 		iface, ok := b.T.Underlying().(*gotypes.Interface)
@@ -34,11 +38,12 @@ func constraintOnly(t types.Type) bool {
 		if b.Decl != nil {
 			// A Lyth interface with a type set (ADR 0047), directly or
 			// through an embedded interface.
-			if b.Decl.Kind != types.InterfaceDecl {
+			if b.Decl.Kind != types.InterfaceDecl || seen[b.Decl] {
 				return false
 			}
+			seen[b.Decl] = true
 			for _, e := range b.Decl.Embeds {
-				if constraintOnly(e) {
+				if constraintOnlyIn(e, seen) {
 					return true
 				}
 			}
@@ -57,17 +62,25 @@ func constraintOnly(t types.Type) bool {
 // its embedded elements only, so that an interface still being declared is
 // never completed.
 func hasTypeTerms(iface *gotypes.Interface) bool {
+	return hasTypeTermsIn(iface, map[*gotypes.Interface]bool{})
+}
+
+func hasTypeTermsIn(iface *gotypes.Interface, seen map[*gotypes.Interface]bool) bool {
+	if seen[iface] {
+		return false // an interface embedding itself, reported elsewhere
+	}
+	seen[iface] = true
 	for i := 0; i < iface.NumEmbeddeds(); i++ {
 		switch e := iface.EmbeddedType(i).(type) {
 		case *gotypes.Union:
 			return true
 		case *gotypes.Interface:
-			if hasTypeTerms(e) {
+			if hasTypeTermsIn(e, seen) {
 				return true
 			}
 		default:
 			if u, ok := e.Underlying().(*gotypes.Interface); ok {
-				if hasTypeTerms(u) {
+				if hasTypeTermsIn(u, seen) {
 					return true
 				}
 			} else if e.Underlying() != nil {
@@ -98,6 +111,20 @@ func (c *Checker) unionType(u *syntax.UnionType) types.Type {
 			c.errorf(diag.EInvalidUse, tm.S, "a type set cannot hold the type parameter %s", t)
 			return types.Invalid
 		}
+		if n, ok := types.Base(t).(*types.Named); ok && n.Decl != nil {
+			// A Lyth type may still be being declared, so its Go type is not
+			// asked for its underlying type: the declaration answers.
+			if n.Decl.Kind == types.InterfaceDecl && len(n.Decl.Methods) > 0 {
+				c.errorf(diag.EInvalidUse, tm.S, "a type set cannot hold %s, an interface with methods", t)
+				return types.Invalid
+			}
+			if tm.Tilde {
+				c.errorf(diag.EInvalidUse, tm.S, "~%s: the type after ~ must be its own underlying type", t)
+				return types.Invalid
+			}
+			terms = append(terms, gotypes.NewTerm(false, types.Lower(t)))
+			continue
+		}
 		g := types.Lower(t)
 		if g == nil || g.Underlying() == nil {
 			return types.Invalid // a type still being declared, reported elsewhere
@@ -116,6 +143,25 @@ func (c *Checker) unionType(u *syntax.UnionType) types.Type {
 	iface := gotypes.NewInterfaceType(nil, []gotypes.Type{gotypes.NewUnion(terms)})
 	iface.MarkImplicit() // completed by go/types when first used
 	return &types.GoType{T: iface}
+}
+
+// arrayLen checks the length of an array type. While type declarations
+// are resolved, a length may name a type that is not defined yet
+// ([T(1)]int inside T, [Node(0)]int inside Node), which go/types cannot
+// look into; a length is a constant, so such an expression is reported as
+// one that is not.
+func (c *Checker) arrayLen(e syntax.Expr) (x *operand) {
+	if c.defining != nil {
+		n := c.sink.Len()
+		defer func() {
+			if r := recover(); r != nil {
+				c.sink.Truncate(n)
+				c.errorf(diag.EInvalidUse, e.Span(), "array length must be a constant integer")
+				x = invalid(e)
+			}
+		}()
+	}
+	return c.expr(e, types.Int)
 }
 
 // aliasArgs instantiates a generic alias with the type arguments of te,
@@ -305,7 +351,7 @@ func (c *Checker) resolveType0(te syntax.TypeExpr) types.Type {
 			return types.Invalid
 		}
 		n := int64(0)
-		x := c.expr(te.Len, types.Int)
+		x := c.arrayLen(te.Len)
 		if x.mode != ModeInvalid {
 			if x.val == nil || x.val.Kind() != constant.Int {
 				c.errorf(diag.EInvalidUse, te.Len.Span(), "array length must be a constant integer")

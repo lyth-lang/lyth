@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("interface e e\nstruct:Shape e\nfun A s Shape)=when s as l(0 A:[#Shap ")

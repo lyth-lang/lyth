@@ -673,6 +673,12 @@ func (c *Checker) typeCall(e *syntax.CallExpr, t types.Type, args []*syntax.Arg,
 		c.errorf(diag.EInvalidUse, e.S, "%s cannot be converted here: a type parameter's constraint cannot use the parameters it declares", args[0].Value.Span().Short())
 		return invalid(e)
 	}
+	if c.undefined(src) || c.undefined(t) {
+		// [T(1)]int inside T's own declaration: go/types cannot convert to
+		// a type whose definition is not set yet.
+		c.errorf(diag.EInvalidUse, e.S, "%s cannot be converted here: the type is still being declared", args[0].Value.Span().Short())
+		return invalid(e)
+	}
 	if !gotypes.ConvertibleTo(types.Lower(src), types.Lower(t)) {
 		d := c.errorf(diag.EConversion, e.S, "cannot convert %s (type %s) to %s", args[0].Value.Span().Short(), x.typ, t)
 		if types.IsString(src) && types.IsNumeric(t) {
