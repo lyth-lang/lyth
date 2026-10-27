@@ -3,6 +3,7 @@ package check
 import (
 	"go/constant"
 	gotypes "go/types"
+	"slices"
 	"strings"
 
 	"github.com/lyth-lang/lyth/internal/diag"
@@ -367,7 +368,12 @@ func (c *Checker) resolveType0(te syntax.TypeExpr) types.Type {
 		for _, p := range te.Params {
 			sig.Params = append(sig.Params, c.resolveType(p))
 		}
+		seen := map[string]*syntax.Ident{}
 		for _, n := range te.ParamNames {
+			if old := seen[n.Name]; old != nil && n.Name != "_" {
+				c.errorf(diag.EDuplicate, n.S, "parameter %s is already declared", n.Name).WithRelated(old.S, "previous declaration")
+			}
+			seen[n.Name] = n
 			sig.ParamNames = append(sig.ParamNames, n.Name)
 		}
 		if te.Result != nil {
@@ -404,6 +410,18 @@ func (c *Checker) lythTypeRef(ts *TypeSym, te *syntax.NamedType) types.Type {
 	for i, a := range te.Args {
 		if args[i] = c.resolveType(a); args[i] == types.Invalid {
 			return types.Invalid
+		}
+	}
+	if c.defining[d] && d.Kind != types.InterfaceDecl {
+		// struct S[T] { next: *S[[]T]? } needs S[[]T], S[[][]T], and so on
+		// without end: Go rejects it as an instantiation cycle. (An interface
+		// embedding itself is reported as that.)
+		for i, a := range args {
+			if _, bare := a.(*types.TypeParam); !bare && mentions(a, d.TypeParams) {
+				c.errorf(diag.EInvalidUse, te.Args[i].Span(), "invalid recursive type %s: it refers to itself with the type argument %s, which would need infinitely many types", d.Name, a).
+					WithNote("a generic type may refer to itself only with its own type parameters, as %s[%s]", d.Name, typeParamNames(d.TypeParams))
+				return types.Invalid
+			}
 		}
 	}
 	inst := &types.Named{Decl: d, Args: args}
@@ -698,4 +716,34 @@ func (c *Checker) whenDeclared(f func()) {
 		return
 	}
 	f()
+}
+
+// mentions reports whether t refers to one of the type parameters tps.
+func mentions(t types.Type, tps []*types.TypeParam) bool {
+	switch t := t.(type) {
+	case *types.TypeParam:
+		return slices.Contains(tps, t)
+	case *types.Nullable:
+		return mentions(t.Elem, tps)
+	case *types.Platform:
+		return mentions(t.Elem, tps)
+	case *types.Pointer:
+		return mentions(t.Elem, tps)
+	case *types.Slice:
+		return mentions(t.Elem, tps)
+	case *types.Array:
+		return mentions(t.Elem, tps)
+	case *types.Map:
+		return mentions(t.Key, tps) || mentions(t.Elem, tps)
+	case *types.Chan:
+		return mentions(t.Elem, tps)
+	case *types.Signature:
+		return slices.ContainsFunc(t.Params, func(p types.Type) bool { return mentions(p, tps) }) ||
+			slices.ContainsFunc(t.Results, func(r types.Type) bool { return mentions(r, tps) })
+	case *types.Tuple:
+		return slices.ContainsFunc(t.Elems, func(e types.Type) bool { return mentions(e, tps) })
+	case *types.Named:
+		return slices.ContainsFunc(t.Args, func(a types.Type) bool { return mentions(a, tps) })
+	}
+	return false
 }

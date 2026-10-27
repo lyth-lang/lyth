@@ -1927,13 +1927,19 @@ func (c *Checker) indexValue(e syntax.Expr) constant.Value {
 	}
 	if types.IsUntyped(x.typ) {
 		c.assign(x, types.Int, "index")
-		return x.val
-	}
-	if !types.IsInteger(types.Base(x.typ)) {
+	} else if !types.IsInteger(types.Base(x.typ)) {
 		c.errorf(diag.ETypeMismatch, e.Span(), "index must be an integer, not %s", x.typ)
 		return nil
 	}
-	return x.val
+	// Only an integer constant is compared with other bounds: an untyped
+	// "a" > "b" has been reported, and is no bound.
+	if x.val == nil {
+		return nil
+	}
+	if v := constant.ToInt(x.val); v.Kind() == constant.Int {
+		return v
+	}
+	return nil
 }
 
 // constBound reports a constant index or slice bound v past n, the length
@@ -2904,7 +2910,7 @@ func (c *Checker) indexInstantiation(e *syntax.IndexExpr) *syntax.InstantiateExp
 	generic := func(sym Symbol) bool {
 		switch s := sym.(type) {
 		case *TypeSym:
-			return s.Decl != nil && len(s.Decl.TypeParams) > 0
+			return s.Decl != nil && len(s.Decl.TypeParams) > 0 || len(s.AliasParams) > 0
 		case *FuncSym:
 			return s.Decl != nil && len(s.Decl.TypeParams) > 0 || s.Sig != nil && len(s.Sig.TypeParams) > 0
 		}

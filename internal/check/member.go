@@ -234,8 +234,10 @@ func (c *Checker) lookupMember(t types.Type, name string, id *syntax.Ident) *mem
 			return nil
 		}
 	}
-	if u, ok := definedUnder(base).(*types.Pointer); ok {
+	if u, ok := definedUnder(base).(*types.Pointer); ok && base == t {
 		// type UserPtr *User: up.Name is (*up).Name, for fields only, as in Go.
+		// One level only: through a pointer to UserPtr, or from type A *A,
+		// there is no field.
 		if m := c.quietMember(u, name, id); m != nil && m.kind == SelField {
 			return m
 		}
@@ -882,6 +884,12 @@ func (c *Checker) instantiateFunc(e *syntax.InstantiateExpr) *operand {
 	for i, tp := range sig.TypeParams {
 		targs[i] = bind[tp.Go]
 		goArgs[i] = types.Lower(targs[i])
+		// A type parameter used in its own constraint has none yet, and
+		// go/types cannot check it: func f[A: [zero[A]]int]().
+		if tp, ok := goArgs[i].(*gotypes.TypeParam); ok && tp.Constraint() == nil {
+			c.errorf(diag.EInvalidUse, e.S, "%s cannot be used here: its constraint is still being declared", tp.Obj().Name())
+			return invalid(e)
+		}
 	}
 	inst, err := gotypes.Instantiate(nil, sig.GoSig, goArgs, true)
 	if err != nil {
