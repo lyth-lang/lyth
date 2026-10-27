@@ -76,7 +76,7 @@ func main() throws {
         strconv.Atoi("x")? // ERROR E0301 "? cannot be used in a go block"
     }
     f := { strconv.Atoi("z")? } // ERROR E0301 "? can only be used in a lambda whose type is fallible"
-    c: *(string?) = null // ERROR E0201 "expected *(string?)"
+    c: *(string?) = null // ERROR E0402 "expected *(string?)"
     n := int("7") // ERROR E0214 "cannot convert"
     tn, _ := tuple("1")
     println(a, b, f, c, n, withDefault(1), isNil(1), tn)

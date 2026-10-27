@@ -143,7 +143,11 @@ func (c *Checker) reportMismatchReason(x *operand, target types.Type, context, r
 	if types.IsUntyped(found) {
 		found = types.DefaultType(found)
 	}
-	d := c.errorf(diag.ETypeMismatch, span, "%s", msg).WithLabel("expected %s, found %s", target, found)
+	code := diag.ETypeMismatch
+	if x.typ == types.Null {
+		code = diag.ENullAssign // null where the type has no null
+	}
+	d := c.errorf(code, span, "%s", msg).WithLabel("expected %s, found %s", target, found)
 	if reason != "" {
 		d.WithNote("%s", reason)
 	}

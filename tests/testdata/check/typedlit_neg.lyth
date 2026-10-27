@@ -24,7 +24,7 @@ func main() {
     var2: [...]int = [1] // ERROR E0216 "[...] gives an array its length only in a typed literal"
     p := Point{X: 1} // ERROR E0008 "write Point(X = 1)"
     pg := Page[int]{Items: [1]} // ERROR E0008 "write Page[int](Items = [1])"
-    n := []any{null} // ERROR E0201 "any is not nullable"
+    n := []any{null} // ERROR E0402 "any is not nullable"
     println(a, b, c, d, e, f, g, h, fl, an, i, var2, p, pg, n)
     for x in []int{1, 2} { // a type is never a header's value: the braces are the literal's
         println(x)
