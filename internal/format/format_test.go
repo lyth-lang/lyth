@@ -41,6 +41,8 @@ var cases = []struct{ name, in, want string }{
 		"struct User {\n    ID: int64    `db:\"id\"`\n    Name: string `db:\"name\"` // shown\n}\n"},
 	{"raw strings and templates", "func f() {\n    q := `SELECT *\n  FROM t   `\n    s := \"a ${ x+1 } b\"\n}\n",
 		"func f() {\n    q := `SELECT *\n  FROM t   `\n    s := \"a ${ x+1 } b\"\n}\n"},
+	{"comments spanning lines", "func main() {\n      /*\n       a\n    */\n  x := 1 /* b\n  c */\n  println(x)\n}\n",
+		"func main() {\n    /*\n       a\n    */\n    x := 1 /* b\n  c */\n    println(x)\n}\n"},
 	{"in as a name", "func stage(in: <-chan int) {\n    double := { in: int -> in * 2 }\n    x := in\n    b := 1 in xs\n    c := x !in xs\n}\n",
 		"func stage(in: <-chan int) {\n    double := { in: int -> in * 2 }\n    x := in\n    b := 1 in xs\n    c := x !in xs\n}\n"},
 	{"when and else", "func f(x: int): string = when x {\n1, 2 -> \"low\"\nin 3..9 -> \"mid\"\nelse -> {\n\"high\"\n}\n}\n",

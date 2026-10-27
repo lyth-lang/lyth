@@ -8,6 +8,7 @@ import (
 	gotypes "go/types"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/lyth-lang/lyth/internal/check"
 	"github.com/lyth-lang/lyth/internal/source"
@@ -77,10 +78,10 @@ func newFnLower(l *fileLowerer, sig *types.Signature, lambda bool) *fnLower {
 		casts: map[*check.VarSym]*castBinding{}, breaks: &[]*breakCtx{}, labels: map[string]bool{},
 		pre: map[syntax.Expr]ast.Expr{}, assignedFields: map[string]bool{}}
 	fl.setShape(sig)
-	for name := range l.importNames {
-		fl.reserved[name] = true
-		fl.taken[name] = true
-	}
+	// Imports are reserved where the function refers to them or to their
+	// types (collectNames), so a parameter path keeps its name in a file
+	// that imports path but does not use it there; the packages lowering
+	// may call are reserved always.
 	for name := range supportPkgs {
 		fl.reserved[name] = true
 		fl.taken[name] = true
@@ -111,6 +112,7 @@ func (fl *fnLower) child(sig *types.Signature) *fnLower {
 // temporaries never capture or shadow them, and the package-level names
 // the body refers to so user locals never shadow those.
 func (fl *fnLower) collectNames(n syntax.Node) {
+	defer fl.reserveTypePackages()
 	syntax.Walk(n, func(x syntax.Node) {
 		switch x := x.(type) {
 		case *syntax.AssignStmt:
@@ -134,10 +136,15 @@ func (fl *fnLower) collectNames(n syntax.Node) {
 			switch s := fl.info.Uses[x].(type) {
 			case *check.FuncSym, *check.ConstSym, *check.TypeSym:
 				fl.reserved[goNameOf(s)] = true
+				if s, ok := s.(*check.FuncSym); ok && s.Pkg != nil {
+					fl.reserved[pkgMarker+s.Pkg.Path] = true
+				}
 			case *check.VarSym:
 				if s.Kind == check.GlobalVar {
 					fl.reserved[s.GoName] = true
 				}
+			case *check.PkgSym:
+				fl.reserved[x.Name] = true
 			}
 		case *syntax.WhenExpr:
 			for _, br := range x.Branches {
@@ -199,6 +206,15 @@ func collectTypeNames(t types.Type, out map[string]bool) {
 	case *types.Named:
 		if t.Decl != nil {
 			out[t.Decl.GoName] = true
+			if t.Decl.PkgPath != "" {
+				out[pkgMarker+t.Decl.PkgPath] = true
+			}
+		}
+		if t.Go != nil && t.Go.Obj().Pkg() != nil {
+			out[pkgMarker+t.Go.Obj().Pkg().Path()] = true // a qualifier: http.Request
+		}
+		if t.Alias != nil && t.Alias.Obj().Pkg() != nil {
+			out[pkgMarker+t.Alias.Obj().Pkg().Path()] = true
 		}
 		for _, a := range t.Args {
 			collectTypeNames(a, out)
@@ -232,6 +248,26 @@ func collectTypeNames(t types.Type, out map[string]bool) {
 	case *types.Tuple:
 		for _, e := range t.Elems {
 			collectTypeNames(e, out)
+		}
+	}
+}
+
+// pkgMarker prefixes the import paths collectTypeNames records in a reserved
+// set; reserveTypePackages turns them into the file's import names.
+const pkgMarker = "\x00"
+
+// reserveTypePackages reserves the import names of the packages whose types
+// or functions the function uses, which its Go code may qualify.
+func (fl *fnLower) reserveTypePackages() {
+	for k := range fl.reserved {
+		path, ok := strings.CutPrefix(k, pkgMarker)
+		if !ok {
+			continue
+		}
+		delete(fl.reserved, k)
+		if name, ok := fl.l.imports[path]; ok {
+			fl.reserved[name] = true
+			fl.taken[name] = true
 		}
 	}
 }
@@ -415,6 +451,9 @@ func (fl *fnLower) finish(stmts *[]ast.Stmt, span source.Span) {
 	}
 	switch {
 	case fl.shape.throws && len(fl.shape.results) == 0:
+		if fl.returnLastError(stmts) {
+			return
+		}
 		r := &ast.ReturnStmt{Results: []ast.Expr{ast.NewIdent("nil")}}
 		markTree(fl.l, r, span)
 		*stmts = append(*stmts, r)
@@ -423,6 +462,63 @@ func (fl *fnLower) finish(stmts *[]ast.Stmt, span source.Span) {
 		markTree(fl.l, p, span)
 		*stmts = append(*stmts, p)
 	}
+}
+
+// returnLastError folds a function's final error check into its return, as
+// Go writes it: err? last is return err, and f()? last is return f(), where
+// lowering wrote if err != nil { return err } before the return nil.
+func (fl *fnLower) returnLastError(stmts *[]ast.Stmt) bool {
+	list := *stmts
+	if len(list) == 0 || fl.deferErr != "" || fl.namedResults {
+		return false
+	}
+	is, ok := list[len(list)-1].(*ast.IfStmt)
+	if !ok || is.Else != nil || len(is.Body.List) != 1 {
+		return false
+	}
+	cond, ok := is.Cond.(*ast.BinaryExpr)
+	if !ok || cond.Op != token.NEQ || !isNilIdent(cond.Y) {
+		return false
+	}
+	errID, ok := cond.X.(*ast.Ident)
+	ret, okRet := is.Body.List[0].(*ast.ReturnStmt)
+	if !ok || !okRet || len(ret.Results) != 1 {
+		return false
+	}
+	if r, ok := ret.Results[0].(*ast.Ident); !ok || r.Name != errID.Name {
+		return false
+	}
+	// The value checked: the if's init, the statement before, or the variable.
+	var value ast.Expr = ast.NewIdent(errID.Name)
+	cut := len(list) - 1
+	define := func(st ast.Stmt) ast.Expr {
+		if a, ok := st.(*ast.AssignStmt); ok && a.Tok == token.DEFINE && len(a.Lhs) == 1 && len(a.Rhs) == 1 {
+			if id, ok := a.Lhs[0].(*ast.Ident); ok && id.Name == errID.Name {
+				return a.Rhs[0]
+			}
+		}
+		return nil
+	}
+	switch {
+	case is.Init != nil:
+		if value = define(is.Init); value == nil {
+			return false
+		}
+	case cut > 0 && define(list[cut-1]) != nil:
+		value = define(list[cut-1])
+		cut--
+	}
+	r := &ast.ReturnStmt{Return: is.If, Results: []ast.Expr{value}}
+	if span, ok := fl.l.spans[is]; ok {
+		fl.l.mark(r, span)
+	}
+	*stmts = append(list[:cut], r)
+	return true
+}
+
+func isNilIdent(e ast.Expr) bool {
+	id, ok := e.(*ast.Ident)
+	return ok && id.Name == "nil"
 }
 
 // goTerminates reports whether a statement list ends in a terminating
@@ -603,7 +699,7 @@ func (fl *fnLower) localDecl(s *syntax.LocalDecl) {
 	v := vars[0]
 	if s.Value == nil {
 		name := fl.declareLocal(v)
-		spec := &ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(name)}, Type: fl.l.typeExpr(v.Type)}
+		spec := &ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(name)}, Type: fl.l.declTypeExpr(s.Type, v.Type)}
 		fl.emit(&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, TokPos: fl.l.pos(s.S), Specs: []ast.Spec{spec}}}, s.S)
 		fl.useIfUnused(v, name, s.S)
 		return
@@ -645,6 +741,17 @@ func (fl *fnLower) localDecl(s *syntax.LocalDecl) {
 		// c := cur ?: break: the check, then the declaration of what is
 		// left, as Go code writes it: if cur == nil { break }; c := cur.
 		if xt := fl.info.TypeOf(el.X); xt != nil && (types.MayBeNull(xt) || types.IsNilable(xt)) {
+			if _, plain := syntax.Unparen(el.X).(*syntax.Ident); !plain && !(optionalValue(xt) && !optionalValue(v.Type)) {
+				// next := n.next ?: throw e: declare, then check the name,
+				// as Go writes it: next := n.next; if next == nil { ... }.
+				name := fl.declareLocal(v)
+				fl.emit(&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(name)}, Tok: token.DEFINE, TokPos: fl.l.pos(s.S), Rhs: []ast.Expr{fl.expr(el.X)}}, s.S)
+				sub, stmts := fl.sub()
+				sub.exprStmt(el.Y)
+				fl.emitSynthShallow(&ast.IfStmt{If: fl.l.pos(el.S), Cond: nilCmp(ast.NewIdent(name), token.EQL), Body: &ast.BlockStmt{List: *stmts}}, el.OpSpan)
+				fl.useIfUnused(v, name, s.S)
+				return
+			}
 			x := fl.stash(el.X, fl.expr(el.X))
 			sub, stmts := fl.sub()
 			sub.exprStmt(el.Y)
@@ -831,6 +938,22 @@ func (fl *fnLower) assignStmt(s *syntax.AssignStmt) {
 		}
 		fl.emit(&ast.AssignStmt{Lhs: lhs, Tok: token.ASSIGN, TokPos: fl.l.pos(s.S), Rhs: []ast.Expr{x}}, s.S)
 		return
+	}
+	if id, ok := syntax.Unparen(s.Lhs).(*syntax.Ident); ok && s.Op == syntax.ASSIGN && fl.info.Implicit[s.Rhs] == check.ConvNone {
+		// scheme = if c { a } else { b }: each branch assigns the variable,
+		// as Go code writes it, without a temporary.
+		if v, ok := fl.info.Uses[id].(*check.VarSym); ok && (v.Kind == check.LocalVar || v.Kind == check.GlobalVar) {
+			switch r := syntax.Unparen(s.Rhs).(type) {
+			case *syntax.IfExpr, *syntax.WhenExpr:
+				if fl.info.UsedAsValue[r] {
+					fl.exprInto(r, fl.lvalue(s.Lhs), v.Type)
+					return
+				}
+			case *syntax.ElvisExpr:
+				fl.exprInto(r, fl.lvalue(s.Lhs), v.Type)
+				return
+			}
+		}
 	}
 	if fl.callFree(s.Lhs) && hasNotNull(s.Lhs) && !fl.callFree(s.Rhs) {
 		// p.next!!.v = f(): Go reads p.next after calling f, so the right
@@ -1421,6 +1544,11 @@ func (fl *fnLower) exprIntoRaw(e syntax.Expr, target ast.Expr, targetType types.
 		return
 	}
 	v := fl.exprAs(e, targetType)
+	if t, ok := target.(*ast.Ident); ok {
+		if x, ok := v.(*ast.Ident); ok && x.Name == t.Name {
+			return // p := if c { "/" + p } else { p }: the branch keeps p
+		}
+	}
 	fl.emit(&ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: token.ASSIGN, Rhs: []ast.Expr{v}}, e.Span())
 }
 

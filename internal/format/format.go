@@ -193,7 +193,10 @@ func (fm *formatter) units(toks []syntax.Token, comments []syntax.Comment) []uni
 	var out []unit
 	ci := 0
 	addComment := func(c syntax.Comment) {
-		out = append(out, unit{kind: syntax.ILLEGAL, text: strings.TrimRight(c.Text, " \t\r"), start: c.Span.Start, end: c.Span.End, comment: true})
+		// A comment spanning lines contributes its first line here; layout
+		// keeps the lines after it as written.
+		text, _, _ := strings.Cut(c.Text, "\n")
+		out = append(out, unit{kind: syntax.ILLEGAL, text: strings.TrimRight(text, " \t\r"), start: c.Span.Start, end: c.Span.End, comment: true})
 	}
 	for i := 0; i < len(toks); i++ {
 		t := toks[i]
@@ -594,7 +597,8 @@ func (sp *spacer) join(idx []int, stack []*frame, skip int) (string, string) {
 		if u.endLine > u.line {
 			// A raw string or comment spanning lines: its other lines are
 			// written as they are (layout).
-			text = strings.TrimSuffix(text[:strings.IndexByte(text, '\n')], "\r")
+			first, _, _ := strings.Cut(text, "\n")
+			text = strings.TrimSuffix(first, "\r")
 		}
 		b.WriteString(text)
 		if !u.comment {

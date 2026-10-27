@@ -265,7 +265,7 @@ func (c *Checker) nextGen() int {
 // castByValue smart-casts v, just assigned a value of type t, when the
 // value is never null.
 func (c *Checker) castByValue(v *VarSym, t types.Type) {
-	if t != nil && t != types.Invalid && t != types.Null && c.castable(v) && types.MayBeNull(v.Type) && !types.MayBeNull(t) {
+	if t != nil && t != types.Invalid && t != types.Null && c.castable(v) && types.MayBeNull(v.Type) && (!types.MayBeNull(t) || types.IsPlatform(t)) {
 		c.scope.setNarrow(v, types.Base(v.Type))
 	}
 }

@@ -59,22 +59,26 @@ type Checker struct {
 	// selectorX is the bare name left of a selector being checked (log in
 	// log.Println), where an import may be meant.
 	selectorX syntax.Expr
-	conf      *Config
-	pkg       *Package
-	info      *Info
-	sink      *diag.Sink
-	universe  *Scope
-	pkgScope  *Scope
-	fileScope map[*syntax.File]*Scope
-	scope     *Scope
-	fn        *funcCtx
-	shadow    *gotypes.Package
-	goNames   map[string]source.Span
-	resolving []*VarSym
-	preArgs   map[syntax.Expr]*operand // arguments already checked during inference
-	aliases   []*TypeSym
-	damaged   map[*source.File][]source.Span // syntax.File.Damaged by source file
-	misspelt  map[*source.File]bool          // files with syntax errors the parser read past (Go and Kotlin spellings)
+	// selectorSel is the name right of that selector, and calleeArgs the
+	// number of arguments of the call whose callee is checked.
+	selectorSel *syntax.Ident
+	calleeArgs  int
+	conf        *Config
+	pkg         *Package
+	info        *Info
+	sink        *diag.Sink
+	universe    *Scope
+	pkgScope    *Scope
+	fileScope   map[*syntax.File]*Scope
+	scope       *Scope
+	fn          *funcCtx
+	shadow      *gotypes.Package
+	goNames     map[string]source.Span
+	resolving   []*VarSym
+	preArgs     map[syntax.Expr]*operand // arguments already checked during inference
+	aliases     []*TypeSym
+	damaged     map[*source.File][]source.Span // syntax.File.Damaged by source file
+	misspelt    map[*source.File]bool          // files with syntax errors the parser read past (Go and Kotlin spellings)
 	// While the package's types are being defined (resolveTypeDecls), a
 	// constraint that names a Lyth type without its definition yet
 	// (struct Cache[S: Store[int]], struct Box[S: Plain]) is set once all
@@ -634,10 +638,36 @@ func (c *Checker) implicitMember(name string) *MemberSym {
 // a struct with a field Config or max. Calling a field that is not a function
 // never compiled, so the member cannot have been meant.
 func (c *Checker) callsOther(id *syntax.Ident, m *MemberSym) bool {
-	if c.callee != syntax.Expr(id) || m.Field == nil || signatureOf(m.Field.Type) != nil {
+	if c.selectorX == syntax.Expr(id) && c.selectorSel != nil && m.Field != nil {
+		// kind.A in a type with a field kind beside the enum kind: the field
+		// has no member A, so the name can only be the type.
+		if ts, ok := c.lookup(id.Name).(*TypeSym); ok && ts.Type != nil && !c.memberHas(m, c.selectorSel) {
+			return true
+		}
+	}
+	if c.callee != syntax.Expr(id) {
 		return false
 	}
-	return c.lookup(id.Name) != nil
+	var sig *types.Signature
+	switch {
+	case m.Method != nil:
+		sig = m.Method.Sig
+	case m.Field != nil:
+		sig = signatureOf(m.Field.Type)
+		if sig == nil {
+			return c.lookup(id.Name) != nil // a field that is not a function cannot be called
+		}
+	}
+	// Version(x) in a type with a method Version(): the member cannot take
+	// the call's arguments, so a type or builtin of the name is meant.
+	if sig == nil || sig.Variadic || len(sig.Params) == c.calleeArgs {
+		return false
+	}
+	switch c.lookup(id.Name).(type) {
+	case *TypeSym, *BuiltinSym:
+		return true
+	}
+	return false
 }
 
 // otherMeaning describes what a bare name that meant a member before ADR

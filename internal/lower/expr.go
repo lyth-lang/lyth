@@ -470,6 +470,16 @@ func (fl *fnLower) valueViaTemp(e syntax.Expr) ast.Expr {
 		fl.exprStmt(e)
 		return ast.NewIdent("nil")
 	}
+	if el, ok := syntax.Unparen(e).(*syntax.ElvisExpr); ok && fl.elvisPlain(el, t) {
+		// (g ?: x).greet(): v := g; if v == nil { v = x }, as Go writes a
+		// default.
+		name := fl.temp(tempBase(el.X))
+		fl.emitSynth(&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(name)}, Tok: token.DEFINE, Rhs: []ast.Expr{fl.expr(el.X)}}, el.X.Span())
+		sub, stmts := fl.sub()
+		sub.exprIntoRaw(el.Y, ast.NewIdent(name), t)
+		fl.emitSynthShallow(&ast.IfStmt{If: fl.l.pos(el.S), Cond: nilCmp(ast.NewIdent(name), token.EQL), Body: &ast.BlockStmt{List: *stmts}}, el.OpSpan)
+		return ast.NewIdent(name)
+	}
 	name := fl.temp(tempBase(e))
 	if c, ok := syntax.Unparen(e).(*syntax.CatchExpr); ok && fl.simpleCatch(c) {
 		if info := fl.info.Tries[c]; info != nil && len(info.Success) == 1 {
@@ -481,6 +491,30 @@ func (fl *fnLower) valueViaTemp(e syntax.Expr) ast.Expr {
 	fl.emitSynth(&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{spec}}}, e.Span())
 	fl.exprIntoRaw(e, ast.NewIdent(name), t)
 	return ast.NewIdent(name)
+}
+
+// elvisPlain reports whether x ?: y, of type t, can be computed as a
+// variable holding x that y replaces when it is nil: x is a plain read or a
+// call, with t's Go type, and y does not jump.
+func (fl *fnLower) elvisPlain(el *syntax.ElvisExpr, t types.Type) bool {
+	switch x := syntax.Unparen(el.X).(type) {
+	case *syntax.Ident:
+	case *syntax.SelectorExpr:
+		if x.Safe {
+			return false
+		}
+	case *syntax.CallExpr:
+		if c, _, _ := fl.safeCallOf(x); c != nil {
+			return false
+		}
+	default:
+		return false
+	}
+	xt := fl.info.TypeOf(el.X)
+	if xt == nil || optionalValue(xt) || !types.MayBeNull(xt) || fl.info.TypeOf(el.Y) == types.Nothing {
+		return false
+	}
+	return gotypes.Identical(types.Lower(xt), types.Lower(t))
 }
 
 func tempBase(e syntax.Expr) string {

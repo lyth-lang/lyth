@@ -1953,6 +1953,46 @@ func (c *Checker) constBound(e syntax.Expr, v constant.Value, n int64, slice boo
 	}
 }
 
+// notAddressable says why the array value e has no address Go can slice:
+// a call result, a map element, or a literal; "" for a variable, a field of
+// one, an element of an addressable array or of a slice, or a pointer's
+// target.
+func (c *Checker) notAddressable(e syntax.Expr) string {
+	switch x := syntax.Unparen(e).(type) {
+	case *syntax.Ident:
+		if _, ok := c.info.Uses[x].(*VarSym); ok {
+			return ""
+		}
+		if _, ok := c.info.Uses[x].(*MemberSym); ok {
+			return ""
+		}
+		return "it is not a variable"
+	case *syntax.ThisExpr:
+		return ""
+	case *syntax.SelectorExpr:
+		if _, isPtr := types.Base(c.info.TypeOf(x.X)).(*types.Pointer); isPtr {
+			return ""
+		}
+		return c.notAddressable(x.X)
+	case *syntax.IndexExpr:
+		switch collectionOf(c.info.TypeOf(x.X)).(type) {
+		case *types.Slice:
+			return ""
+		case *types.Map:
+			return "map elements are not addressable"
+		case *types.Array:
+			return c.notAddressable(x.X)
+		}
+	case *syntax.UnaryExpr:
+		if x.Op == syntax.MUL {
+			return ""
+		}
+	case *syntax.CallExpr:
+		return "it is the result of a call"
+	}
+	return "it has no address"
+}
+
 func (c *Checker) sliceExpr(e *syntax.SliceExpr) *operand {
 	x := c.value(e.X, nil)
 	var lo, hi, max constant.Value
@@ -1987,7 +2027,12 @@ func (c *Checker) sliceExpr(e *syntax.SliceExpr) *operand {
 	case *types.Slice:
 		return &operand{mode: ModeValue, typ: types.Base(x.typ)}
 	case *types.Array:
-		if !c.mutablePath(e.X, "slice", diag.EAddressOfVal) {
+		// Go's rule: the array must be addressable. A read-only parameter,
+		// receiver, or loop variable is a copy of its own, so slicing it
+		// (self[0:4] in a value method) cannot reach the caller's value.
+		if why := c.notAddressable(e.X); why != "" {
+			c.errorf(diag.EAddressOfVal, e.X.Span(), "cannot slice %s: %s", e.X.Span().Short(), why).
+				WithHint("store it in a variable first: a := %s, then a[...]", e.X.Span().Short())
 			return invalid(e)
 		}
 		bounds(t.Len)

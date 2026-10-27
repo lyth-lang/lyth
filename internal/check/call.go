@@ -25,10 +25,10 @@ func callArgs(e *syntax.CallExpr) []*syntax.Arg {
 
 func (c *Checker) call(e *syntax.CallExpr, want types.Type) *operand {
 	args := callArgs(e)
-	saveCallee := c.callee
-	c.callee = syntax.Unparen(e.Fun)
+	saveCallee, saveArgs := c.callee, c.calleeArgs
+	c.callee, c.calleeArgs = syntax.Unparen(e.Fun), len(args)
 	f := c.expr(e.Fun, nil)
-	c.callee = saveCallee
+	c.callee, c.calleeArgs = saveCallee, saveArgs
 	switch f.mode {
 	case ModeInvalid:
 		for _, a := range args {

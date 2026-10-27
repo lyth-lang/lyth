@@ -69,10 +69,7 @@ func run() error {
 		return err
 	}
 //line errors.lyth:37
-	if err := os.Setenv("PORT", strconv.Itoa(cfg.Port)); err != nil {
-		return err
-	}
-	return nil
+	return os.Setenv("PORT", strconv.Itoa(cfg.Port))
 }
 
 func main() {

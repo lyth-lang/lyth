@@ -189,6 +189,7 @@ func lowerFile(pkg *check.Package, f *syntax.File, pkgNames map[string]bool) *Fi
 		file.Package = l.pos(f.Package.S)
 	}
 	file.Decls = append(file.Decls, l.decls...)
+	stripOperandParens(file)
 	parenHeaderLiterals(file)
 	flattenElseIf(file)
 	l.keepDetachedComments(f)
@@ -608,6 +609,9 @@ func docGroup(doc string) *ast.CommentGroup {
 	if doc == "" {
 		return nil
 	}
+	if strings.HasPrefix(doc, "/*") {
+		return &ast.CommentGroup{List: []*ast.Comment{{Text: doc}}} // kept as written
+	}
 	g := &ast.CommentGroup{}
 	for _, line := range strings.Split(canonicalDoc(doc), "\n") {
 		g.List = append(g.List, &ast.Comment{Text: line})
@@ -653,11 +657,16 @@ func (l *fileLowerer) memberDoc(doc string, s source.Span) *ast.CommentGroup {
 	if g == nil || !s.IsValid() || s.File != l.src.Src {
 		return g
 	}
-	first := s.StartPos().Line - len(g.List)
-	for i, c := range g.List {
-		if line := first + i; line >= 1 && line <= l.mirror.LineCount() {
+	n := 0 // the lines the doc takes
+	for _, c := range g.List {
+		n += strings.Count(c.Text, "\n") + 1
+	}
+	line := s.StartPos().Line - n
+	for _, c := range g.List {
+		if line >= 1 && line <= l.mirror.LineCount() {
 			c.Slash = l.mirror.LineStart(line)
 		}
+		line += strings.Count(c.Text, "\n") + 1
 	}
 	return g
 }
@@ -754,8 +763,15 @@ func (l *fileLowerer) structType(decl *types.TypeDecl, d *syntax.StructDecl) *as
 			l.mark(fld.Names[0], f.Span)
 		}
 		if f.Embedded {
-			// Go names an embedded field after its type (ADR 0043).
+			// Go names an embedded field after its type (ADR 0043); the type
+			// takes the field's line, so its doc stays above it.
 			fld.Names = nil
+			if i < len(d.Fields) {
+				startAt(fld.Type, l.pos(d.Fields[i].S))
+				if st, ok := fld.Type.(*ast.StarExpr); ok {
+					st.Star = l.pos(d.Fields[i].S)
+				}
+			}
 		}
 		st.Fields.List = append(st.Fields.List, fld)
 	}
@@ -1404,7 +1420,7 @@ func (l *fileLowerer) keepDetachedComments(f *syntax.File) {
 			for _, c := range block {
 				text = append(text, c.Text)
 			}
-			head := f.Package != nil && block[0].Span.Start < f.Package.S.Start
+			head := block[0].Span.Start < firstCode(f)
 			l.bodyComments = append(l.bodyComments, BodyComment{Text: strings.Join(text, "\n"), Line: first, Detached: true, Head: head})
 		}
 		block = nil
@@ -1423,6 +1439,22 @@ func (l *fileLowerer) keepDetachedComments(f *syntax.File) {
 	flush()
 }
 
+// firstCode returns the offset of the file's first code: its package clause,
+// first import, or first declaration.
+func firstCode(f *syntax.File) int {
+	first := len(f.Src.Content)
+	if f.Package != nil {
+		first = f.Package.S.Start
+	}
+	if len(f.Imports) > 0 {
+		first = min(first, f.Imports[0].S.Start)
+	}
+	if len(f.Decls) > 0 {
+		first = min(first, f.Decls[0].Span().Start)
+	}
+	return first
+}
+
 // packageDoc returns the comment directly above the package clause.
 func packageDoc(f *syntax.File) string {
 	if f.Package == nil {
@@ -1434,6 +1466,9 @@ func packageDoc(f *syntax.File) string {
 		c := f.Comments[i]
 		if c.Span.Start >= f.Package.S.Start {
 			continue
+		}
+		if len(lines) == 0 && strings.HasPrefix(c.Text, "/*") && c.Span.EndPos().Line == expect {
+			return c.Text // a /* */ package doc
 		}
 		if c.Span.EndPos().Line != expect || !strings.HasPrefix(c.Text, "//") || strings.HasPrefix(c.Text, "//go:") {
 			break
@@ -1626,7 +1661,7 @@ func (l *fileLowerer) propDecl(d *syntax.PropDecl) {
 		}
 		spec.Values = []ast.Expr{x}
 	} else {
-		spec.Type = l.typeExpr(v.Type)
+		spec.Type = l.declTypeExpr(d.Type, v.Type)
 	}
 	for _, dir := range d.Directives {
 		if dir.Name() == "embed" {
@@ -1929,9 +1964,47 @@ func parenHeaderLiterals(f *ast.File) {
 
 // flattenElseIf turns else { if ... } into else if ..., as Go is written:
 // typed catch chains and nested ifs lower to an else holding one if.
+// stripOperandParens removes the parentheses lowering left around a name
+// or a selection that a selector, index, slice, or call applies to: a
+// temporary that replaced (g ?: x) in (g ?: x).greet() needs none.
+func stripOperandParens(f *ast.File) {
+	plain := func(e ast.Expr) ast.Expr {
+		for {
+			p, ok := e.(*ast.ParenExpr)
+			if !ok {
+				return e
+			}
+			switch p.X.(type) {
+			case *ast.Ident, *ast.SelectorExpr, *ast.CallExpr, *ast.IndexExpr:
+				e = p.X
+			default:
+				return e
+			}
+		}
+	}
+	ast.Inspect(f, func(n ast.Node) bool {
+		switch x := n.(type) {
+		case *ast.SelectorExpr:
+			x.X = plain(x.X)
+		case *ast.IndexExpr:
+			x.X = plain(x.X)
+		case *ast.SliceExpr:
+			x.X = plain(x.X)
+		case *ast.CallExpr:
+			if _, isType := x.Fun.(*ast.ParenExpr); isType {
+				x.Fun = plain(x.Fun)
+			}
+		}
+		return true
+	})
+}
+
 func flattenElseIf(f *ast.File) {
 	ast.Inspect(f, func(n ast.Node) bool {
 		if s, ok := n.(*ast.IfStmt); ok {
+			if b, ok := s.Else.(*ast.BlockStmt); ok && len(b.List) == 0 {
+				s.Else = nil // a branch left with nothing to do
+			}
 			for {
 				b, ok := s.Else.(*ast.BlockStmt)
 				if !ok || len(b.List) != 1 {

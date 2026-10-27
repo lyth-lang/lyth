@@ -186,7 +186,7 @@ func (s *Session) resolvePos(file string, line, col int) (source.Span, string) {
 		for _, f := range p.Files {
 			for _, c := range candidates {
 				if f.Path == filepath.Clean(c) {
-					return lineSpan(f, line, col), "line"
+					return codeLineSpan(f, line), "line"
 				}
 			}
 			if filepath.Base(f.Path) == filepath.Base(file) {
@@ -195,7 +195,7 @@ func (s *Session) resolvePos(file string, line, col int) (source.Span, string) {
 		}
 	}
 	if len(byBase) == 1 && strings.HasSuffix(file, ".lyth") {
-		return lineSpan(byBase[0], line, col), "line"
+		return codeLineSpan(byBase[0], line), "line"
 	}
 	abs := filepath.Clean(candidates[0])
 	if m := s.Maps[abs]; m != nil {
@@ -422,6 +422,19 @@ func (s *Session) WriteInTree() ([]string, error) {
 		}
 	}
 	return written, nil
+}
+
+// codeLineSpan covers the code of a Lyth line. The go command reaches
+// .lyth positions through //line directives, which carry no column, so the
+// column it prints says nothing about the line.
+func codeLineSpan(f *source.File, line int) source.Span {
+	if line < 1 || line > f.LineCount() {
+		return source.Span{File: f}
+	}
+	start := f.LineStart(line)
+	text := f.LineText(line)
+	lead := len(text) - len(strings.TrimLeft(text, " \t"))
+	return source.Span{File: f, Start: start + lead, End: start + len(strings.TrimRight(text, " \t"))}
 }
 
 func lineSpan(f *source.File, line, col int) source.Span {

@@ -10,13 +10,9 @@ import (
 
 //line catch_discard.lyth:7
 func closeIt(c io.Closer) error {
-	if err := c.Close(); err != nil {
-		return err
-	}
-	return nil
+	return c.Close()
 }
 
-//line catch_discard.lyth:11
 func run(w io.Writer, f *os.File) {
 	_ = closeIt(f)
 	_, _ = fmt.Fprint(w, "ok")

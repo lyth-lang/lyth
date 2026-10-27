@@ -57,8 +57,9 @@ func (c *Checker) selector(e *syntax.SelectorExpr, want types.Type) *operand {
 			return c.pkgMember(e, ps.Pkg)
 		}
 	}
-	saveX := c.selectorX
-	c.selectorX = syntax.Unparen(e.X)
+	saveX, saveSel := c.selectorX, c.selectorSel
+	c.selectorX, c.selectorSel = syntax.Unparen(e.X), e.Sel
+	defer func() { c.selectorSel = saveSel }()
 	x := c.expr(e.X, nil)
 	c.selectorX = saveX
 	if x.mode == ModeInvalid {

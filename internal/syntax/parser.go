@@ -596,6 +596,9 @@ func (p *parser) docFor(off int) string {
 		pos := p.file.Position(c.Span.Start)
 		// a comment after code on its line (`ID: int64 // ...`) belongs to that code
 		trailing := strings.TrimSpace(string(p.file.Content[p.file.LineStart(pos.Line):c.Span.Start])) != ""
+		if len(lines) == 0 && strings.HasPrefix(c.Text, "/*") && !trailing && p.file.Position(c.Span.End).Line == expect {
+			return c.Text // a /* */ doc comment directly above
+		}
 		if pos.Line == expect && !trailing && strings.HasPrefix(c.Text, "//go:") &&
 			!strings.HasPrefix(c.Text, "//go:build") && !strings.HasPrefix(c.Text, "//go:generate") {
 			expect-- // a directive (directivesFor) between the doc and the declaration
@@ -1322,6 +1325,17 @@ func (p *parser) parseFunDecl(start source.Span, doc string) *FunDecl {
 		p.next()
 		p.skipNL()
 		d.ExprBody = p.parseExpr()
+		if p.at(COMMA) {
+			// func pair(): (string, int) = "a", 1: several values need a block.
+			first := d.ExprBody.Span()
+			for !p.at(NEWLINE) && !p.at(EOF) {
+				p.next()
+			}
+			values := first.Join(p.toks[p.pos-1].Span)
+			p.errorf(diag.EUnsupportedSyntax, values, "an expression body is one value").
+				WithEdit(values, "{ return "+values.Text()+" }", "return several results from a block: { return %s }", values.Text())
+			p.damaged = append(p.damaged, values)
+		}
 	default:
 		p.errorf(diag.EUnexpectedToken, p.tok().Span, "expected function body '{' or '= expression', found %s", describe(p.tok()))
 		p.syncDecl()
