@@ -289,9 +289,18 @@ func (l *Loader) writeCache(paths []string, roots []*packages.Package) {
 	if err := os.MkdirAll(filepath.Dir(l.CacheFile), 0o755); err != nil {
 		return
 	}
-	tmp := l.CacheFile + ".tmp"
-	if os.WriteFile(tmp, data, 0o644) == nil {
-		os.Rename(tmp, l.CacheFile)
+	// A temporary file of its own, so concurrent lyth processes never
+	// rename each other's half-written files into place.
+	f, err := os.CreateTemp(filepath.Dir(l.CacheFile), filepath.Base(l.CacheFile)+".*.tmp")
+	if err != nil {
+		return
+	}
+	_, err = f.Write(data)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil || os.Rename(f.Name(), l.CacheFile) != nil {
+		os.Remove(f.Name())
 	}
 }
 

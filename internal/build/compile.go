@@ -14,6 +14,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -506,7 +507,10 @@ func (s *Session) parse() {
 				continue
 			}
 			f := source.NewFile(path, displayName(path, s.cfg.WorkDir), data)
-			sf := syntax.Parse(f, s.Sink)
+			var sf *syntax.File
+			if protect(s.Sink, source.Span{File: f}, "while parsing "+f.Name, func() { sf = syntax.Parse(f, s.Sink) }) != nil {
+				continue
+			}
 			if !s.buildsFile(path, sf) {
 				continue // another platform's file, or excluded by //go:build
 			}
@@ -750,7 +754,7 @@ func (s *Session) check() {
 		if s.Mod.Synthetic {
 			conf.DirName = "main"
 		}
-		p.Checked = check.Check(conf, p.Dir.ImportPath, p.Syntax)
+		protect(s.Sink, p.span(), "in package "+p.Dir.ImportPath, func() { p.Checked = check.Check(conf, p.Dir.ImportPath, p.Syntax) })
 	}
 }
 
@@ -777,12 +781,15 @@ func (s *Session) generatePkg(p *Package, opts emit.Options) {
 	}
 	p.generated = true
 	var lowered []*lower.File
-	err := protect(s.Sink, p, func() { lowered = lower.Package(p.Checked) })
-	if err != nil {
+	if protect(s.Sink, p.span(), "in package "+p.Dir.ImportPath, func() { lowered = lower.Package(p.Checked) }) != nil {
 		return
 	}
 	for _, lf := range lowered {
-		res, err := emit.Emit(lf, opts)
+		var res *emit.Result
+		var err error
+		if protect(s.Sink, source.Span{File: lf.Src}, "while generating Go code for "+lf.Src.Name, func() { res, err = emit.Emit(lf, opts) }) != nil {
+			continue
+		}
 		if err != nil {
 			s.Sink.Errorf(diag.EInternal, source.Span{File: lf.Src}, "internal compiler error while generating Go code: %v", err).
 				WithNote("please report this with the source file")
@@ -794,21 +801,55 @@ func (s *Session) generatePkg(p *Package, opts emit.Options) {
 }
 
 // protect converts a panic in a compiler stage into an internal-error
-// diagnostic so invalid user code never crashes the compiler.
-func protect(sink *diag.Sink, p *Package, fn func()) (err error) {
+// diagnostic at span, so no input crashes the compiler.
+func protect(sink *diag.Sink, span source.Span, where string, fn func()) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			var span source.Span
-			if len(p.Files) > 0 {
-				span = source.Span{File: p.Files[0]}
+			d := sink.Errorf(diag.EInternal, span, "internal compiler error %s: %v", where, r)
+			if at := PanicSite(); at != "" {
+				d.WithNote("raised at %s", at)
 			}
-			sink.Errorf(diag.EInternal, span, "internal compiler error in package %s: %v", p.Dir.ImportPath, r).
-				WithNote("please report this with the source file")
+			d.WithNote("please report this at https://github.com/lyth-lang/lyth/issues with the source file")
 			err = fmt.Errorf("internal error: %v", r)
 		}
 	}()
 	fn()
 	return nil
+}
+
+// PanicSite names the function and line that raised the panic being
+// recovered, and the compiler function that called into it when the panic
+// came from a library such as go/types. Called from a deferred function.
+func PanicSite() string {
+	pcs := make([]uintptr, 64)
+	frames := runtime.CallersFrames(pcs[:runtime.Callers(3, pcs)])
+	site := ""
+	for {
+		fr, more := frames.Next()
+		if fr.Function != "" && !strings.HasPrefix(fr.Function, "runtime.") {
+			at := fmt.Sprintf("%s (%s:%d)", strings.TrimPrefix(fr.Function, "github.com/lyth-lang/lyth/internal/"), filepath.Base(fr.File), fr.Line)
+			switch {
+			case site == "":
+				site = at
+				if strings.HasPrefix(fr.Function, "github.com/lyth-lang/lyth/") {
+					return site
+				}
+			case strings.HasPrefix(fr.Function, "github.com/lyth-lang/lyth/"):
+				return site + ", called from " + at
+			}
+		}
+		if !more {
+			return site
+		}
+	}
+}
+
+// span is the package's first file, where package-wide diagnostics go.
+func (p *Package) span() source.Span {
+	if len(p.Files) > 0 {
+		return source.Span{File: p.Files[0]}
+	}
+	return source.Span{}
 }
 
 // write stores generated files under .lyth/gen and writes the overlay.
@@ -992,7 +1033,33 @@ func writeIfChanged(path string, data []byte) error {
 	if old, err := os.ReadFile(path); err == nil && string(old) == string(data) {
 		return nil
 	}
-	return os.WriteFile(path, data, 0o644)
+	return writeAtomic(path, data)
+}
+
+// writeAtomic writes data to a temporary file beside path and renames it
+// into place, so a go command or lyth process reading path concurrently sees
+// the old file or the new one, never a partial one. The temporary name ends
+// in .tmp, which neither the go command nor cleanStale takes for a source.
+func writeAtomic(path string, data []byte) error {
+	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	_, err = f.Write(data)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Chmod(tmp, 0o644)
+	}
+	if err == nil {
+		err = os.Rename(tmp, path)
+	}
+	if err != nil {
+		os.Remove(tmp)
+	}
+	return err
 }
 
 // cleanStale removes generated files that the current build did not

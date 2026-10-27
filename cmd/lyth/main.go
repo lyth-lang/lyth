@@ -128,7 +128,19 @@ func splitArgs(args []string) ([]string, []string) {
 	return args, nil
 }
 
-func run(args []string, stdout, stderr io.Writer) int {
+func run(args []string, stdout, stderr io.Writer) (code int) {
+	// The compiler stages turn their panics into E0901 diagnostics; this
+	// catches the rest, so no input ends in a Go stack trace.
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(stderr, "lyth: internal compiler error: %v\n", r)
+			if at := build.PanicSite(); at != "" {
+				fmt.Fprintf(stderr, "\traised at %s\n", at)
+			}
+			fmt.Fprintf(stderr, "\tplease report this at https://github.com/lyth-lang/lyth/issues with the command and its source files\n")
+			code = 2
+		}
+	}()
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
 		return 2
