@@ -1040,8 +1040,9 @@ func writeIfChanged(path string, data []byte) error {
 
 // writeAtomic writes data to a temporary file beside path and renames it
 // into place, so a go command or lyth process reading path concurrently sees
-// the old file or the new one, never a partial one. The temporary name ends
-// in .tmp, which neither the go command nor cleanStale takes for a source.
+// the old file or the new one, never a partial one (on Windows, only when no
+// other process holds the file open). The temporary name ends in .tmp, which
+// neither the go command nor cleanStale takes for a source.
 func writeAtomic(path string, data []byte) error {
 	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
 	if err != nil {
@@ -1060,6 +1061,11 @@ func writeAtomic(path string, data []byte) error {
 	}
 	if err != nil {
 		os.Remove(tmp)
+	}
+	if busyOnWindows(err) {
+		// Still held open by another process: write in place, which
+		// Windows allows, rather than fail the build.
+		return os.WriteFile(path, data, 0o644)
 	}
 	return err
 }

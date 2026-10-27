@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 )
@@ -12,6 +13,9 @@ import (
 // version while concurrent lyth processes rewrite it, and that no temporary
 // file is left behind.
 func TestWriteAtomic(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows cannot replace a file that a reader holds open; lyth writes it in place there")
+	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "x.lyth.go")
 	versions := [][]byte{bytes.Repeat([]byte("a"), 1<<16), bytes.Repeat([]byte("b"), 1<<17)}
@@ -38,9 +42,6 @@ func TestWriteAtomic(t *testing.T) {
 		default:
 		}
 		data, err := os.ReadFile(path)
-		if busyOnWindows(err) {
-			continue // Windows refuses to open a file while it is replaced
-		}
 		if err != nil {
 			t.Fatal(err)
 		}
