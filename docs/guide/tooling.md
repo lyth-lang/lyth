@@ -43,7 +43,7 @@ go install ./cmd/lyth
 | `lyth init [module-path]` | Makes the current directory a Lyth module: `go.mod` (through `go mod init`; the path defaults to the directory's name), `main.lyth` when there is no Lyth code yet, `AGENTS.md` and `CLAUDE.md` for coding agents, and `.lyth/` in `.gitignore`. In an existing module it adds only what is missing. |
 | `lyth guide [topics \| topic]` | Prints the guide to writing this version of Lyth ([writing Lyth](writing-lyth.md)), the list of topics, or one documentation page. |
 | `lyth lsp [-no-vet]` | Runs the language server on stdin and stdout, for editors ([editors](#editors)). |
-| `lyth version` | Prints the compiler version. |
+| `lyth version` | Prints the compiler version, the Go it was built with, and the Go releases it supports ([Go releases](compatibility.md#go-releases)). |
 
 Common flags: `-tags a,b` (build tags), `-diagnostics=json` (one JSON object
 per diagnostic, for editors and CI), `-v` (diagnostics include the original Go

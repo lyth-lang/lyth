@@ -31,7 +31,7 @@ export const repoUrl = (process.env.LYTH_REPO_URL ?? '').replace(/\/$/, '');
 export const groups = [
 	{ label: 'Learn', pages: ['guide/tour', 'guide/lyth-for-go-programmers', 'guide/cheatsheet'] },
 	{ label: 'AI coding agents', pages: ['guide/ai-agents', 'guide/writing-lyth'] },
-	{ label: 'Using Lyth', pages: ['guide/go-interop', 'guide/testing', 'guide/tooling', 'examples/todoapi'] },
+	{ label: 'Using Lyth', pages: ['guide/go-interop', 'guide/testing', 'guide/tooling', 'guide/compatibility', 'examples/todoapi'] },
 	{ label: 'Language reference', pages: ['spec/language', 'spec/types', 'spec/errors'] },
 	{
 		label: 'Design',

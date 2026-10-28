@@ -22,10 +22,12 @@ lambdas) is a small set of features familiar from modern languages.
 
 > **Status: before 1.0.** The compiler works end to end: it parses,
 > type-checks, generates Go, validates it, builds it, and maps errors and stack
-> traces back to Lyth source. The syntax can still change between releases
-> (`lyth fix` updates code written for an older one), and the sections of the
-> [specification](docs/spec/language.md) that are not implemented yet are
-> tagged **[planned]**.
+> traces back to Lyth source. The language is frozen on the way to 1.0:
+> releases fix bugs and add only compatible changes, and `lyth fix` updates
+> code written for an older release. [Compatibility](docs/guide/compatibility.md)
+> says what 1.x will keep stable and which Go releases are supported; the
+> sections of the [specification](docs/spec/language.md) that are not
+> implemented yet are tagged **[planned]**.
 
 ```kotlin
 import "errors"
@@ -214,7 +216,8 @@ The documentation is published at [lyth.bkymz.net](https://lyth.bkymz.net); its 
 - Guide: [tour](docs/guide/tour.md), [Lyth for Go programmers](docs/guide/lyth-for-go-programmers.md),
   [AI coding agents](docs/guide/ai-agents.md), [writing Lyth](docs/guide/writing-lyth.md) (what `lyth guide` prints),
   [cheat sheet](docs/guide/cheatsheet.md), [Go interop](docs/guide/go-interop.md),
-  [testing](docs/guide/testing.md), [tooling](docs/guide/tooling.md)
+  [testing](docs/guide/testing.md), [tooling](docs/guide/tooling.md),
+  [compatibility](docs/guide/compatibility.md)
 - [Design overview](docs/design/overview.md): goals, principles, decision summary
 - Specification: [language](docs/spec/language.md), [types](docs/spec/types.md), [errors](docs/spec/errors.md)
 - Design: [compiler](docs/design/compiler.md), [interop](docs/design/interop.md),

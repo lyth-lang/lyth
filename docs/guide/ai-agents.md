@@ -125,7 +125,8 @@ propagate an error or converting a number, stay hints for the agent to decide on
 
 ## When Lyth changes
 
-Lyth's syntax changes between releases, and will until 1.0. Three things keep agents current
+Lyth's syntax changed often before the freeze that leads to 1.0, so code and models may
+still carry older forms ([compatibility](compatibility.md)). Three things keep agents current
 ([ADR 0033](../adr/0033-agents-learn-from-the-compiler.md)):
 
 - `AGENTS.md`, `CLAUDE.md`, and the Claude Code skill hold no language rules, only commands, so
