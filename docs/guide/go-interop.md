@@ -328,7 +328,26 @@ The [REST API example](../../examples/todoapi/README.md) uses `pgx` this way.
 A module in a `go.work` workspace builds against the workspace's other
 modules, as Go code does, their Lyth packages included: lyth compiles a Lyth
 package of another module of the workspace along with the program (into the
-program's `.lyth/gen`), without writing into that module.
+program's `.lyth/gen`), without writing into that module. A module replaced by
+a local directory (`replace example.com/lib => ../lib`) is compiled the same
+way.
+
+### Publishing a Lyth library
+
+A Lyth library is a Go module that commits its `.lyth` sources and the Go that
+`lyth gen -in-tree` writes beside them; run it before each release, so the Go
+matches the sources. Go programs build that Go. Lyth programs that import the
+library see its Lyth declarations: nullable types, default and named
+arguments, enums and sealed interfaces with exhaustive `when`, and extension
+functions, as if it were a package of their own module. The library's tests
+and warnings stay its own.
+
+If the library's sources do not compile with the installed `lyth`, or its
+committed Go was not generated from them, Lyth uses the committed Go and warns
+at the import (W0014), naming the reason. A package with `.lyth` sources and no
+Go is an error: Go code could not build it either.
+[Compatibility](compatibility.md#evolving-a-lyth-library) lists which changes
+to a library's API break Lyth callers and which break Go callers.
 
 ## Limits and differences
 

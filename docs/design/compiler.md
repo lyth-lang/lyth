@@ -332,7 +332,10 @@ run.
 `.lyth` files) for inspection, committing, or building with plain `go build`.
 Its `//line` directives use bare file names, so committed output is
 reproducible across machines. Publishing a Lyth library to the Go ecosystem
-requires this, because the module proxy serves only committed files.
+requires this, because the module proxy serves only committed files, and the
+`go` command allows no overlay for files in the module cache: a Lyth program
+that imports the library checks its `.lyth` sources and builds its published
+Go ([ADR 0053](../adr/0053-lyth-libraries-across-modules.md)).
 
 **Dependencies.** Plain `go mod tidy` cannot see imports that exist only in
 `.lyth` files, and removes their requirements. `lyth mod tidy` writes an

@@ -106,6 +106,9 @@ changes are compatible for one and not the other:
 | Add an entry to an enum or a member to a sealed interface | breaking: every exhaustive `when` without `else` stops compiling | compatible |
 | Rename a parameter | breaking for calls that name it | compatible |
 
+A library publishes the Go that `lyth gen -in-tree` writes from its sources;
+Lyth callers read the sources and Go callers the Go, so both must come from the
+same commit ([publishing a Lyth library](go-interop.md#publishing-a-lyth-library)).
 In a minor version of a library, add new functions and fields instead of
 changing existing ones, and keep `else` branches in `when`s over another
 package's enums if that package may add entries.

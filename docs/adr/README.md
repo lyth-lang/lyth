@@ -57,3 +57,5 @@ Accepted ADRs are immutable; a superseding ADR links back.
 | [0050](0050-safe-call-only.md) | `?.` is only the safe call; `(f()?).name` propagates | Accepted |
 | [0051](0051-returns-in-catch-handlers.md) | A bare `return` in a `catch` of a fallible lambda warns | Accepted |
 | [0052](0052-wrapping-a-call.md) | `f().wrap("context")` wraps a call's error when it fails | Accepted |
+| [0053](0053-lyth-libraries-across-modules.md) | Lyth libraries from other modules keep their Lyth declarations | Accepted (amends 0006 for dependencies) |
+| [0054](0054-language-version-per-module.md) | A module declares the Lyth version it is written for (`//lyth:version` in `go.mod`) | Proposed |

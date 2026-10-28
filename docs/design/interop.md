@@ -135,6 +135,13 @@ A Lyth package compiles to a normal Go package:
   package **from its `.lyth` sources**, so no metadata format is needed. Published
   Lyth modules therefore ship both the `.lyth` sources and the generated `.go`
   files (see compiler.md §6.1): Go users consume the `.go`, Lyth users the `.lyth`.
+  A package of the module, of a `go.work` workspace, or of a module replaced by a
+  local directory is compiled with the program; one from the module cache is
+  checked from its sources and built from its published Go, since the `go`
+  command allows no overlay there. If the sources do not compile with the
+  installed `lyth`, or lower to an API other than the published Go's, the
+  program uses the published Go, with W0014 at each import
+  ([ADR 0053](../adr/0053-lyth-libraries-across-modules.md)).
 - A Go package of the module may import Lyth packages and be imported by Lyth
   code (a *bridge*, `internal/build/bridge.go`). The build orders the Lyth
   packages the bridge reaches before its Lyth importers, lowers and validates
