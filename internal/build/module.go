@@ -129,6 +129,11 @@ type pkgDir struct {
 	// GoTestFiles are hand-written _test.go files. They may test Lyth code,
 	// and only go test compiles them, so they can live beside .lyth files.
 	GoTestFiles []string
+	// External marks a Lyth package of a module in the module cache: checked
+	// for its Lyth declarations, built from the Go published with it
+	// (deps.go). Module is that module, path@version.
+	External bool
+	Module   string
 }
 
 // TestOnly reports whether the package has only test files (e2e tests):

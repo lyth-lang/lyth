@@ -74,7 +74,7 @@ func (s *Session) validatePkg(p *Package) {
 	var errs []gotypes.Error
 	conf := gotypes.Config{
 		Importer: importerFunc(func(path string) (*gotypes.Package, error) {
-			if np := s.byPath[path]; np != nil {
+			if np := s.byPath[path]; np != nil && !np.Dir.External {
 				if np.GoTypes != nil {
 					return np.GoTypes, nil
 				}

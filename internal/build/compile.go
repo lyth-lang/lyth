@@ -77,6 +77,10 @@ type Package struct {
 	// kept to print them again for coverage runs (cover.go).
 	Lowered []*lower.File
 	GoTypes *gotypes.Package // types of the generated Go (validation)
+	// depSink holds the diagnostics of an external package's sources, and
+	// goView why the program sees it through its published Go (deps.go).
+	depSink *diag.Sink
+	goView  string
 
 	generated, validated bool
 }
@@ -123,6 +127,10 @@ type Session struct {
 	// path, for validation; goTypesN is len(goPkgs) when it was built.
 	goTypes  map[string]*gotypes.Package
 	goTypesN int
+	// reqs are the main module's requirements, and externals the Lyth
+	// packages of the module cache by import path (nil: none), both lazily.
+	reqs      []requirement
+	externals map[string]*pkgDir
 }
 
 // Timing is the duration of one compilation phase.
@@ -244,7 +252,7 @@ func (s *Session) setup(t Target) error {
 					all = append(all, s.editorFiles(mod, d, nil))
 				}
 			}
-			s.makeAvailable(append(all, s.workspacePackages(mod)...))
+			s.makeAvailable(append(all, s.otherModules(mod)...))
 			s.Targets = append(s.Targets, s.addPkg(p))
 			return nil
 		}
@@ -304,7 +312,7 @@ func (s *Session) setup(t Target) error {
 			return fmt.Errorf("no Lyth package in %s", pat)
 		}
 	}
-	s.makeAvailable(append(all, s.workspacePackages(mod)...))
+	s.makeAvailable(append(all, s.otherModules(mod)...))
 	var testOnly []string
 	for _, p := range all {
 		if len(t.Patterns) == 0 || selected[p.Dir] {
@@ -383,6 +391,13 @@ func patternDir(pat, wd string, mod *Module) string {
 		return filepath.Join(mod.Root, filepath.FromSlash(strings.TrimPrefix(pat, mod.Path+"/")))
 	}
 	return filepath.Join(wd, pat)
+}
+
+// otherModules returns the Lyth packages of other modules compiled with the
+// program: those of the workspace, and of modules replaced by a directory.
+func (s *Session) otherModules(mod *Module) []*pkgDir {
+	ws := s.workspacePackages(mod)
+	return append(ws, s.replacedPackages(mod, ws)...)
 }
 
 // workspacePackages returns the Lyth packages of the other modules of the
@@ -499,6 +514,12 @@ func (s *Session) parse() {
 			// Like go test, only the packages under test get their tests.
 			paths = append(slices.Clip(paths), p.Dir.TestFiles...)
 		}
+		sink := s.Sink
+		if p.Dir.External {
+			// a dependency's diagnostics are not the program's (settleExternal)
+			p.depSink = &diag.Sink{}
+			s.Sink = p.depSink
+		}
 		for _, path := range paths {
 			data, ok := s.cfg.Overlay[path]
 			var err error
@@ -529,6 +550,8 @@ func (s *Session) parse() {
 				if _, ok := s.available[imp.Path]; !ok {
 					if dep := s.stdPackage(imp.Path); dep != nil {
 						s.available[imp.Path] = dep
+					} else if dep := s.externalPackage(imp.Path); dep != nil {
+						s.available[imp.Path] = dep
 					}
 				}
 				if dep, ok := s.available[imp.Path]; ok && s.byPath[imp.Path] == nil {
@@ -538,6 +561,7 @@ func (s *Session) parse() {
 				}
 			}
 		}
+		s.Sink = sink
 		if len(p.Dir.GoFiles) > 0 && len(p.Files) > 0 {
 			s.Sink.Errorf(diag.EUnsupported, source.Span{File: p.Files[0], Start: 0, End: 0},
 				"package %s mixes Go and Lyth files, which is not supported yet", p.Dir.ImportPath).
@@ -693,8 +717,8 @@ func (s *Session) loadGo() error {
 	for _, p := range s.Packages {
 		for _, f := range p.Syntax {
 			for _, imp := range f.Imports {
-				if s.byPath[imp.Path] == nil && s.bridges[imp.Path] == nil && imp.Path != "" {
-					need[imp.Path] = true
+				if dep := s.byPath[imp.Path]; (dep == nil || dep.Dir.External) && s.bridges[imp.Path] == nil && imp.Path != "" {
+					need[imp.Path] = true // an external Lyth package builds from its published Go
 				}
 			}
 		}
@@ -738,7 +762,12 @@ func (s *Session) check() {
 			if b := s.bridges[path]; b != nil && b.types == nil {
 				return nil, strings.Join(b.errors, "; ")
 			}
-			if dep := s.byPath[path]; dep != nil {
+			if dep := s.byPath[path]; dep != nil && dep.Dir.External && dep.Checked == nil {
+				if gp := s.goPkgs[path]; gp == nil || gp.Types == nil {
+					return nil, path + " " + dep.goView
+				}
+			}
+			if dep := s.byPath[path]; dep != nil && dep.goView == "" {
 				if dep.Checked == nil {
 					return nil, "package " + path + " failed to compile"
 				}
@@ -753,11 +782,18 @@ func (s *Session) check() {
 			}
 			return &check.Package{Path: path, Name: gp.Types.Name(), Go: gp.Types}, ""
 		}
-		conf := &check.Config{Sink: s.Sink, Import: imp, DirName: filepath.Base(p.Dir.Dir), NoModule: s.Mod.Synthetic}
+		sink := s.Sink
+		if p.Dir.External {
+			sink = p.depSink
+		}
+		conf := &check.Config{Sink: sink, Import: imp, DirName: filepath.Base(p.Dir.Dir), NoModule: s.Mod.Synthetic}
 		if s.Mod.Synthetic {
 			conf.DirName = "main"
 		}
-		protect(s.Sink, p.span(), "in package "+p.Dir.ImportPath, func() { p.Checked = check.Check(conf, p.Dir.ImportPath, p.Syntax) })
+		protect(sink, p.span(), "in package "+p.Dir.ImportPath, func() { p.Checked = check.Check(conf, p.Dir.ImportPath, p.Syntax) })
+		if p.Dir.External {
+			s.settleExternal(p)
+		}
 	}
 }
 
@@ -779,7 +815,7 @@ func (s *Session) generate() error {
 
 // generatePkg lowers and emits a checked package, once.
 func (s *Session) generatePkg(p *Package, opts emit.Options) {
-	if p.Checked == nil || p.generated {
+	if p.Checked == nil || p.generated || p.Dir.External {
 		return
 	}
 	p.generated = true
@@ -880,6 +916,9 @@ func (s *Session) write() error {
 	replace := map[string]string{}
 	written := map[string]*emit.SourceMap{}
 	for _, p := range s.Packages {
+		if p.Dir.External {
+			continue // the go command builds its published Go
+		}
 		dir := filepath.Join(s.GenDir, filepath.FromSlash(p.Dir.Rel))
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
@@ -907,7 +946,9 @@ func (s *Session) write() error {
 	// sources still exist.
 	inSession := map[string]bool{}
 	for _, p := range s.Packages {
-		inSession[p.Dir.Dir] = true
+		if !p.Dir.External {
+			inSession[p.Dir.Dir] = true
+		}
 	}
 	if data, err := os.ReadFile(s.Overlay); err == nil {
 		var old struct{ Replace map[string]string }

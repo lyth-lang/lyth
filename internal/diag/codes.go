@@ -85,4 +85,5 @@ const (
 	WBuiltinMember Code = "W0011"
 	WRawTemplate   Code = "W0012"
 	WCatchReturn   Code = "W0013"
+	WGoView        Code = "W0014"
 )

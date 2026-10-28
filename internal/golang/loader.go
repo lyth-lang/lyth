@@ -171,7 +171,7 @@ func GoVersion(dir string) (string, int, error) {
 
 // EnvVars are the go env variables that affect type information; they key
 // the persistent type cache.
-var EnvVars = []string{"GOVERSION", "GOOS", "GOARCH", "GOFLAGS", "CGO_ENABLED", "GOEXPERIMENT", "GOROOT", "GOWORK"}
+var EnvVars = []string{"GOVERSION", "GOOS", "GOARCH", "GOFLAGS", "CGO_ENABLED", "GOEXPERIMENT", "GOROOT", "GOWORK", "GOMODCACHE"}
 
 // Env is the output of `go env -json` for EnvVars.
 type Env struct {
