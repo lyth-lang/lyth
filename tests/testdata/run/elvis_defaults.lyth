@@ -1,0 +1,84 @@
+// ?: on reads that can be repeated: a default first, or one if of nil checks.
+
+const Anonymous = "anonymous"
+
+struct Address {
+    City: string
+    Zip: string?
+}
+
+struct Customer {
+    Name: string
+    Email: string?
+    Address: Address?
+    Limit: int64?
+    Manager: *Customer?
+}
+
+var calls = 0
+
+func find(id: int): Customer? {
+    calls++
+    if id == 1 {
+        return Customer(Name = "Ada", Email = "ada@example.com", Address = Address(City = "Oslo", Zip = "0150"), Limit = 7, Manager = null)
+    }
+    if id == 2 {
+        return Customer(Name = "Bob", Email = null, Address = null, Limit = null, Manager = &Customer(Name = "Ada", Email = null, Address = null, Limit = null, Manager = null))
+    }
+    return null
+}
+
+func label(c: Customer, fallback: string): string {
+    email := c.Email ?: "no email"
+    name := c.Manager?.Name ?: Anonymous
+    limit := c.Limit ?: 100
+    other := c.Email ?: fallback
+    return "${email} ${name} ${limit} ${other} ${c.Address?.City ?: "nowhere"}"
+}
+
+func city(c: Customer?): string = c?.Address?.City ?: "unknown"
+
+func zip(c: Customer?): string = c?.Address?.Zip ?: "none"
+
+func manager(id: int): string = find(id)?.Manager?.Name ?: "none"
+
+func *Customer.contact(): string {
+    email := self.Email ?: self.Name
+    return email
+}
+
+func main() {
+    for id in 1..3 {
+        c := find(id)
+        if c == null {
+            println(id, "nobody", city(c), zip(c))
+            continue
+        }
+        println(id, label(c, "fallback"), city(c), zip(c))
+        p := &Customer(Name = c.Name, Email = c.Email, Address = null, Limit = null, Manager = null)
+        println(p.contact())
+    }
+    calls = 0
+    name := find(1)?.Name ?: "nobody"
+    println(name, manager(2), manager(1), manager(3), calls)
+
+    // the new name hides the one it defaults from
+    note: string? = null
+    if true {
+        note := note ?: "empty"
+        println(note)
+    }
+    limit: int64? = null
+    big := limit ?: 1 << 40
+    println(big)
+}
+
+// Output:
+// 1 ada@example.com anonymous 7 ada@example.com Oslo Oslo 0150
+// ada@example.com
+// 2 no email Ada 100 fallback nowhere unknown none
+// Bob
+// 3 nobody unknown none
+// Ada Ada none none 4
+// empty
+// 1099511627776

@@ -23,17 +23,10 @@ func Contact(u User) string {
 }
 
 func ManagerName(u *User) string {
-	var v string
-	var manager *User
-	if u != nil {
-		manager = u.Manager
+	if u != nil && u.Manager != nil {
+		return u.Manager.Name
 	}
-	if manager != nil {
-		v = manager.Name
-	} else {
-		v = "none"
-	}
-	return v
+	return "none"
 }
 
 //line nullable.lyth:14

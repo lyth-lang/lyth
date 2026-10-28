@@ -1,0 +1,50 @@
+// x ?: y lowered as Go writes a default or a chain of nil checks.
+
+const Anonymous = "anonymous"
+
+struct Address {
+    City: string
+    Zip: string?
+}
+
+struct Customer {
+    Name: string
+    Email: string?
+    Address: Address?
+    Limit: int64?
+    Manager: *Customer?
+}
+
+func find(id: int): Customer? = if id == 1 { Customer(Name = "Ada", Email = null, Address = null, Limit = null, Manager = null) } else { null }
+
+func Label(c: Customer, fallback: string): string {
+    email := c.Email ?: "no email"
+    name := c.Manager?.Name ?: Anonymous
+    limit := c.Limit ?: 100
+    other := c.Email ?: fallback
+    return "${email} ${name} ${limit} ${other} ${c.Address?.City ?: "nowhere"}"
+}
+
+func Lookup(id: int): string {
+    name := find(id)?.Name ?: "nobody"
+    return name
+}
+
+func City(c: Customer?): string = c?.Address?.City ?: "unknown"
+
+func Zip(c: *Customer?): string = c?.Address?.Zip ?: "none"
+
+func FirstName(id: int): string = find(id)?.Manager?.Name ?: "none"
+
+func Boss(c: *Customer, other: *Customer): *Customer {
+    boss := c.Manager ?: other
+    return boss
+}
+
+func *Customer.Contact(): string {
+    email := self.Email ?: self.Name
+    return email
+}
+
+// a call could change what a field default reads: it keeps its place
+func Fallback(c: *Customer): string = (find(2)?.Name ?: c.Name) + "!"

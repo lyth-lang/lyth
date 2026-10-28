@@ -207,6 +207,14 @@ through crafted source is impossible.
   each branch instead, and an `else` after a returning branch is outdented
   (Go's early-return style) when that moves no declaration into the enclosing
   scope.
+- **`?:` forms.** When the left side is a chain of field reads from a local,
+  `self`, or a call (evaluated once, in the `if`'s init), `?:` becomes one `if`
+  whose condition checks every nullable link, repeating the path as Go code
+  does: `return o?.a?.b ?: d` is `if o != nil && o.a != nil { return o.a.b }`
+  then `return d`, and a declaration whose default is a constant or a settled
+  read starts from it: `email := "none"; if u.Email != nil { email = *u.Email }`.
+  A plain nullable read that keeps its type is assigned and then replaced:
+  `next := n.next; if next == nil { next = d }`.
 - **`when` forms.** All-`is` conditions become a type switch; value conditions
   a Go `switch`; anything else (mixed tests, a condition that needs statements,
   which a `case` cannot hold without evaluating it eagerly) an `if`/`else`

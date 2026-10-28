@@ -766,6 +766,32 @@ func (fl *fnLower) localDecl(s *syntax.LocalDecl) {
 			return
 		}
 	}
+	if el, ok := value.(*syntax.ElvisExpr); ok && conv == check.ConvNone {
+		if fl.elvisPlain(el, v.Type) {
+			// next := n.next ?: d: next := n.next; if next == nil { next = d }
+			name := fl.declareLocal(v)
+			fl.emit(&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(name)}, Tok: token.DEFINE, TokPos: fl.l.pos(s.S), Rhs: []ast.Expr{fl.expr(el.X)}}, s.S)
+			sub, stmts := fl.sub()
+			sub.exprIntoRaw(el.Y, ast.NewIdent(name), v.Type)
+			fl.emitSynthShallow(&ast.IfStmt{If: fl.l.pos(el.S), Cond: nilCmp(ast.NewIdent(name), token.EQL), Body: &ast.BlockStmt{List: *stmts}}, el.OpSpan)
+			fl.useIfUnused(v, name, s.S)
+			return
+		}
+		if fl.elvisDefaultFirst(el, v.Type) {
+			// email := u.Email ?: "none": email := "none"; if u.Email != nil { email = *u.Email }
+			name := fl.declareLocal(v)
+			if fl.readsName(el.X, name) {
+				// name := name ?: d reads the outer name in the condition
+				tmp := fl.temp(name)
+				fl.elvisDefaultInto(el, tmp, v.Type, s.S)
+				fl.emit(&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(name)}, Tok: token.DEFINE, TokPos: fl.l.pos(s.S), Rhs: []ast.Expr{ast.NewIdent(tmp)}}, s.S)
+			} else {
+				fl.elvisDefaultInto(el, name, v.Type, s.S)
+			}
+			fl.useIfUnused(v, name, s.S)
+			return
+		}
+	}
 	if conv == check.ConvNone && fl.intoTargetForm(value) {
 		name := fl.declareLocal(v)
 		if try, ok := value.(*syntax.TryExpr); ok && fl.simpleTry(try) {
@@ -1396,7 +1422,16 @@ func (fl *fnLower) elvisReturn(v syntax.Expr, span source.Span) bool {
 	case *syntax.Ident:
 	case *syntax.SelectorExpr:
 		if x.Safe {
-			return false
+			// return o?.a?.b ?: d: if o != nil && o.a != nil { return o.a.b }; return d
+			et := fl.info.TypeOf(e)
+			if !fl.elvisGuarded(e, fl.shape.results[0]) || et == nil || !types.Identical(et, fl.shape.results[0]) || !types.Identical(fl.info.TypeOf(e.Y), et) {
+				return false
+			}
+			fl.elvisGuardIf(e, func(val ast.Expr) ast.Stmt {
+				return &ast.ReturnStmt{Results: fl.successResults(val)}
+			})
+			fl.returnStmt([]syntax.Expr{e.Y}, span)
+			return true
 		}
 	case *syntax.CallExpr:
 		if c, _, _ := fl.safeCallOf(x); c != nil {

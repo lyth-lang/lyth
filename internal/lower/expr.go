@@ -368,7 +368,11 @@ func (fl *fnLower) expr0(e syntax.Expr) ast.Expr {
 	case *syntax.ThisExpr:
 		return ast.NewIdent(fl.recvName)
 	case *syntax.ParenExpr:
-		return &ast.ParenExpr{X: fl.expr(e.X)}
+		x := fl.expr(e.X)
+		if id, ok := x.(*ast.Ident); ok {
+			return id // (f() ?: d) + 1 became a temporary: v + 1
+		}
+		return &ast.ParenExpr{X: x}
 	case *syntax.UnaryExpr:
 		return fl.unary(e)
 	case *syntax.BinaryExpr:
@@ -478,6 +482,12 @@ func (fl *fnLower) valueViaTemp(e syntax.Expr) ast.Expr {
 		sub, stmts := fl.sub()
 		sub.exprIntoRaw(el.Y, ast.NewIdent(name), t)
 		fl.emitSynthShallow(&ast.IfStmt{If: fl.l.pos(el.S), Cond: nilCmp(ast.NewIdent(name), token.EQL), Body: &ast.BlockStmt{List: *stmts}}, el.OpSpan)
+		return ast.NewIdent(name)
+	}
+	if el, ok := syntax.Unparen(e).(*syntax.ElvisExpr); ok && fl.elvisDefaultFirst(el, t) {
+		// f(u.Email ?: "none"): email := "none"; if u.Email != nil { email = *u.Email }
+		name := fl.temp(tempBase(el.X))
+		fl.elvisDefaultInto(el, name, t, el.S)
 		return ast.NewIdent(name)
 	}
 	name := fl.temp(tempBase(e))
@@ -939,6 +949,17 @@ func (fl *fnLower) stash(e syntax.Expr, x ast.Expr) ast.Expr {
 
 // elvisInto assigns `x ?: y` to target.
 func (fl *fnLower) elvisInto(e *syntax.ElvisExpr, target ast.Expr, targetType types.Type) {
+	if fl.elvisGuarded(e, targetType) {
+		// if u.Email != nil { target = *u.Email } else { target = y }
+		sub, stmts := fl.sub()
+		sub.exprInto(e.Y, cloneIdentExpr(target), targetType)
+		fl.elvisGuardIf(e, func(val ast.Expr) ast.Stmt {
+			return &ast.AssignStmt{Lhs: []ast.Expr{cloneIdentExpr(target)}, Tok: token.ASSIGN, Rhs: []ast.Expr{val}}
+		})
+		ifs := (*fl.stmts)[len(*fl.stmts)-1].(*ast.IfStmt)
+		ifs.Else = &ast.BlockStmt{List: *stmts}
+		return
+	}
 	if fl.elvisSafeChain(e, target, targetType) {
 		return
 	}
@@ -1025,6 +1046,220 @@ func (fl *fnLower) elvisSafeChain(e *syntax.ElvisExpr, target ast.Expr, targetTy
 	sub.exprInto(e.Y, cloneIdentExpr(target), targetType)
 	fl.emitSynthShallow(&ast.IfStmt{If: fl.l.pos(e.S), Cond: nilCmp(recv, token.NEQ), Body: then, Else: &ast.BlockStmt{List: *stmts}}, e.OpSpan)
 	return true
+}
+
+// elvisReads splits the left side of x ?: y into the selections it reads
+// and their root, when every part can be read again without effects: a
+// local, self, or a call evaluated once, followed by fields. ok is false for
+// anything else (an index, a method call, a conversion Go cannot read
+// through).
+func (fl *fnLower) elvisReads(e *syntax.ElvisExpr) (root syntax.Expr, hops []*syntax.SelectorExpr, ok bool) {
+	if fl.info.Implicit[e.X] != check.ConvNone {
+		return nil, nil, false
+	}
+	x := syntax.Unparen(e.X)
+	for {
+		s, isSel := x.(*syntax.SelectorExpr)
+		if !isSel {
+			break
+		}
+		sel := fl.info.Selections[s]
+		if sel == nil || sel.Kind != check.SelField || sel.TryFirst {
+			return nil, nil, false
+		}
+		if conv := fl.info.Implicit[s.X]; conv != check.ConvNone && conv != check.ConvUnbox {
+			return nil, nil, false
+		}
+		hops = append([]*syntax.SelectorExpr{s}, hops...)
+		x = syntax.Unparen(s.X)
+	}
+	switch r := x.(type) {
+	case *syntax.ThisExpr:
+	case *syntax.Ident:
+		if !isLocalIdent(fl, r) {
+			return nil, nil, false
+		}
+	case *syntax.CallExpr:
+		if c, _, _ := fl.safeCallOf(r); c != nil {
+			return nil, nil, false
+		}
+	default:
+		return nil, nil, false
+	}
+	return x, hops, true
+}
+
+// elvisGuarded reports whether x ?: y, of type t, can be lowered as
+//
+//	if v := call(); v != nil && v.a != nil { target = v.a.b }
+//
+// with x's reads repeated in the condition and the value: x is a chain
+// elvisReads accepts, something in it may be null, and once its checks pass
+// it has t's Go type.
+func (fl *fnLower) elvisGuarded(e *syntax.ElvisExpr, t types.Type) bool {
+	if t == nil || types.MayBeNull(t) || fl.info.TypeOf(e.Y) == types.Nothing {
+		return false
+	}
+	root, hops, ok := fl.elvisReads(e)
+	if !ok {
+		return false
+	}
+	guarded := false
+	ft := fl.info.TypeOf(root)
+	for _, h := range hops {
+		sel := fl.info.Selections[h]
+		guarded = guarded || sel.Safe
+		ft = sel.Type
+	}
+	if ft == nil {
+		return false
+	}
+	gt := types.Lower(ft)
+	if types.MayBeNull(ft) {
+		guarded = true
+		if optionalValue(ft) {
+			gt = types.Lower(types.Base(ft))
+		}
+	}
+	return guarded && gt != nil && gotypes.Identical(gt, types.Lower(t))
+}
+
+// elvisDefaultFirst reports whether `v := x ?: y` can be written as Go
+// writes a default: v := y, then the if that replaces it. y is evaluated
+// first, so it must be a constant or a variable that cannot change.
+func (fl *fnLower) elvisDefaultFirst(e *syntax.ElvisExpr, t types.Type) bool {
+	if !fl.elvisGuarded(e, t) {
+		return false
+	}
+	if root, _, _ := fl.elvisReads(e); root != nil {
+		if _, call := root.(*syntax.CallExpr); call {
+			// the call could change a field y reads
+			if _, sel := syntax.Unparen(e.Y).(*syntax.SelectorExpr); sel {
+				return false
+			}
+		}
+	}
+	return fl.settledRead(e.Y)
+}
+
+// settledRead reports whether e is a constant, or fields of self or of a
+// local that is never assigned again: reading it earlier gives the same value.
+func (fl *fnLower) settledRead(e syntax.Expr) bool {
+	if tv, ok := fl.info.Types[e]; ok && tv.Value != nil {
+		return fl.info.Implicit[e] == check.ConvNone
+	}
+	if fl.info.Implicit[e] != check.ConvNone {
+		return false
+	}
+	switch x := syntax.Unparen(e).(type) {
+	case *syntax.ThisExpr:
+		return true
+	case *syntax.SelectorExpr:
+		sel := fl.info.Selections[x]
+		return sel != nil && sel.Kind == check.SelField && !sel.Safe && !sel.TryFirst && fl.settledRead(x.X)
+	case *syntax.Ident:
+		switch s := fl.info.Uses[x].(type) {
+		case *check.ConstSym:
+			return true
+		case *check.VarSym:
+			return s.Kind != check.GlobalVar && s.Settled()
+		}
+	}
+	return false
+}
+
+// elvisGuardIf builds the if of an elvisGuarded x ?: y whose body is
+// body(value): its condition checks every nullable read of x, and a call at
+// the root is evaluated once, in the if's init.
+func (fl *fnLower) elvisGuardIf(e *syntax.ElvisExpr, body func(val ast.Expr) ast.Stmt) {
+	root, hops, _ := fl.elvisReads(e)
+	ifs := &ast.IfStmt{If: fl.l.pos(e.S)}
+	var cur ast.Expr
+	if len(hops) > 0 && fl.info.Implicit[root] == check.ConvUnbox {
+		cur = fl.expr0(root) // Go dereferences pointers for member access
+		fl.l.mark(cur, root.Span())
+	} else {
+		cur = fl.expr(root)
+	}
+	if _, plain := cur.(*ast.Ident); !plain {
+		name := fl.temp(tempBase(root))
+		ifs.Init = &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(name)}, Tok: token.DEFINE, Rhs: []ast.Expr{cur}}
+		cur = ast.NewIdent(name)
+		defer fl.release(name)
+	}
+	var conds []ast.Expr
+	for _, h := range hops {
+		sel := fl.info.Selections[h]
+		if sel.Safe {
+			conds = append(conds, nilCmp(cloneRead(cur), token.NEQ))
+		}
+		cur = &ast.SelectorExpr{X: cloneRead(cur), Sel: ast.NewIdent(sel.GoName)}
+	}
+	ft := fl.info.TypeOf(root)
+	if len(hops) > 0 {
+		ft = fl.info.Selections[hops[len(hops)-1]].Type
+	}
+	if types.MayBeNull(ft) {
+		conds = append(conds, nilCmp(cloneRead(cur), token.NEQ))
+		if optionalValue(ft) {
+			cur = &ast.StarExpr{X: cloneRead(cur)}
+		}
+	}
+	ifs.Cond = conds[0]
+	for _, c := range conds[1:] {
+		ifs.Cond = &ast.BinaryExpr{X: ifs.Cond, Op: token.LAND, Y: c}
+	}
+	ifs.Body = &ast.BlockStmt{List: []ast.Stmt{body(cur)}}
+	markTree(fl.l, ifs.Body, e.X.Span())
+	fl.emitSynthShallow(ifs, e.OpSpan)
+}
+
+// elvisDefaultInto declares name := y (typed as t where y's own type
+// differs) and assigns x over it when x is not null.
+func (fl *fnLower) elvisDefaultInto(e *syntax.ElvisExpr, name string, t types.Type, span source.Span) {
+	y := fl.exprAs(e.Y, t)
+	if needsExplicitType(fl.info, e.Y, t) {
+		spec := &ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(name)}, Type: fl.l.typeExpr(t), Values: []ast.Expr{y}}
+		fl.emit(&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, TokPos: fl.l.pos(span), Specs: []ast.Spec{spec}}}, span)
+	} else {
+		fl.emit(&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(name)}, Tok: token.DEFINE, TokPos: fl.l.pos(span), Rhs: []ast.Expr{y}}, span)
+	}
+	fl.elvisGuardIf(e, func(val ast.Expr) ast.Stmt {
+		return &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(name)}, Tok: token.ASSIGN, Rhs: []ast.Expr{val}}
+	})
+}
+
+// readsName reports whether lowering x reads a Go variable called name.
+func (fl *fnLower) readsName(x syntax.Expr, name string) bool {
+	found := false
+	syntax.Walk(x, func(n syntax.Node) {
+		switch n := n.(type) {
+		case *syntax.ThisExpr:
+			found = found || fl.recvName == name
+		case *syntax.Ident:
+			if n.Name == name {
+				found = true
+			}
+			if v, ok := fl.info.Uses[n].(*check.VarSym); ok {
+				found = found || fl.locals[v] == name || (v.Kind == check.ReceiverVar && fl.recvName == name)
+			}
+		}
+	})
+	return found
+}
+
+// cloneRead copies a read built from identifiers, selectors, and
+// dereferences, so it can appear in the tree more than once.
+func cloneRead(x ast.Expr) ast.Expr {
+	switch x := x.(type) {
+	case *ast.Ident:
+		return ast.NewIdent(x.Name)
+	case *ast.SelectorExpr:
+		return &ast.SelectorExpr{X: cloneRead(x.X), Sel: ast.NewIdent(x.Sel.Name)}
+	case *ast.StarExpr:
+		return &ast.StarExpr{X: cloneRead(x.X)}
+	}
+	return x
 }
 
 func (fl *fnLower) notNull(e *syntax.NotNullExpr) ast.Expr {
