@@ -26,6 +26,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -148,7 +149,7 @@ func run(args []string, stdout, stderr io.Writer) (code int) {
 	cmd, rest := args[0], args[1:]
 	switch cmd {
 	case "version", "-version", "--version":
-		fmt.Fprintf(stdout, "lyth version %s\n", version)
+		fmt.Fprintf(stdout, "lyth version %s (built with %s; supports %s)\n", version, runtime.Version(), build.SupportedGo())
 		return 0
 	case "help", "-h", "-help", "--help":
 		fmt.Fprint(stdout, usage)

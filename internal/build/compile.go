@@ -159,6 +159,7 @@ func Compile(cfg *Config, target Target) (*Session, error) {
 	if err := s.checkToolchain(); err != nil {
 		return s, err
 	}
+	defer s.explainNewerGo()
 	if !s.checkGoDirective() {
 		return s, nil
 	}
@@ -177,7 +178,7 @@ func Compile(cfg *Config, target Target) (*Session, error) {
 		return s, nil
 	}
 	if err := s.loadGo(); err != nil {
-		return s, err
+		return s, s.newerGoError(err)
 	}
 	if s.loader.CacheHit {
 		t = s.phase("load Go packages (cached)", t)
