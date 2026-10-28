@@ -28,8 +28,8 @@ concentrates in a few places:
 | nil pointer / nil interface panics                  | nullable types `T?`, smart casts, `?.`, `?:`, `!!`        | none at runtime |
 | verbose closures `func(x int) int { return x*2 }`   | lambdas `{ x -> x * 2 }`, `it`, trailing-lambda syntax     | none: same closures |
 | statements where expressions are wanted             | `if`/`when` expressions                                    | none: lowered to statements |
-| `fmt.Sprintf` for every message                     | string templates `"Hello, ${user.Name}"`                   | none: lowered to `+`/`strconv` |
-| silent mutation bugs (value receivers, aliasing)    | read-only parameters, loop variables, and value receivers  | none: compile-time only |
+| `fmt.Sprintf` or `+` with `strconv` for messages    | string templates `"Hello, ${user.Name}"`                   | none: lowered to `+`/`strconv` |
+| assignments that change only a copy (value receivers, parameters, loop variables) | read-only parameters, loop variables, and value receivers  | none: compile-time only |
 | JSON tag boilerplate                                | automatic lower-camel `json` tags on exported fields      | small, documented |
 | hand-written fan-out/cancellation plumbing          | fallible lambdas make `errgroup`-style libraries concise   | none: plain Go libraries |
 

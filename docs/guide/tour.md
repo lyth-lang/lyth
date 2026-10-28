@@ -283,7 +283,7 @@ func main() {
         // here user is a User, not a User?
         println(id, user.Name, user.Email ?: "no email")
     }
-    println(find(2)?.Name, find(3)?.Name)
+    println(find(3)?.Name ?: "unknown")
 }
 ```
 
@@ -561,8 +561,7 @@ func produce(jobs: chan<- *Job, n: int) {
 func main() {
     jobs := make(chan *Job, 2)
     go { produce(jobs, 3) }
-    while true {
-        job := jobs.receive() ?: break
+    for job in jobs {
         println("job", job.ID)
     }
 
@@ -583,9 +582,10 @@ Channels are Go channels with method syntax: `make(chan T, n)` creates one,
 `close(ch)`, and `for v in ch` receives until the channel is closed.
 `chan<- T` and `<-chan T` restrict a parameter to one direction.
 Semantics are Go's: receiving from a closed channel does not fail, it yields
-the zero value. That is why `receive()` on a channel of
-pointers is nullable, and why `?: break` ends the loop once `produce` closes
-`jobs`. `v, ok := ch.receive()` tells a zero value from a closed channel.
+the zero value. A non-null pointer type has no zero value, so `receive()` on a
+channel of pointers is nullable, and `job := jobs.receive() ?: break` ends a
+`while` loop once the channel is closed. `v, ok := ch.receive()` tells a zero
+value from a closed channel.
 
 `select` waits for whichever channel operation can proceed first. Its branches
 look like `when` branches: a receive can bind its value, `else` runs when no

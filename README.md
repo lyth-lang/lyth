@@ -71,9 +71,9 @@ func main() throws {
 - **Easier to read and review.** Much of today's code is written with AI, often
   hundreds of lines at a time, and people still have to read it. With the
   plumbing gone, what is left is what the program does. The compiler checks
-  what a reviewer would otherwise have to spot: using a value that may be nil
-  without a check, or leaving an error unhandled, is a compile error rather
-  than a crash in production.
+  what a reviewer would otherwise have to spot: using a nullable value without
+  a check, or leaving an error unhandled, is a compile error rather than a
+  crash in production.
 - **Error handling without the ceremony.** `func find(id: int64): User? throws`
   is Go's `func find(id int64) (*User, error)`. Errors stay values, as in Go:
   no exceptions, no unwinding, no hidden control flow. Only the repetition

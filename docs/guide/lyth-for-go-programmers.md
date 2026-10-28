@@ -3,8 +3,10 @@
 If you know Go, you already know Lyth's runtime, standard library, packages,
 concurrency model, and performance. Lyth changes how everyday code reads, and
 moves two classes of runtime failure (nil dereferences and ignored errors) to
-compile time. This page compares the two side by side, including the places
-where Lyth is no simpler than Go.
+compile time, for the types Lyth declares; values that come from Go APIs are
+trusted as Go trusts them ([platform types](go-interop.md#nil-and-platform-types)).
+This page compares the two side by side, including the places where Lyth is no
+simpler than Go.
 
 You also know most of Lyth's spelling. For everything Go already has, Lyth
 writes it Go's way: `func`, `:=` and `=`, Go's type names (`int`, `string`,
@@ -58,10 +60,10 @@ func main() {
 }
 ```
 
-Every `?` is an `if err != nil { return ..., err }` in the Go tab. Lyth writes
-the zero values (`Order{}`, `nil`) for you, which is where hand-written Go
-error handling most often goes wrong. A call whose error is neither propagated
-nor handled is a compile error, not a `go vet` warning.
+Every `?` is an `if err != nil { return ..., err }` in the Go tab, with the
+zero values (`Order{}`, `nil`) written for you. A call whose error is neither
+propagated nor handled is a compile error; Go compiles it, and only a linter
+such as `errcheck` reports it.
 
 ## Building a value from fallible parts
 
@@ -170,7 +172,9 @@ func main() {
 }
 ```
 
-One line in Lyth; a ladder of nil checks in Go.
+One expression in Lyth. Go needs a nil check for every link, repeating the
+path in each one, as the Go tab shows. The brevity is the smaller gain; the
+larger is that leaving out a check is a compile error in Lyth and a panic in Go.
 
 ## No typed-nil errors
 
@@ -436,10 +440,13 @@ func main() {
 
 The Go tab shows the idiom Go programmers write by hand: `type Method int`
 with `iota` constants (`MethodGet`, ...) and a `String` method, and an
-interface with an unexported method that only the listed structs have. What
-Go cannot do is check a `switch` against the set. In Lyth, a `when` over an
-enum or a sealed interface must cover every entry or member type (or have an
-`else`), so adding `Method.Put` or a new `Result` makes every `when` that
+interface with an unexported method that only the listed structs have. Most
+of its length is `MarshalText` and `UnmarshalText`, which make an entry travel
+as its name in JSON (`"get"`) and reject unknown names; Go code that does not
+need that leaves them out. What the Go compiler cannot do is check a `switch`
+against the set (linters such as `exhaustive` can, for constants). In Lyth, a
+`when` over an enum or a sealed interface must cover every entry or member
+type (or have an `else`), so adding `Method.Put` or a new `Result` makes every `when` that
 forgets it a compile error. The generated `switch` ends in a `default` that
 panics with the Lyth position, for values from outside the set such as
 `Method(7)`.
@@ -537,7 +544,9 @@ func parse(a: string, b: string, verbose: bool): int {
 Locals are mutable, as in Go: `x := e` declares one and `=` assigns it.
 Parameters, loop variables, `catch` bindings, and `self` are read-only, and a
 value receiver's fields cannot be assigned, because the assignment would change
-only the method's copy. Go has no such check, and it costs nothing at run
+only the method's copy. Read-only stops at references, as Go's sharing does:
+a function may still set the elements of a slice parameter or the fields
+behind a pointer. Go has no such check, and it costs nothing at run
 time: the generated code uses ordinary Go variables. A local the function never
 assigns again keeps the type that a null check or `is` test gave it (a smart
 cast), like a parameter.
@@ -592,7 +601,7 @@ meaning Go would get wrong ([ADR 0031](../adr/0031-go-spelling.md)):
 | `T?`, `?.`, `?:`, `!!`, smart casts | `*T`, nil checks | nil safety at compile time |
 | `null` | `nil` | Lyth's null is never a typed nil |
 | `func T.M()`, `func *T.M()`, `self` | `func (t T) M()` | the receiver always has the same name and cannot be shadowed; there are no static methods, so constructors stay package functions (`NewServer`) |
-| `for x in xs`, `for i, x in xs`, `for i in 0..<n` | `for _, x := range xs`, `for i := 0; i < n; i++` | element first, and ranges `a..<b`, `a..b`; Go's `range` would be a false friend, and `for i, x := range xs` is an error whose hint gives the Lyth form |
+| `for x in xs`, `for i, x in xs`, `for i in 0..<n` | `for _, x := range xs`, `for i := range n` | element first, and ranges `a..<b`, `a..b`; Go's `range` would be a false friend, and `for i, x := range xs` is an error whose hint gives the Lyth form |
 | `while c`, `while true` | `for c`, `for` | `for c` would read like `for x in xs`; Go's three-part `for` stays |
 | `when x { ... }` | `switch x { ... }` | an expression, exhaustive over enums and sealed interfaces; `break` exits the loop |
 | `if`/`when` as values; `= expr` bodies | statements | fewer temporaries |

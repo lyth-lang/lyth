@@ -151,8 +151,8 @@
   },
   {
     "file": "docs/guide/tour.md",
-    "source": "struct User {\n    Name: string\n    Email: string?\n}\n\nfunc find(id: int): User? {\n    when id {\n        1 -\u003e return User(Name = \"Ada\", Email = \"ada@example.com\")\n        2 -\u003e return User(Name = \"Linus\", Email = null)\n    }\n    return null\n}\n\nfunc main() {\n    for id in 1..3 {\n        user := find(id)\n        if user == null {\n            println(id, \"nobody\")\n            continue\n        }\n        // here user is a User, not a User?\n        println(id, user.Name, user.Email ?: \"no email\")\n    }\n    println(find(2)?.Name, find(3)?.Name)\n}\n",
-    "output": "1 Ada ada@example.com\n2 Linus no email\n3 nobody\nLinus null\n"
+    "source": "struct User {\n    Name: string\n    Email: string?\n}\n\nfunc find(id: int): User? {\n    when id {\n        1 -\u003e return User(Name = \"Ada\", Email = \"ada@example.com\")\n        2 -\u003e return User(Name = \"Linus\", Email = null)\n    }\n    return null\n}\n\nfunc main() {\n    for id in 1..3 {\n        user := find(id)\n        if user == null {\n            println(id, \"nobody\")\n            continue\n        }\n        // here user is a User, not a User?\n        println(id, user.Name, user.Email ?: \"no email\")\n    }\n    println(find(3)?.Name ?: \"unknown\")\n}\n",
+    "output": "1 Ada ada@example.com\n2 Linus no email\n3 nobody\nunknown\n"
   },
   {
     "file": "docs/guide/tour.md",
@@ -186,7 +186,7 @@
   },
   {
     "file": "docs/guide/tour.md",
-    "source": "import \"time\"\n\nstruct Job {\n    ID: int\n}\n\nfunc produce(jobs: chan\u003c- *Job, n: int) {\n    defer jobs.close()\n    for i in 1..n {\n        jobs.send(\u0026Job(ID = i))\n    }\n}\n\nfunc main() {\n    jobs := make(chan *Job, 2)\n    go { produce(jobs, 3) }\n    while true {\n        job := jobs.receive() ?: break\n        println(\"job\", job.ID)\n    }\n\n    results := make(chan string)\n    go {\n        time.Sleep(time.Second)\n        results.send(\"slow answer\")\n    }\n    select {\n        r := results.receive() -\u003e println(r)\n        time.After(10 * time.Millisecond).receive() -\u003e println(\"gave up waiting\")\n    }\n}\n",
+    "source": "import \"time\"\n\nstruct Job {\n    ID: int\n}\n\nfunc produce(jobs: chan\u003c- *Job, n: int) {\n    defer jobs.close()\n    for i in 1..n {\n        jobs.send(\u0026Job(ID = i))\n    }\n}\n\nfunc main() {\n    jobs := make(chan *Job, 2)\n    go { produce(jobs, 3) }\n    for job in jobs {\n        println(\"job\", job.ID)\n    }\n\n    results := make(chan string)\n    go {\n        time.Sleep(time.Second)\n        results.send(\"slow answer\")\n    }\n    select {\n        r := results.receive() -\u003e println(r)\n        time.After(10 * time.Millisecond).receive() -\u003e println(\"gave up waiting\")\n    }\n}\n",
     "output": "job 1\njob 2\njob 3\ngave up waiting\n"
   },
   {
