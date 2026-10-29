@@ -129,9 +129,12 @@ func TestLythLibraryFromOtherModule(t *testing.T) {
 		"v1.1.0": {"users/users.lyth": []byte(libSource)},
 		"v1.2.0": {"users/users.lyth": []byte(strings.Replace(libSource, `greeting: string = "hello"`, `greeting: string = "hello", end: string = ""`, 1)), "users/users.lyth.go": published},
 		"v1.3.0": {"users/users.lyth": []byte(strings.Replace(libSource, "func Find(id: int)", "fun Find(id: Int)", 1)), "users/users.lyth.go": published},
+		"v1.4.0": {"users/users.lyth": []byte(libSource), "users/users.lyth.go": published, "go.mod": []byte("module example.com/lib\n\ngo 1.26\n\n//lyth:version 99.0\n")},
 	}
 	for v, files := range versions {
-		files["go.mod"] = read("go.mod")
+		if files["go.mod"] == nil {
+			files["go.mod"] = read("go.mod")
+		}
 		writeProxyModule(t, proxy, "example.com/lib", v, files)
 	}
 	proxyURL := filepath.ToSlash(proxy)
@@ -192,6 +195,79 @@ func TestLythLibraryFromOtherModule(t *testing.T) {
 			}
 		}
 	})
+	t.Run("written for a newer Lyth", func(t *testing.T) {
+		s := compileWith(t, "v1.4.0")
+		d := find(s, diag.WGoView)
+		if d == nil || !strings.Contains(d.Message, "it is written for Lyth 99.0, newer than this lyth ("+build.LangVersion+")") {
+			t.Errorf("want W0014 naming the version, got %v", d)
+		}
+	})
+}
+
+// TestLythVersionDirective checks the //lyth:version line of go.mod (ADR
+// 0054) for the modules compiled with the program: a version newer than this
+// lyth, or a malformed line, is E0602 at the line; the go command keeps it.
+func TestLythVersionDirective(t *testing.T) {
+	main := "func main() {\n    println(\"hi\")\n}\n"
+	compile := func(t *testing.T, root string) *build.Session {
+		t.Helper()
+		s, err := build.Compile(&build.Config{WorkDir: root, NoWrite: true, Stdout: os.Stdout, Stderr: os.Stderr}, build.Target{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	for _, tc := range []struct{ line, want string }{
+		{"//lyth:version " + build.LangVersion, ""},
+		{"//lyth:version 0.1", ""},
+		{"//lyth:version 99.0", "go.mod:5:1: error[E0602]: the module is written for Lyth 99.0, newer than this lyth (" + build.LangVersion + ")"},
+		{"//lyth:version 1", "go.mod:5:1: error[E0602]: go.mod has a malformed //lyth:version line"},
+		{"//lyth:version 0.1\n//lyth:version 0.2", "go.mod:6:1: error[E0602]: go.mod has a second //lyth:version line (the first is line 5)"},
+	} {
+		root := writeModule(t, "example.com/app", map[string]string{"main.lyth": main})
+		if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/app\n\ngo 1.26\n\n"+tc.line+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got := ""
+		if ds := compile(t, root).Sink.All(); len(ds) > 0 {
+			got = render(ds)
+		}
+		if tc.want == "" && got != "" || tc.want != "" && !strings.Contains(got, tc.want) {
+			t.Errorf("%q: got\n%s\nwant %q", tc.line, got, tc.want)
+		}
+	}
+
+	// A module replaced by a directory is compiled with the program, so its
+	// version is checked as the program's is.
+	ws := t.TempDir()
+	write := func(name, content string) {
+		t.Helper()
+		p := filepath.Join(ws, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("lib/go.mod", "module example.com/lib\n\ngo 1.26\n\n//lyth:version 99.0\n")
+	write("lib/users/users.lyth", libSource)
+	write("app/go.mod", "module example.com/app\n\ngo 1.26\n\n//lyth:version "+build.LangVersion+"\n\nrequire example.com/lib v0.0.0\n\nreplace example.com/lib => ../lib\n")
+	write("app/main.lyth", main)
+	if got := render(compile(t, filepath.Join(ws, "app")).Sink.All()); !strings.Contains(got, filepath.Join("lib", "go.mod")+":5:1: error[E0602]: the module is written for Lyth 99.0") {
+		t.Errorf("replaced module: got\n%s", got)
+	}
+
+	// The go command keeps the line when it edits go.mod.
+	cmd := exec.Command("go", "mod", "edit", "-go=1.27", "-require=example.com/other@v1.0.0")
+	cmd.Dir = filepath.Join(ws, "app")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("go mod edit: %v: %s", err, out)
+	}
+	data, _ := os.ReadFile(filepath.Join(ws, "app", "go.mod"))
+	if v, _, err := build.LythDirective(string(data)); err != nil || v != build.LangVersion {
+		t.Errorf("after go mod edit, go.mod declares %q (%v):\n%s", v, err, data)
+	}
 }
 
 // runApp builds the session's module and returns what the program prints.

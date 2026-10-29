@@ -131,6 +131,9 @@ type Session struct {
 	// packages of the module cache by import path (nil: none), both lazily.
 	reqs      []requirement
 	externals map[string]*pkgDir
+	// withModules are the roots of the other modules compiled with the
+	// program: workspace modules and local replacements.
+	withModules []string
 }
 
 // Timing is the duration of one compilation phase.
@@ -168,7 +171,7 @@ func Compile(cfg *Config, target Target) (*Session, error) {
 		return s, err
 	}
 	defer s.explainNewerGo()
-	if !s.checkGoDirective() {
+	if !s.checkGoDirective() || !s.checkLythDirective() {
 		return s, nil
 	}
 	t = s.phase("setup", t)
@@ -431,6 +434,7 @@ func (s *Session) workspacePackages(mod *Module) []*pkgDir {
 		if err != nil {
 			continue
 		}
+		s.withModules = append(s.withModules, other.Root)
 		for _, p := range pkgs {
 			p.Rel = path.Join("_ws", strings.ReplaceAll(other.Path, "/", "_"), p.Rel)
 			out = append(out, p)

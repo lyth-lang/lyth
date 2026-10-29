@@ -134,6 +134,9 @@ type pkgDir struct {
 	// (deps.go). Module is that module, path@version.
 	External bool
 	Module   string
+	// newerLang says why the module's go.mod //lyth:version line rules out
+	// its Lyth view (langversion.go), for an External package.
+	newerLang string
 }
 
 // TestOnly reports whether the package has only test files (e2e tests):

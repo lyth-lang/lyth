@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/lyth-lang/lyth/docs"
+	"github.com/lyth-lang/lyth/internal/build"
 )
 
 func TestGuideListsEveryTopic(t *testing.T) {
@@ -90,6 +91,10 @@ func TestInit(t *testing.T) {
 		}
 	}
 
+	if got, _ := os.ReadFile("go.mod"); !strings.HasSuffix(string(got), "\n\n//lyth:version "+build.LangVersion+"\n") {
+		t.Errorf("go.mod does not declare the Lyth version:\n%s", got)
+	}
+
 	// A second init keeps what exists, and adds what is missing.
 	os.WriteFile("AGENTS.md", []byte("mine\n"), 0o644)
 	os.Remove("CLAUDE.md")
@@ -108,5 +113,63 @@ func TestInit(t *testing.T) {
 	}
 	if code := run([]string{"init", "other.com/x"}, &out, &errOut); code != 1 {
 		t.Errorf("init with another module path: exit %d", code)
+	}
+}
+
+// TestLangVersionFollowsDevVersion keeps the Lyth version a module declares
+// in step with the version of this checkout.
+func TestLangVersionFollowsDevVersion(t *testing.T) {
+	if !strings.HasPrefix(devVersion, build.LangVersion+".") {
+		t.Errorf("build.LangVersion is %s but devVersion is %s: bump LangVersion with devVersion", build.LangVersion, devVersion)
+	}
+}
+
+func TestFixLang(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("needs the go command")
+	}
+	dir := t.TempDir()
+	t.Chdir(dir)
+	write := func(gomod string) {
+		t.Helper()
+		if err := os.WriteFile("go.mod", []byte(gomod), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	os.WriteFile("main.lyth", []byte("func main() {\n    println(\"hi\")\n}\n"), 0o644)
+	gomod := func() string {
+		data, _ := os.ReadFile("go.mod")
+		return string(data)
+	}
+	for _, tc := range []struct {
+		before, lang string
+		code         int
+		out, after   string
+	}{
+		{"module m\n\ngo 1.26\n", build.LangVersion, 0, "lyth: go.mod now declares Lyth " + build.LangVersion + "\n", "module m\n\ngo 1.26\n\n//lyth:version " + build.LangVersion + "\n"},
+		{"module m\n\ngo 1.26\n\n//lyth:version 0.1\n\n// kept\n", build.LangVersion, 0, "lyth: raised the Lyth version in go.mod from 0.1 to " + build.LangVersion + "\n", "module m\n\ngo 1.26\n\n//lyth:version " + build.LangVersion + "\n\n// kept\n"},
+		{"module m\n\ngo 1.26\n\n//lyth:version " + build.LangVersion + "\n", "0.1", 1, "", ""},
+		{"module m\n\ngo 1.26\n", "99.0", 1, "", ""},
+		{"module m\n\ngo 1.26\n", "1", 1, "", ""},
+	} {
+		write(tc.before)
+		var out, errOut bytes.Buffer
+		code := run([]string{"fix", "-lang=" + tc.lang}, &out, &errOut)
+		if code != tc.code {
+			t.Errorf("%q, -lang=%s: exit %d, want %d: %s", tc.before, tc.lang, code, tc.code, errOut.String())
+			continue
+		}
+		if tc.code != 0 {
+			if gomod() != tc.before {
+				t.Errorf("-lang=%s changed go.mod after an error:\n%s", tc.lang, gomod())
+			}
+			continue
+		}
+		if out.String() != tc.out {
+			t.Errorf("-lang=%s printed %q, want %q", tc.lang, out.String(), tc.out)
+		}
+		if gomod() != tc.after {
+			t.Errorf("-lang=%s: go.mod is\n%s\nwant\n%s", tc.lang, gomod(), tc.after)
+		}
 	}
 }

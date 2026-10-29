@@ -146,7 +146,7 @@ func cmdInit(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "lyth: %s is already in module %s (%s)\n", wd, mod.Path, filepath.Join(root, "go.mod"))
 			return 1
 		}
-		if !raiseGoVersion(root, stdout, stderr, true) {
+		if !raiseGoVersion(root, stdout, stderr, true) || !declareLythVersion(root, stdout, stderr, true) {
 			return 1
 		}
 	default:
@@ -161,7 +161,7 @@ func cmdInit(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		// Go 1.26's go mod init writes the previous release (go 1.25.0).
-		if !raiseGoVersion(wd, stdout, stderr, false) {
+		if !raiseGoVersion(wd, stdout, stderr, false) || !declareLythVersion(wd, stdout, stderr, false) {
 			return 1
 		}
 	}
@@ -215,6 +215,29 @@ func raiseGoVersion(root string, stdout, stderr io.Writer, announce bool) bool {
 	return true
 }
 
+// declareLythVersion adds the //lyth:version line to root's go.mod when it
+// has none, declaring the version this lyth compiles (ADR 0054), saying so
+// when announce is set. A line it has is kept: only lyth fix -lang raises
+// it. It reports false after an error.
+func declareLythVersion(root string, stdout, stderr io.Writer, announce bool) bool {
+	path := filepath.Join(root, "go.mod")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return true
+	}
+	if v, _, _ := build.LythDirective(string(data)); v != "" {
+		return true
+	}
+	if _, err := build.SetLythDirective(path, build.LangVersion); err != nil {
+		fmt.Fprintf(stderr, "lyth: %v\n", err)
+		return false
+	}
+	if announce {
+		fmt.Fprintf(stdout, "lyth: go.mod now declares the Lyth version the module is written for (//lyth:version %s)\n", build.LangVersion)
+	}
+	return true
+}
+
 // hasLyth reports whether the module at root has a .lyth file.
 func hasLyth(root string) bool {
 	found := errors.New("found")
@@ -261,10 +284,14 @@ func cmdFix(args []string, stdout, stderr io.Writer) int {
 	c.tests = true
 	c.fixing = true
 	c.register(flags)
+	lang := flags.String("lang", "", "raise the Lyth version go.mod declares (//lyth:version) to `version`, and apply the fixes up to it")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
 	c.parseDiag(flags)
+	if *lang != "" && !raiseLythVersion(*lang, stdout, stderr) {
+		return 1
+	}
 	files, s, err := build.Fix(c.config(stdout, stderr), target(flags.Args()))
 	wd, _ := os.Getwd()
 	for _, f := range files {
@@ -281,4 +308,33 @@ func cmdFix(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// raiseLythVersion is lyth fix -lang: it raises the //lyth:version line of
+// the current module's go.mod to v before the fixes are applied, so the
+// compilation that finds them uses v's rules.
+func raiseLythVersion(v string, stdout, stderr io.Writer) bool {
+	wd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(stderr, "lyth: %v\n", err)
+		return false
+	}
+	mod, err := build.FindModule(wd)
+	if err != nil {
+		fmt.Fprintf(stderr, "lyth: -lang needs a module: %v\n", err)
+		return false
+	}
+	old, err := build.SetLythDirective(filepath.Join(mod.Root, "go.mod"), v)
+	if err != nil {
+		fmt.Fprintf(stderr, "lyth: %v\n", err)
+		return false
+	}
+	switch old {
+	case v:
+	case "":
+		fmt.Fprintf(stdout, "lyth: go.mod now declares Lyth %s\n", v)
+	default:
+		fmt.Fprintf(stdout, "lyth: raised the Lyth version in go.mod from %s to %s\n", old, v)
+	}
+	return true
 }

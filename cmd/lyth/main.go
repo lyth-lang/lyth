@@ -8,7 +8,7 @@
 //	lyth gen [-stdout | -in-tree] [packages]
 //	lyth vet [packages]
 //	lyth test [packages] [go test flags]
-//	lyth fix [packages]
+//	lyth fix [-lang version] [packages]
 //	lyth fmt [-l] [-d] [-stdin] [paths]
 //	lyth generate [-run re] [-skip re] [-n] [-v] [-x] [packages]
 //	lyth init [module-path]
@@ -66,7 +66,7 @@ Usage:
   lyth vet [packages]                                     run go vet on generated code
   lyth test [packages] [go test flags]                    run tests (_test.lyth and _test.go files)
   lyth cover -func=c.out | -html=c.out                    show a coverage profile of Lyth code
-  lyth fix [packages]                                     rewrite older Lyth syntax and Kotlin and Go spellings
+  lyth fix [-lang version] [packages]                     rewrite older Lyth syntax and Kotlin and Go spellings
   lyth fmt [-l] [-d] [paths]                              format .lyth files in Lyth's canonical layout
   lyth generate [-run re] [-n] [-v] [-x] [packages]       run the //go:generate lines of .lyth files
   lyth mod tidy                                           go mod tidy that sees imports in .lyth files

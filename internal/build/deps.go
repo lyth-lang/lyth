@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -94,6 +95,9 @@ func (s *Session) replacedPackages(mod *Module, skip []*pkgDir) []*pkgDir {
 		if err != nil {
 			continue
 		}
+		if !slices.Contains(s.withModules, other.Root) {
+			s.withModules = append(s.withModules, other.Root)
+		}
 		for _, p := range pkgs {
 			if !containsDir(skip, p.Dir) {
 				p.Rel = path.Join("_dep", strings.ReplaceAll(r.path, "/", "_"), p.Rel)
@@ -151,6 +155,9 @@ func (s *Session) findExternal(importPath string) *pkgDir {
 		p.TestFiles, p.GoTestFiles = nil, nil // a dependency's tests are its own
 		p.External = true
 		p.Module = r.modPath + "@" + r.version
+		if data, err := os.ReadFile(filepath.Join(root, "go.mod")); err == nil {
+			p.newerLang, _ = newerLang(string(data))
+		}
 		return p
 	}
 	return nil
@@ -206,7 +213,10 @@ func (s *Session) settleExternal(p *Package) {
 		return
 	}
 	reason, hint := "", fmt.Sprintf("update %s, or the lyth that builds this module (lyth version)", modulePathOf(p.Dir.Module))
-	if p.depSink.HasErrors() || p.Checked == nil || p.Checked.Go == nil {
+	if p.Dir.newerLang != "" {
+		reason = p.Dir.newerLang
+		hint = "upgrade lyth (lyth version prints the installed one)"
+	} else if p.depSink.HasErrors() || p.Checked == nil || p.Checked.Go == nil {
 		for _, d := range p.depSink.All() {
 			if d.Severity == diag.Error {
 				reason = "its Lyth sources do not compile with this lyth: " + d.Message
