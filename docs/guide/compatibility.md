@@ -66,6 +66,36 @@ release and means the same. In detail:
 - Performance: generated code may get faster or slower, though Lyth adds no
   runtime and keeps what code costs visible in the source.
 
+## The Lyth version of a module
+
+A module says which Lyth it is written for in its `go.mod`, after the `go`
+line:
+
+```text
+module example.com/app
+
+go 1.26
+
+//lyth:version X.Y
+```
+
+The line is a comment, because the `go` command accepts no directives of its
+own in `go.mod`, but `go mod tidy`, `go mod edit`, and `go get` keep it, and
+it travels with the module to the programs that depend on it. `lyth init`
+writes the installed version; nothing raises it implicitly.
+`lyth fix -lang=X.Y` raises it and applies the fixes the newer version needs.
+
+After 1.0, a change that could stop code from building, or change what it
+means, applies only to modules that declare the version that introduced it
+or a newer one, and each dependency is checked with the version it declares.
+A module without the line is written for 1.0. Before 1.0 the line changes
+nothing yet.
+
+A module that declares a newer Lyth than the installed `lyth` does not build
+(E0602 at the line); upgrade `lyth`. A dependency that does is used through
+its published Go, with W0014 at the import, as for a library whose sources do
+not compile ([publishing a Lyth library](go-interop.md#publishing-a-lyth-library)).
+
 ## Go releases
 
 A Lyth release supports Go 1.26 through the Go release it was built with.

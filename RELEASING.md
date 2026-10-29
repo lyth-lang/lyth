@@ -56,7 +56,9 @@ To change the notes after the fact, edit the release on GitHub.
 3. `.github/workflows/release.yml` runs the tests, creates the GitHub release, and commits the
    new formula to the Homebrew tap (repository secret `HOMEBREW_TAP_TOKEN`: a fine-grained
    token with read and write access to the contents of `lyth-lang/homebrew-tap`).
-4. Bump `devVersion` in `cmd/lyth/main.go` to the next `-dev` version. The documentation site
+4. Bump `devVersion` in `cmd/lyth/main.go` to the next `-dev` version, and `LangVersion` in
+   `internal/build/langversion.go` to its major and minor (the version `lyth init` writes into
+   `go.mod`; `TestLangVersionFollowsDevVersion` fails until they agree). The documentation site
    reads it, and the newest `v*` tag, to say which version its specification pages describe
    (`versions()` in `website/scripts/sync-docs.mjs`); nothing in `docs/` names a version.
 

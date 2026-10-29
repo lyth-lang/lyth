@@ -191,6 +191,13 @@ identifier). A `_test.lyth` file whose package clause names the directory's
 package with `_test` (`package shapes_test`) is an external test package, as
 in Go: it imports the package under test and sees only its exported names.
 
+A module is a Go module. Its `go.mod` may declare the Lyth version the
+module is written for in a comment line `//lyth:version X.Y` (major and
+minor); the module's code is checked with that version's rules, and a module
+without the line is written for 1.0. A version newer than the compiler's, a
+malformed line, or a second one is E0602
+([ADR 0054](../adr/0054-language-version-per-module.md)).
+
 Import paths are Go import paths, resolved by the Go toolchain
 against the enclosing module's `go.mod`. An import may refer to a Go package or a
 Lyth package; the importer cannot tell the difference and does not need to. The

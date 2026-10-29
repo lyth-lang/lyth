@@ -15,6 +15,8 @@ you remember about Lyth, they are right.
 - A Lyth project is a Go module: `go.mod` at the root, `.lyth` files in package directories,
   `_test.lyth` files beside them. `lyth init` creates one. Imports come from `go.mod` as in Go;
   `lyth mod tidy` adds the modules your `.lyth` files import (`lyth mod vendor` vendors them).
+  The `//lyth:version` line in `go.mod` is the Lyth version the module is written for: keep it,
+  and don't change it by hand (`lyth fix -lang=X.Y` raises it).
 - Run `lyth check` after each change and fix what it reports before writing more. It is fast, and
   test files are included. `lyth fmt` lays the files out canonically. Diagnostics point at `.lyth`
   lines and speak Lyth; many end with a `hint:` that gives the exact edit.

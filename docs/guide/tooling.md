@@ -35,12 +35,12 @@ go install ./cmd/lyth
 | `lyth vet [packages]` | Runs `go vet` on the generated code and maps findings to `.lyth` positions. |
 | `lyth cover -func=c.out` | Prints the coverage of each function in a profile written by `lyth test -coverprofile` ([testing](testing.md#coverage)). Other modes, such as `-html=c.out`, run `go tool cover`. |
 | `lyth gen [-stdout \| -in-tree] [packages \| file.lyth]` | Writes the generated Go: to stdout, or next to the sources as `*.lyth.go` files. `-stdout file.lyth` prints that file's Go only. |
-| `lyth fix [packages]` | Rewrites older Lyth syntax, and Go and Kotlin spellings of Lyth constructs, in the packages' files, test files included, then reports the errors left ([below](#lyth-fix)). |
+| `lyth fix [-lang X.Y] [packages]` | Rewrites older Lyth syntax, and Go and Kotlin spellings of Lyth constructs, in the packages' files, test files included, then reports the errors left ([below](#lyth-fix)). `-lang` first raises the Lyth version `go.mod` declares. |
 | `lyth fmt [-l] [-d] [paths]` | Formats `.lyth` files in place in Lyth's canonical layout ([below](#lyth-fmt)), the current directory and those below it by default; `-l` lists the files that differ and `-d` prints the changes, without writing; `-stdin` formats standard input. |
 | `lyth generate [-run re] [-skip re] [-n] [-v] [-x] [packages]` | Runs the `//go:generate` lines of `.lyth` files, test files included, as `go generate` does for `.go` files (which is all it reads): in the package directory, with `$GOFILE`, `$GOLINE`, `$GOPACKAGE`, `$GOOS`, `$GOARCH`, and `$DOLLAR`, quoted arguments, and `-command` aliases. Run `go generate` for the directives in `.go` files. |
 | `lyth mod tidy` | `go mod tidy` that also sees imports in `.lyth` files ([interop](go-interop.md#modules-and-third-party-packages)). |
 | `lyth mod vendor` | `go mod vendor` that also vendors the packages `.lyth` files import. A module that imports `lyth/coll` cannot build from `vendor/` yet; build it with `GOFLAGS=-mod=mod`. |
-| `lyth init [module-path]` | Makes the current directory a Lyth module: `go.mod` (through `go mod init`; the path defaults to the directory's name), `main.lyth` when there is no Lyth code yet, `AGENTS.md` and `CLAUDE.md` for coding agents, and `.lyth/` in `.gitignore`. In an existing module it adds only what is missing. |
+| `lyth init [module-path]` | Makes the current directory a Lyth module: `go.mod` (through `go mod init`; the path defaults to the directory's name), `main.lyth` when there is no Lyth code yet, `AGENTS.md` and `CLAUDE.md` for coding agents, and `.lyth/` in `.gitignore`. `go.mod` gets a `//lyth:version` line with the installed version ([compatibility](compatibility.md#the-lyth-version-of-a-module)). In an existing module it adds only what is missing. |
 | `lyth guide [topics \| topic]` | Prints the guide to writing this version of Lyth ([writing Lyth](writing-lyth.md)), the list of topics, or one documentation page. |
 | `lyth lsp [-no-vet]` | Runs the language server on stdin and stdout, for editors ([editors](#editors)). |
 | `lyth version` | Prints the compiler version, the Go it was built with, and the Go releases it supports ([Go releases](compatibility.md#go-releases)). |
@@ -182,6 +182,11 @@ With `-diagnostics=json`, an edit that is a fix has `"fix": true`.
 
 When a Lyth release changes its syntax, the compiler keeps reporting the older form with a fix,
 so `lyth fix` brings a module up to date after an upgrade.
+
+`lyth fix -lang=X.Y` also raises the Lyth version the module's `go.mod` declares (its
+`//lyth:version` line) to `X.Y` before applying the fixes, so changes that newer version brings
+apply to the module ([compatibility](compatibility.md#the-lyth-version-of-a-module)). It only
+raises the version, and only up to the installed `lyth`'s.
 
 ## AI coding agents
 

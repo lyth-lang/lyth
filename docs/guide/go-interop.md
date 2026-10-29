@@ -342,9 +342,10 @@ arguments, enums and sealed interfaces with exhaustive `when`, and extension
 functions, as if it were a package of their own module. The library's tests
 and warnings stay its own.
 
-If the library's sources do not compile with the installed `lyth`, or its
-committed Go was not generated from them, Lyth uses the committed Go and warns
-at the import (W0014), naming the reason. A package with `.lyth` sources and no
+If the library's sources do not compile with the installed `lyth`, its
+committed Go was not generated from them, or its `go.mod` declares a newer
+Lyth than the installed one, Lyth uses the committed Go and warns at the
+import (W0014), naming the reason. A package with `.lyth` sources and no
 Go is an error: Go code could not build it either.
 [Compatibility](compatibility.md#evolving-a-lyth-library) lists which changes
 to a library's API break Lyth callers and which break Go callers.
